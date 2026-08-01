@@ -34,7 +34,7 @@ return [
 
         'mongodb' => [
             'driver' => 'mongodb',
-            'dsn' => env('DB_DSN', 'mongodb://' . env('DB_HOST', '127.0.0.1') . ':' . env('DB_PORT', '27017')),
+            'dsn' => env('MONGO_URL', 'mongodb://' . env('DB_HOST', '127.0.0.1') . ':' . env('DB_PORT', '27017')),
             'database' => env('DB_DATABASE', 'tower_control'),
             'username' => env('DB_USERNAME', ''),
             'password' => env('DB_PASSWORD', ''),
