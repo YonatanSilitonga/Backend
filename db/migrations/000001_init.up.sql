@@ -1,0 +1,2 @@
+-- 000001_init.up.sql
+-- Migration pertama: placeholder, ditambah saat fitur mulai dibangun.

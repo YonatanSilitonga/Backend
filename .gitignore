@@ -1,0 +1,21 @@
+# ===== Env & secrets =====
+.env
+.env.local
+*.pem
+*.key
+
+# ===== Build artifacts =====
+/bin/
+/tmp/
+*.exe
+*.test
+*.out
+
+# ===== Editor & OS =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ===== Logs =====
+*.log
