@@ -3,17 +3,12 @@ package main
 import (
 	"context"
 	"log"
-	"time"
 
 	"github.com/labstack/echo/v4"
 
-	mobileAPI "backend/internal/api"
-	"backend/internal/armada"
-	"backend/internal/auth"
 	"backend/internal/config"
-	"backend/internal/dashboard"
 	"backend/internal/database"
-	appJWT "backend/internal/pkg/jwt"
+	"backend/internal/mobile_api"
 	appMiddleware "backend/internal/pkg/middleware"
 	"backend/internal/pkg/response"
 )
@@ -30,50 +25,28 @@ func main() {
 	defer db.Close()
 	log.Println("berhasil konek ke database")
 
-	// JWT manager (secret dari env, TTL 24 jam)
-	jwtManager := appJWT.NewManager(cfg.JWTSecret, 24*time.Hour)
-
-	// dependency injection per modul
-	authRepo := auth.NewRepository(db)
-	authSvc := auth.NewService(authRepo, jwtManager)
-	authH := auth.NewHandler(authSvc)
-
-	armadaRepo := armada.NewRepository(db)
-	armadaSvc := armada.NewService(armadaRepo)
-	armadaH := armada.NewHandler(armadaSvc)
-
-	dashRepo := dashboard.NewRepository(db)
-	dashSvc := dashboard.NewService(dashRepo)
-	dashH := dashboard.NewHandler(dashSvc)
-
 	e := echo.New()
 	appMiddleware.Setup(e)
 
-	// grup API v1
-	api := e.Group("/api/v1")
-	authMW := appMiddleware.Auth(jwtManager)
-
-	// health check (tanpa auth)
-	api.GET("/health", func(c echo.Context) error {
+	// health check: bukti server hidup & database nyambung
+	e.GET("/health", func(c echo.Context) error {
 		if err := db.Ping(c.Request().Context()); err != nil {
 			return response.Error(c, 503, "database tidak bisa dijangkau")
 		}
 		return response.OK(c, map[string]string{
 			"status":  "up",
-			"version": "0.2.0",
+			"version": "0.1.0",
 		})
 	})
 
-	// handler mobile (milik Whisnu) — endpoint public yang dipakai app driver
-	apiH := mobileAPI.NewAPIHandler(db)
-	api.GET("/sellers", apiH.GetSellers)
-	api.GET("/drivers", apiH.GetDrivers)
-	api.GET("/vehicles", apiH.GetVehicles)
+	handler := mobile_api.NewAPIHandler(db)
 
-	// route per modul (web + shared)
-	authH.RegisterRoutes(api, authMW)
-	armadaH.RegisterRoutes(api, authMW)
-	dashH.RegisterRoutes(api, authMW)
+	v1 := e.Group("/api/v1")
+	v1.POST("/auth/login", handler.Login)
+	v1.GET("/sellers", handler.GetSellers)
+	v1.GET("/drivers", handler.GetDrivers)
+	v1.GET("/vehicles", handler.GetVehicles)
+	v1.POST("/driver/tracking", handler.PostTracking)
 
 	log.Printf("server jalan di :%s", cfg.Port)
 	e.Logger.Fatal(e.Start(":" + cfg.Port))

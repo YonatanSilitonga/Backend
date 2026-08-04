@@ -1,4 +1,4 @@
-package api
+package mobile_api
 
 import (
 	"context"
@@ -171,4 +171,41 @@ func (h *APIHandler) GetVehicles(c echo.Context) error {
 	}
 
 	return response.OK(c, list)
+}
+
+type CreateTrackingRequest struct {
+	IDRitase    int64   `json:"id_ritase"`
+	IDKendaraan int64   `json:"id_kendaraan"`
+	IDDriver    int64   `json:"id_driver"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
+	Kecepatan   *int    `json:"kecepatan"`
+	Arah        *int    `json:"arah"`
+	Status      *string `json:"status"`
+}
+
+func (h *APIHandler) PostTracking(c echo.Context) error {
+	var req CreateTrackingRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
+	}
+
+	idRitase := req.IDRitase
+	if idRitase == 0 {
+		idRitase = 1
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel()
+
+	_, err := h.DB.Exec(ctx, `
+		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, last_update)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+	`, idRitase, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status)
+
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking")
+	}
+
+	return response.OK(c, "success")
 }
