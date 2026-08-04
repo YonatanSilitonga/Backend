@@ -25,14 +25,14 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 func (r *Repository) FindByUsername(ctx context.Context, username string) (*User, string, error) {
 	query := `
 		SELECT u.id_user, u.username, COALESCE(k.nama, u.username) AS name,
-		       u.role, u.karyawan_id
+		       u.role, u.karyawan_id, u.id_driver
 		FROM users u
 		LEFT JOIN karyawan k ON k.id_karyawan = u.karyawan_id
 		WHERE LOWER(u.username) = LOWER($1)
 	`
 	var u User
 	var pwHash string
-	err := r.db.QueryRow(ctx, query, username).Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.KaryawanID)
+	err := r.db.QueryRow(ctx, query, username).Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.KaryawanID, &u.IDDriver)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, "", ErrNotFound
 	}
@@ -52,13 +52,13 @@ func (r *Repository) FindByUsername(ctx context.Context, username string) (*User
 func (r *Repository) FindByID(ctx context.Context, id int64) (*User, error) {
 	query := `
 		SELECT u.id_user, u.username, COALESCE(k.nama, u.username) AS name,
-		       u.role, u.karyawan_id
+		       u.role, u.karyawan_id, u.id_driver
 		FROM users u
 		LEFT JOIN karyawan k ON k.id_karyawan = u.karyawan_id
 		WHERE u.id_user = $1
 	`
 	var u User
-	err := r.db.QueryRow(ctx, query, id).Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.KaryawanID)
+	err := r.db.QueryRow(ctx, query, id).Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.KaryawanID, &u.IDDriver)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

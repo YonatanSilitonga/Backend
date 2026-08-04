@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	appMiddleware "backend/internal/pkg/middleware"
 	"backend/internal/pkg/response"
 )
 
@@ -41,9 +42,16 @@ func (h *Handler) ListDriver(c echo.Context) error {
 /* ---------- Ritase / Penugasan ---------- */
 
 // ListRitase menangani GET /armada/ritase?driver_id=&tanggal=
+// Driver (role=driver) hanya melihat ritase miliknya sendiri (scoping dari JWT).
 func (h *Handler) ListRitase(c echo.Context) error {
 	driverID, _ := strconv.ParseInt(c.QueryParam("driver_id"), 10, 64)
 	tanggal := c.QueryParam("tanggal")
+
+	if role, ok := c.Get(appMiddleware.CtxRole).(string); ok && role == "driver" {
+		if did, ok := c.Get(appMiddleware.CtxDriverID).(int64); ok && did > 0 {
+			driverID = did
+		}
+	}
 
 	data, err := h.svc.ListRitase(c.Request().Context(), driverID, tanggal)
 	if err != nil {

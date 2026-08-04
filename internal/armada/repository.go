@@ -82,7 +82,9 @@ const ritaseSelect = `
 	       r.id_drop_point, COALESCE(dp.nama_drop_point,''),
 	       r.ritase_ke, r.total_awb, r.total_koli,
 	       r.paket_tertinggal, r.alasan_tertinggal,
-	       r.jam_berangkat::text, r.jam_tiba::text, r.status, r.created_at
+	       r.jam_berangkat::text, r.jam_tiba::text,
+	       r.jam_mulai::text, r.jam_selesai::text,
+	       r.status, r.created_at
 	FROM ritase r
 	LEFT JOIN driver d ON d.id_driver = r.id_driver
 	LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
@@ -99,7 +101,9 @@ func scanRitase(row pgx.Row) (*Ritase, error) {
 		&r.IDDropPoint, &r.NamaDropPoint,
 		&r.RitaseKe, &r.TotalAWB, &r.TotalKoli,
 		&r.PaketTertinggal, &r.AlasanTertinggal,
-		&r.JamBerangkat, &r.JamTiba, &r.Status, &r.CreatedAt)
+		&r.JamBerangkat, &r.JamTiba,
+		&r.JamMulai, &r.JamSelesai,
+		&r.Status, &r.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -142,7 +146,7 @@ func (r *Repository) ListRitase(ctx context.Context, idDriver int64, tanggal str
 	return items, rows.Err()
 }
 
-// GetRitase mengambil satu ritase + event timeline-nya.
+// GetRitase mengambil satu ritase + timeline event + rute (stops).
 func (r *Repository) GetRitase(ctx context.Context, id int64) (*RitaseDetail, error) {
 	rit, err := scanRitase(r.db.QueryRow(ctx, ritaseSelect+" WHERE r.id_ritase = $1", id))
 	if err != nil {
@@ -154,13 +158,49 @@ func (r *Repository) GetRitase(ctx context.Context, id int64) (*RitaseDetail, er
 		return nil, err
 	}
 
-	return &RitaseDetail{Ritase: *rit, Events: events}, nil
+	stops, err := r.ListStops(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	return &RitaseDetail{Ritase: *rit, Events: events, Stops: stops}, nil
 }
 
-// CreateRitase membuat penugasan baru.
+// ListStops mengambil urutan rute sebuah ritase.
+func (r *Repository) ListStops(ctx context.Context, idRitase int64) ([]RitaseStop, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id_stop, id_ritase, urutan, jenis_stop, id_seller, id_drop_point, keterangan
+		FROM ritase_stop
+		WHERE id_ritase = $1
+		ORDER BY urutan
+	`, idRitase)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []RitaseStop
+	for rows.Next() {
+		var st RitaseStop
+		if err := rows.Scan(&st.IDStop, &st.IDRitase, &st.Urutan, &st.JenisStop,
+			&st.IDSeller, &st.IDDropPoint, &st.Keterangan); err != nil {
+			return nil, err
+		}
+		items = append(items, st)
+	}
+	return items, rows.Err()
+}
+
+// CreateRitase membuat penugasan baru (RIT) + rute (stops).
 func (r *Repository) CreateRitase(ctx context.Context, req CreateRitaseRequest) (*Ritase, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
 	var newID int64
-	err := r.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO ritase (kode_ritase, tanggal, id_driver, id_kendaraan, id_seller, id_drop_point, ritase_ke, total_awb, total_koli, status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'direncanakan')
 		RETURNING id_ritase
@@ -169,6 +209,20 @@ func (r *Repository) CreateRitase(ctx context.Context, req CreateRitaseRequest) 
 	if err != nil {
 		return nil, err
 	}
+
+	for _, s := range req.Stops {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO ritase_stop (id_ritase, urutan, jenis_stop, id_seller, id_drop_point, keterangan)
+			VALUES ($1,$2,$3,$4,$5,$6)
+		`, newID, s.Urutan, s.JenisStop, s.IDSeller, s.IDDropPoint, s.Keterangan); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
 	detail, err := r.GetRitase(ctx, newID)
 	if err != nil {
 		return nil, err

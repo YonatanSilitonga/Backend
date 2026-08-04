@@ -10,9 +10,10 @@ import (
 
 // Claims adalah payload yang dibawa di dalam token.
 type Claims struct {
-	UserID   int64  `json:"user_id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	UserID    int64  `json:"user_id"`
+	Username  string `json:"username"`
+	Role      string `json:"role"`
+	IDDriver  int64  `json:"id_driver,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -28,12 +29,13 @@ func NewManager(secret string, ttl time.Duration) *Manager {
 }
 
 // Generate membuat token baru untuk user.
-func (m *Manager) Generate(userID int64, username, role string) (string, error) {
+func (m *Manager) Generate(userID int64, username, role string, idDriver int64) (string, error) {
 	now := time.Now()
 	claims := Claims{
 		UserID:   userID,
 		Username: username,
 		Role:     role,
+		IDDriver: idDriver,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(m.ttl)),
 			IssuedAt:  jwt.NewNumericDate(now),

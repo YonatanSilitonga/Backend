@@ -15,6 +15,8 @@ const (
 	CtxUserID = "auth_user_id"
 	// CtxRole adalah key di Echo context untuk role dari token.
 	CtxRole = "auth_role"
+	// CtxDriverID adalah key di Echo context untuk id_driver dari token (jika ada).
+	CtxDriverID = "auth_driver_id"
 )
 
 // Auth adalah middleware untuk memvalidasi JWT dari header Authorization.
@@ -38,6 +40,7 @@ func Auth(jwtManager *jwt.Manager) echo.MiddlewareFunc {
 
 			c.Set(CtxUserID, claims.UserID)
 			c.Set(CtxRole, claims.Role)
+			c.Set(CtxDriverID, claims.IDDriver)
 
 			return next(c)
 		}

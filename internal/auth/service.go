@@ -41,7 +41,11 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*AuthResponse, e
 		return nil, errors.New("username atau password salah")
 	}
 
-	token, err := s.jwt.Generate(user.ID, user.Username, user.Role)
+	var idDriver int64
+	if user.IDDriver != nil {
+		idDriver = *user.IDDriver
+	}
+	token, err := s.jwt.Generate(user.ID, user.Username, user.Role, idDriver)
 	if err != nil {
 		return nil, err
 	}

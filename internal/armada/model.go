@@ -41,8 +41,21 @@ type Ritase struct {
 	AlasanTertinggal *string   `json:"alasan_tertinggal,omitempty"`
 	JamBerangkat     *string   `json:"jam_berangkat,omitempty"`
 	JamTiba          *string   `json:"jam_tiba,omitempty"`
+	JamMulai         *string   `json:"jam_mulai,omitempty"`  // jadwal RIT mulai
+	JamSelesai       *string   `json:"jam_selesai,omitempty"` // jadwal RIT selesai
 	Status           string    `json:"status"`
 	CreatedAt        time.Time `json:"created_at,omitempty"`
+}
+
+// RitaseStop adalah satu titik dalam rute ritase (gudang -> seller(s) -> drop_point/GTW).
+type RitaseStop struct {
+	IDStop      int64   `json:"id_stop"`
+	IDRitase    int64   `json:"id_ritase"`
+	Urutan      int     `json:"urutan"`
+	JenisStop   string  `json:"jenis_stop"` // gudang | seller | drop_point
+	IDSeller    *int64  `json:"id_seller,omitempty"`
+	IDDropPoint *int64  `json:"id_drop_point,omitempty"`
+	Keterangan  *string `json:"keterangan,omitempty"`
 }
 
 // RitaseEvent adalah satu baris timeline status perjalanan (10 status tombol driver).
@@ -56,10 +69,11 @@ type RitaseEvent struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// RitaseDetail adalah ritase + seluruh timeline event-nya.
+// RitaseDetail adalah ritase + seluruh timeline event + rute (stops).
 type RitaseDetail struct {
 	Ritase
 	Events []RitaseEvent `json:"events"`
+	Stops  []RitaseStop  `json:"stops"`
 }
 
 // Tracking merepresentasikan tabel armada_tracking (posisi realtime).
@@ -87,6 +101,16 @@ type CreateRitaseRequest struct {
 	RitaseKe    *int   `json:"ritase_ke"`
 	TotalAWB    *int   `json:"total_awb"`
 	TotalKoli   *int   `json:"total_koli"`
+	Stops       []RitaseStopRequest `json:"stops"`
+}
+
+// RitaseStopRequest adalah satu titik rute saat membuat ritase.
+type RitaseStopRequest struct {
+	Urutan      int     `json:"urutan"`
+	JenisStop   string  `json:"jenis_stop"`
+	IDSeller    *int64  `json:"id_seller"`
+	IDDropPoint *int64  `json:"id_drop_point"`
+	Keterangan  *string `json:"keterangan"`
 }
 
 type UpdateStatusRequest struct {
