@@ -87,7 +87,6 @@ func main() {
 	handler := mobile_api.NewAPIHandler(db)
 
 	v1 := e.Group("/api/v1")
-	v1.POST("/auth/login", handler.Login)
 	v1.GET("/sellers", handler.GetSellers)
 	v1.GET("/drivers", handler.GetDrivers)
 	v1.GET("/vehicles", handler.GetVehicles)
