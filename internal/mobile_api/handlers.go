@@ -182,6 +182,7 @@ type CreateTrackingRequest struct {
 	Kecepatan   *int    `json:"kecepatan"`
 	Arah        *int    `json:"arah"`
 	Status      *string `json:"status"`
+	JumlahKoli  int     `json:"jumlah_koli"`
 }
 
 func (h *APIHandler) PostTracking(c echo.Context) error {
@@ -199,9 +200,9 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 	defer cancel()
 
 	_, err := h.DB.Exec(ctx, `
-		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, last_update)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
-	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status)
+		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, last_update)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, req.JumlahKoli)
 
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking: "+err.Error())
