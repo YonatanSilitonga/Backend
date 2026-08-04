@@ -7,8 +7,12 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"backend/internal/config"
+	"backend/internal/driver"
 	"backend/internal/database"
 	"backend/internal/mobile_api"
+	"backend/internal/kendaraan"
+	"backend/internal/seller"
+	"backend/internal/tracking"
 	appMiddleware "backend/internal/pkg/middleware"
 	"backend/internal/pkg/response"
 )
@@ -24,6 +28,22 @@ func main() {
 	}
 	defer db.Close()
 	log.Println("berhasil konek ke database")
+
+	sellerRepo := seller.NewRepository(db)
+	sellerSvc := seller.NewService(sellerRepo)
+	sellerH := seller.NewHandler(sellerSvc)
+
+	driverRepo := driver.NewRepository(db)
+	driverSvc := driver.NewService(driverRepo)
+	driverH := driver.NewHandler(driverSvc)
+
+	kendaraanRepo := kendaraan.NewRepository(db)
+	kendaraanSvc := kendaraan.NewService(kendaraanRepo)
+	kendaraanH := kendaraan.NewHandler(kendaraanSvc)
+
+	trackingRepo := tracking.NewRepository(db)
+	trackingSvc := tracking.NewService(trackingRepo)
+	trackingH := tracking.NewHandler(trackingSvc)
 
 	e := echo.New()
 	appMiddleware.Setup(e)
@@ -43,10 +63,10 @@ func main() {
 
 	v1 := e.Group("/api/v1")
 	v1.POST("/auth/login", handler.Login)
-	v1.GET("/sellers", handler.GetSellers)
-	v1.GET("/drivers", handler.GetDrivers)
-	v1.GET("/vehicles", handler.GetVehicles)
-	v1.POST("/driver/tracking", handler.PostTracking)
+	v1.GET("/sellers", sellerH.ListSeller)
+	v1.GET("/drivers", driverH.ListDriver)
+	v1.GET("/vehicles", kendaraanH.ListKendaraan)
+	v1.POST("/driver/tracking", trackingH.PostTracking)
 
 	log.Printf("server jalan di :%s", cfg.Port)
 	e.Logger.Fatal(e.Start(":" + cfg.Port))
