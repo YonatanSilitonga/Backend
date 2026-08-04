@@ -26,8 +26,8 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 
 func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_kendaraan, kode_kendaraan, plat_nomor, jenis_kendaraan,
-		       kapasitas_koli, kapasitas_kg, status_kendaraan
+		SELECT id_kendaraan, plat_nomor, jenis_kendaraan,
+		       kapasitas_koli, status_kendaraan
 		FROM kendaraan
 		ORDER BY id_kendaraan
 	`)
@@ -39,8 +39,8 @@ func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	var items []Kendaraan
 	for rows.Next() {
 		var k Kendaraan
-		if err := rows.Scan(&k.ID, &k.KodeKendaraan, &k.PlatNomor, &k.JenisKendaraan,
-			&k.KapasitasKoli, &k.KapasitasKg, &k.StatusKendaraan); err != nil {
+		if err := rows.Scan(&k.ID, &k.PlatNomor, &k.JenisKendaraan,
+			&k.KapasitasKoli, &k.StatusKendaraan); err != nil {
 			return nil, err
 		}
 		items = append(items, k)

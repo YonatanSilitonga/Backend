@@ -28,22 +28,22 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 		sql string
 	}{
 		{&s.TotalKendaraan, "SELECT count(*) FROM kendaraan"},
-		{&s.ArmadaAktif, "SELECT count(*) FROM kendaraan WHERE status_kendaraan IN ('berjalan','tersedia','bertugas')"},
-		{&s.ArmadaSelesai, "SELECT count(*) FROM kendaraan WHERE status_kendaraan IN ('selesai','istirahat')"},
-		{&s.ArmadaIdle, "SELECT count(*) FROM kendaraan WHERE status_kendaraan IN ('tersedia','idle','off')"},
+		{&s.ArmadaAktif, "SELECT count(*) FROM kendaraan WHERE LOWER(status_kendaraan) IN ('aktif','berjalan','bertugas','tersedia')"},
+		{&s.ArmadaSelesai, "SELECT count(*) FROM kendaraan WHERE LOWER(status_kendaraan) IN ('selesai','istirahat')"},
+		{&s.ArmadaIdle, "SELECT count(*) FROM kendaraan WHERE LOWER(status_kendaraan) IN ('tersedia','idle','off')"},
 		{&s.TotalDriver, "SELECT count(*) FROM driver"},
-		{&s.DriverAktif, "SELECT count(*) FROM driver WHERE status_driver IN ('bertugas','on_duty')"},
-		{&s.DriverLibur, "SELECT count(*) FROM driver WHERE status_driver IN ('libur','off')"},
+		{&s.DriverAktif, "SELECT count(*) FROM driver WHERE LOWER(status_driver) IN ('aktif','bertugas','on_duty')"},
+		{&s.DriverLibur, "SELECT count(*) FROM driver WHERE LOWER(status_driver) IN ('libur','off','cuti')"},
 		{&s.TotalRitase, "SELECT count(*) FROM ritase"},
-		{&s.RitaseAktif, "SELECT count(*) FROM ritase WHERE status NOT IN ('selesai','completed','done','batal','cancelled')"},
-		{&s.RitaseSelesai, "SELECT count(*) FROM ritase WHERE status IN ('selesai','completed','done')"},
+		{&s.RitaseAktif, "SELECT count(*) FROM ritase WHERE LOWER(status) NOT IN ('selesai','completed','done','batal','cancelled')"},
+		{&s.RitaseSelesai, "SELECT count(*) FROM ritase WHERE LOWER(status) IN ('selesai','completed','done')"},
 		{&s.RitaseToday, "SELECT count(*) FROM ritase WHERE tanggal = $1"},
 		{&s.TotalAWB, "SELECT COALESCE(sum(total_awb),0) FROM ritase"},
 		{&s.TotalAWBToday, "SELECT COALESCE(sum(total_awb),0) FROM ritase WHERE tanggal = $1"},
 		{&s.TotalKoli, "SELECT COALESCE(sum(total_koli),0) FROM ritase"},
 		{&s.PaketTertinggal, "SELECT COALESCE(sum(paket_tertinggal),0) FROM ritase"},
 		{&s.TotalSeller, "SELECT count(*) FROM seller"},
-		{&s.SellerTerlayani, "SELECT count(DISTINCT id_seller) FROM ritase WHERE status IN ('selesai','completed','done')"},
+		{&s.SellerTerlayani, "SELECT count(DISTINCT id_seller) FROM ritase WHERE LOWER(status) IN ('selesai','completed','done')"},
 		{&s.TotalDropPoint, "SELECT count(*) FROM drop_point"},
 		{&s.TotalKaryawan, "SELECT count(*) FROM karyawan"},
 		{&s.TotalManpower, "SELECT COALESCE(sum(jumlah_manpower),0) FROM implant"},
@@ -70,7 +70,7 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 		SELECT count(DISTINCT r.id_driver)
 		FROM ritase r
 		JOIN ritase_event e ON e.id_ritase = r.id_ritase
-		WHERE r.status NOT IN ('selesai','completed','done','batal','cancelled')
+		WHERE LOWER(r.status) NOT IN ('selesai','completed','done','batal','cancelled')
 		  AND e.created_at < now() - interval '6 hours'
 	`).Scan(&s.DriverTelat); err != nil {
 		return nil, err

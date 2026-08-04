@@ -5,11 +5,9 @@ import "time"
 // Kendaraan merepresentasikan tabel kendaraan.
 type Kendaraan struct {
 	ID              int64   `json:"id_kendaraan"`
-	KodeKendaraan   string  `json:"kode_kendaraan"`
 	PlatNomor       string  `json:"plat_nomor"`
 	JenisKendaraan  *string `json:"jenis_kendaraan,omitempty"`
 	KapasitasKoli   *int    `json:"kapasitas_koli,omitempty"`
-	KapasitasKg     *int    `json:"kapasitas_kg,omitempty"`
 	StatusKendaraan string  `json:"status_kendaraan"`
 }
 

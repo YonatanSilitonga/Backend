@@ -8,7 +8,9 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"backend/internal/auth"
+	"backend/internal/armada"
 	"backend/internal/config"
+	"backend/internal/dashboard"
 	"backend/internal/database"
 	"backend/internal/driver"
 	"backend/internal/kendaraan"
@@ -39,6 +41,15 @@ func main() {
 	authSvc := auth.NewService(authRepo, jwtManager)
 	authH := auth.NewHandler(authSvc)
 	authMW := appMiddleware.Auth(jwtManager)
+
+	// modul web: armada + dashboard
+	armadaRepo := armada.NewRepository(db)
+	armadaSvc := armada.NewService(armadaRepo)
+	armadaH := armada.NewHandler(armadaSvc)
+
+	dashRepo := dashboard.NewRepository(db)
+	dashSvc := dashboard.NewService(dashRepo)
+	dashH := dashboard.NewHandler(dashSvc)
 
 	// modul mobile: seller, driver, kendaraan, tracking
 	sellerRepo := seller.NewRepository(db)
@@ -84,6 +95,14 @@ func main() {
 	//   POST /auth/login  (public; terima username ATAU email; balikin JWT)
 	//   GET  /auth/me     (butuh token)
 	//   POST /auth/logout (butuh token)
+
+	// ── ROUTE WEB: ARMADA + DASHBOARD (butuh token JWT) ──
+	armadaH.RegisterRoutes(v1, authMW)
+	//   GET  /armada/kendaraan, /armada/driver, /armada/ritase, /armada/tracking
+	//   POST /armada/ritase, /armada/ritase/:id/status, /armada/tracking
+	//   PATCH /armada/ritase/:id/muatan
+	dashH.RegisterRoutes(v1, authMW)
+	//   GET /dashboard/summary, /dashboard/analisis
 
 	log.Printf("server jalan di :%s", cfg.Port)
 	e.Logger.Fatal(e.Start(":" + cfg.Port))
