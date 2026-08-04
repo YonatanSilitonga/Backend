@@ -25,8 +25,6 @@ func main() {
 	}
 	defer db.Close()
 
-	resetTables(ctx)
-
 	// ---------- karyawan ----------
 	var idKaryawanAdmin, idKaryawanKapten, idKaryawanDir int64
 	insertReturning(ctx, "INSERT INTO karyawan (nik, nama, jabatan, penempatan, tempat_penugasan, shift, status) VALUES ('3171010101900001','Budi Santoso','Admin Operasional','Jakarta','Hub Pusat','Pagi','aktif') RETURNING id_karyawan", &idKaryawanAdmin)
@@ -123,13 +121,6 @@ func main() {
 
 func addEvent(ctx context.Context, idRitase int64, status string, at time.Time) {
 	exec(ctx, "INSERT INTO ritase_event (id_ritase, status, created_at) VALUES ($1,$2,$3)", idRitase, status, at)
-}
-
-func resetTables(ctx context.Context) {
-	tables := []string{"armada_tracking", "ritase_event", "ritase", "users", "drop_point", "seller", "kendaraan", "driver", "absensi", "implant", "seller_daily", "karyawan"}
-	for _, t := range tables {
-		exec(ctx, "TRUNCATE "+t+" RESTART IDENTITY CASCADE")
-	}
 }
 
 func exec(ctx context.Context, sql string, args ...interface{}) {
