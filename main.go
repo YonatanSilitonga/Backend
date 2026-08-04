@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"backend/internal/api"
 	"backend/internal/config"
 	"backend/internal/database"
 	appMiddleware "backend/internal/pkg/middleware"
@@ -37,6 +38,14 @@ func main() {
 			"version": "0.1.0",
 		})
 	})
+
+	handler := api.NewAPIHandler(db)
+
+	v1 := e.Group("/api/v1")
+	v1.POST("/auth/login", handler.Login)
+	v1.GET("/sellers", handler.GetSellers)
+	v1.GET("/drivers", handler.GetDrivers)
+	v1.GET("/vehicles", handler.GetVehicles)
 
 	log.Printf("server jalan di :%s", cfg.Port)
 	e.Logger.Fatal(e.Start(":" + cfg.Port))
