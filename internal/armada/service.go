@@ -1,0 +1,51 @@
+package armada
+
+import "context"
+
+// Service berisi logic bisnis modul armada.
+type Service struct {
+	repo *Repository
+}
+
+func NewService(repo *Repository) *Service {
+	return &Service{repo: repo}
+}
+
+func (s *Service) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
+	return s.repo.ListKendaraan(ctx)
+}
+
+func (s *Service) ListDriver(ctx context.Context) ([]Driver, error) {
+	return s.repo.ListDriver(ctx)
+}
+
+func (s *Service) ListRitase(ctx context.Context, idDriver int64, tanggal string) ([]Ritase, error) {
+	return s.repo.ListRitase(ctx, idDriver, tanggal)
+}
+
+func (s *Service) GetRitase(ctx context.Context, id int64) (*RitaseDetail, error) {
+	return s.repo.GetRitase(ctx, id)
+}
+
+func (s *Service) CreateRitase(ctx context.Context, req CreateRitaseRequest) (*Ritase, error) {
+	return s.repo.CreateRitase(ctx, req)
+}
+
+func (s *Service) UpdateStatus(ctx context.Context, idRitase int64, req UpdateStatusRequest) (*RitaseEvent, error) {
+	return s.repo.AddEvent(ctx, idRitase, req)
+}
+
+func (s *Service) UpdateMuatan(ctx context.Context, idRitase int64, req UpdateMuatanRequest) (*Ritase, error) {
+	return s.repo.UpdateMuatan(ctx, idRitase, req)
+}
+
+func (s *Service) ListTracking(ctx context.Context, limit int) ([]Tracking, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	return s.repo.ListTracking(ctx, limit)
+}
+
+func (s *Service) CreateTracking(ctx context.Context, req CreateTrackingRequest) (*Tracking, error) {
+	return s.repo.CreateTracking(ctx, req)
+}
