@@ -3,16 +3,18 @@ package main
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
+	"backend/internal/auth"
 	"backend/internal/config"
-	"backend/internal/driver"
 	"backend/internal/database"
-	"backend/internal/mobile_api"
+	"backend/internal/driver"
 	"backend/internal/kendaraan"
 	"backend/internal/seller"
 	"backend/internal/tracking"
+	appJWT "backend/internal/pkg/jwt"
 	appMiddleware "backend/internal/pkg/middleware"
 	"backend/internal/pkg/response"
 )
@@ -29,6 +31,16 @@ func main() {
 	defer db.Close()
 	log.Println("berhasil konek ke database")
 
+	// JWT manager (secret dari env, TTL 24 jam)
+	jwtManager := appJWT.NewManager(cfg.JWTSecret, 24*time.Hour)
+
+	// modul auth (web): login JWT + me + logout
+	authRepo := auth.NewRepository(db)
+	authSvc := auth.NewService(authRepo, jwtManager)
+	authH := auth.NewHandler(authSvc)
+	authMW := appMiddleware.Auth(jwtManager)
+
+	// modul mobile: seller, driver, kendaraan, tracking
 	sellerRepo := seller.NewRepository(db)
 	sellerSvc := seller.NewService(sellerRepo)
 	sellerH := seller.NewHandler(sellerSvc)
@@ -55,18 +67,23 @@ func main() {
 		}
 		return response.OK(c, map[string]string{
 			"status":  "up",
-			"version": "0.1.0",
+			"version":  "0.1.0",
 		})
 	})
 
-	handler := mobile_api.NewAPIHandler(db)
-
 	v1 := e.Group("/api/v1")
-	v1.POST("/auth/login", handler.Login)
+
+	// ── ROUTE MOBILE (dijaga utuh — jangan diubah) ──
 	v1.GET("/sellers", sellerH.ListSeller)
 	v1.GET("/drivers", driverH.ListDriver)
 	v1.GET("/vehicles", kendaraanH.ListKendaraan)
 	v1.POST("/driver/tracking", trackingH.PostTracking)
+
+	// ── ROUTE AUTH WEB (login JWT + me + logout) ──
+	authH.RegisterRoutes(v1, authMW)
+	//   POST /auth/login  (public; terima username ATAU email; balikin JWT)
+	//   GET  /auth/me     (butuh token)
+	//   POST /auth/logout (butuh token)
 
 	log.Printf("server jalan di :%s", cfg.Port)
 	e.Logger.Fatal(e.Start(":" + cfg.Port))
