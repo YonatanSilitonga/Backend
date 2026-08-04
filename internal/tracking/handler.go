@@ -23,8 +23,8 @@ func (h *Handler) PostTracking(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
 	}
-	if req.IDRitase == 0 || req.IDKendaraan == 0 || req.IDDriver == 0 {
-		return response.Error(c, http.StatusBadRequest, "id_ritase, id_kendaraan, id_driver wajib diisi")
+	if req.IDKendaraan == 0 || req.IDDriver == 0 {
+		return response.Error(c, http.StatusBadRequest, "id_kendaraan dan id_driver wajib diisi")
 	}
 
 	data, err := h.svc.CreateTracking(c.Request().Context(), req)

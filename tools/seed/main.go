@@ -53,8 +53,13 @@ func main() {
 
 	// ---------- seller ----------
 	var idSeller1, idSeller2 int64
-	insertReturning(ctx, "INSERT INTO seller (kode_seller, nama_seller, alamat, kota, area, pic, no_hp, jam_mulai_pickup, jam_selesai_pickup, forecast_harian, status) VALUES ('SLR-001','Kacamata Group','Jl. Raya Cipadu No.1','Tangerang','JKT Area','Pak Agus','0811-1111-1111','08:00:00','17:00:00',600,'aktif') RETURNING id_seller", &idSeller1)
-	insertReturning(ctx, "INSERT INTO seller (kode_seller, nama_seller, alamat, kota, area, pic, no_hp, jam_mulai_pickup, jam_selesai_pickup, forecast_harian, status) VALUES ('SLR-002','Titip Aja','Jl. Ahmad Yani No.5','Bandung','BDG Area','Ibu Sari','0822-2222-2222','08:00:00','16:00:00',450,'aktif') RETURNING id_seller", &idSeller2)
+	insertReturning(ctx, "INSERT INTO seller (kode_seller, nama_seller, alamat, kota, area, pic, no_hp, jam_mulai_pickup, jam_selesai_pickup, forecast_harian, status, latitude, longitude) VALUES ('SLR-001','TITIP AJA','RMM9+49Q, RT.002/RW.003, Poris Plawad, Kec. Batuceper, Kota Tangerang, Banten 15141','Tangerang','TNG Area','Jarot','+62 899-2279-170','08:00:00','17:00:00',600,'aktif', -6.152972, 106.603056) RETURNING id_seller", &idSeller1)
+	insertReturning(ctx, "INSERT INTO seller (kode_seller, nama_seller, alamat, kota, area, pic, no_hp, jam_mulai_pickup, jam_selesai_pickup, forecast_harian, status, latitude, longitude) VALUES ('SLR-002','SOMETHING','QJQG+5H7 Cikokol, Kota Tangerang, Banten','Tangerang','TNG Area','Deni','+62 895-3281-77533','08:00:00','17:00:00',450,'aktif', -6.102222, 106.685694) RETURNING id_seller", &idSeller2)
+	exec(ctx, "INSERT INTO seller (kode_seller, nama_seller, alamat, kota, area, pic, no_hp, jam_mulai_pickup, jam_selesai_pickup, forecast_harian, status, latitude, longitude) VALUES ('SLR-003','SKI','Jl. Pajajaran XIV No.62, RT.005/RW.005, Gandasari, Kec. Jatiuwung, Kota Tangerang, Banten 15810','Tangerang','TNG Area','Mun','+62 856-0834-9714','08:00:00','17:00:00',500,'aktif', -6.231611, 106.720278)")
+	exec(ctx, "INSERT INTO seller (kode_seller, nama_seller, alamat, kota, area, pic, no_hp, jam_mulai_pickup, jam_selesai_pickup, forecast_harian, status, latitude, longitude) VALUES ('SLR-004','CILUPBA','VMXP+477 Benda, Kota Tangerang, Banten','Tangerang','TNG Area','Eko','+62 851-7348-9193','08:00:00','17:00:00',300,'aktif', -6.214750, 106.680556)")
+	exec(ctx, "INSERT INTO seller (kode_seller, nama_seller, alamat, kota, area, pic, no_hp, jam_mulai_pickup, jam_selesai_pickup, forecast_harian, status, latitude, longitude) VALUES ('SLR-005','PAYUTRUS KACAMATA','QMPJ+463 Pinang, Kota Tangerang, Banten','Tangerang','TNG Area','gopur','+62 895-3953-20446','08:00:00','17:00:00',400,'aktif', -6.220694, 106.585472)")
+	exec(ctx, "INSERT INTO seller (kode_seller, nama_seller, alamat, kota, area, pic, no_hp, jam_mulai_pickup, jam_selesai_pickup, forecast_harian, status, latitude, longitude) VALUES ('SLR-006','BAYUR','RJW3+R63 Periuk Jaya, Kota Tangerang, Banten','Tangerang','TNG Area','siregar','+62 853-8119-6599','08:00:00','17:00:00',350,'aktif', -6.212083, 106.626444)")
+	exec(ctx, "INSERT INTO seller (kode_seller, nama_seller, alamat, kota, area, pic, no_hp, jam_mulai_pickup, jam_selesai_pickup, forecast_harian, status, latitude, longitude) VALUES ('SLR-007','LARANGAN CIPADU','QP9C+943 Sudimara Tim., Kota Tangerang, Banten','Tangerang','TNG Area','Junaedi','+62 858-9471-8860','08:00:00','17:00:00',400,'aktif', -6.167750, 106.668778)")
 
 	// ---------- drop_point ----------
 	var idDP1, idDP2 int64
@@ -73,6 +78,9 @@ func main() {
 
 	hashDriver, _ := bcrypt.GenerateFromPassword([]byte("driver123"), bcrypt.DefaultCost)
 	exec(ctx, "INSERT INTO users (username, password, role) VALUES ('driver',$1,'driver')", string(hashDriver))
+
+	hashAwaludin, _ := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.DefaultCost)
+	exec(ctx, "INSERT INTO users (username, password, role) VALUES ('AWALUDIN',$1,'driver') ON CONFLICT (username) DO NOTHING", string(hashAwaludin))
 
 	// ---------- ritase ----------
 	today := time.Now().Format("2006-01-02")

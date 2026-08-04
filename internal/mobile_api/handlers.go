@@ -187,12 +187,12 @@ type CreateTrackingRequest struct {
 func (h *APIHandler) PostTracking(c echo.Context) error {
 	var req CreateTrackingRequest
 	if err := c.Bind(&req); err != nil {
-		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
+		return response.Error(c, http.StatusBadRequest, "format request tidak valid: "+err.Error())
 	}
 
-	idRitase := req.IDRitase
-	if idRitase == 0 {
-		idRitase = 1
+	var ritaseID interface{}
+	if req.IDRitase != 0 {
+		ritaseID = req.IDRitase
 	}
 
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
@@ -201,10 +201,10 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 	_, err := h.DB.Exec(ctx, `
 		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, last_update)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
-	`, idRitase, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status)
+	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status)
 
 	if err != nil {
-		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking")
+		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking: "+err.Error())
 	}
 
 	return response.OK(c, "success")

@@ -67,6 +67,7 @@ func main() {
 	trackingRepo := tracking.NewRepository(db)
 	trackingSvc := tracking.NewService(trackingRepo)
 	trackingH := tracking.NewHandler(trackingSvc)
+	_ = trackingH
 
 	e := echo.New()
 	appMiddleware.Setup(e)
@@ -88,7 +89,7 @@ func main() {
 	v1.GET("/sellers", sellerH.ListSeller)
 	v1.GET("/drivers", driverH.ListDriver)
 	v1.GET("/vehicles", kendaraanH.ListKendaraan)
-	v1.POST("/driver/tracking", trackingH.PostTracking)
+	v1.POST("/driver/tracking", handler.PostTracking)
 
 	// ── ROUTE AUTH WEB (login JWT + me + logout) ──
 	authH.RegisterRoutes(v1, authMW)
