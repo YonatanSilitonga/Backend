@@ -20,7 +20,7 @@ func (r *Repository) CreateTracking(ctx context.Context, req CreateTrackingReque
 	var t Tracking
 	err := r.db.QueryRow(ctx, `
 		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, last_update)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+		VALUES (NULLIF($1,0),$2,$3,$4,$5,$6,$7,$8, now())
 		RETURNING id_tracking, id_ritase, id_kendaraan, id_driver,
 		          latitude, longitude, kecepatan, arah, status
 	`, req.IDRitase, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude,

@@ -3,7 +3,7 @@ package tracking
 // Tracking merepresentasikan tabel armada_tracking.
 type Tracking struct {
 	ID          int64   `json:"id_tracking"`
-	IDRitase    int64   `json:"id_ritase"`
+	IDRitase    *int64  `json:"id_ritase,omitempty"` // nullable — GPS bisa tanpa ritase
 	IDKendaraan int64   `json:"id_kendaraan"`
 	IDDriver    int64   `json:"id_driver"`
 	Latitude    float64 `json:"latitude"`
