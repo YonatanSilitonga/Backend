@@ -2,7 +2,9 @@ package mobile_api
 
 import (
 	"context"
+	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -260,4 +262,93 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 	}
 
 	return response.OK(c, "success")
+}
+
+func (h *APIHandler) GetActiveRitase(c echo.Context) error {
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel()
+
+	idDriverParam := c.QueryParam("id_driver")
+	idKendaraanParam := c.QueryParam("id_kendaraan")
+
+	idDriver, _ := strconv.ParseInt(idDriverParam, 10, 64)
+	idKendaraan, _ := strconv.ParseInt(idKendaraanParam, 10, 64)
+
+	if idDriver == 0 || idKendaraan == 0 {
+		return response.Error(c, http.StatusBadRequest, "id_driver dan id_kendaraan harus diisi")
+	}
+
+	// 1. Cari Ritase Aktif
+	var idRitase int64
+	var statusRitase, kodeRitase string
+	err := h.DB.QueryRow(ctx, `
+		SELECT id_ritase, status, kode_ritase
+		FROM ritase
+		WHERE id_driver = $1 AND id_kendaraan = $2 AND status != 'selesai'
+		ORDER BY id_ritase ASC
+		LIMIT 1
+	`, idDriver, idKendaraan).Scan(&idRitase, &statusRitase, &kodeRitase)
+
+	if err != nil {
+		// Jika tidak ada ritase, kembalikan response sukses tapi kosong (menandakan tidak ada rute)
+		return response.OK(c, map[string]interface{}{
+			"has_active_ritase": false,
+		})
+	}
+
+	// 2. Ambil Urutan Stop
+	rows, err := h.DB.Query(ctx, `
+		SELECT 
+			rs.id_stop, rs.urutan, rs.jenis_stop, 
+			rs.id_seller, rs.id_drop_point, rs.id_gudang, rs.keterangan,
+			COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, 'Gudang OG') AS nama_lokasi,
+			COALESCE(s.alamat, dp.alamat, g.alamat, 'Gudang Outgoing Utama') AS alamat,
+			COALESCE(s.no_hp, '-') AS no_hp
+		FROM ritase_stop rs
+		LEFT JOIN seller s ON s.id_seller = rs.id_seller
+		LEFT JOIN drop_point dp ON dp.id_drop_point = rs.id_drop_point
+		LEFT JOIN gudang g ON g.id_gudang = rs.id_gudang
+		WHERE rs.id_ritase = $1
+		ORDER BY rs.urutan ASC
+	`, idRitase)
+
+	if err != nil {
+		log.Printf("Query error on active ritase stops: %v", err)
+		return response.Error(c, http.StatusInternalServerError, "Gagal mengambil data rute")
+	}
+	defer rows.Close()
+
+	var stops []map[string]interface{}
+	for rows.Next() {
+		var idStop int64
+		var urutan int
+		var jenisStop, namaLokasi, alamat, noHp string
+		var idSeller, idDropPoint, idGudang *int64
+		var keterangan *string
+
+		if err := rows.Scan(&idStop, &urutan, &jenisStop, &idSeller, &idDropPoint, &idGudang, &keterangan, &namaLokasi, &alamat, &noHp); err == nil {
+			stops = append(stops, map[string]interface{}{
+				"id_stop":       idStop,
+				"urutan":        urutan,
+				"jenis_stop":    jenisStop,
+				"id_seller":     idSeller,
+				"id_drop_point": idDropPoint,
+				"id_gudang":     idGudang,
+				"keterangan":    keterangan,
+				"nama_lokasi":   namaLokasi,
+				"alamat":        alamat,
+				"no_hp":         noHp,
+			})
+		} else {
+			log.Printf("Scan error: %v", err)
+		}
+	}
+
+	return response.OK(c, map[string]interface{}{
+		"has_active_ritase": true,
+		"id_ritase":         idRitase,
+		"kode_ritase":       kodeRitase,
+		"status":            statusRitase,
+		"stops":             stops,
+	})
 }

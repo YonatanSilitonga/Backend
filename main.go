@@ -90,6 +90,7 @@ func main() {
 	v1.GET("/sellers", handler.GetSellers)
 	v1.GET("/drivers", handler.GetDrivers)
 	v1.GET("/vehicles", handler.GetVehicles)
+	v1.GET("/driver/active-ritase", handler.GetActiveRitase)
 	v1.POST("/driver/tracking", handler.PostTracking)
 
 	// ── ROUTE AUTH WEB (login JWT + me + logout) ──
