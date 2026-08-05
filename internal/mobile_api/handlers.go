@@ -3,6 +3,7 @@ package mobile_api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -161,11 +162,11 @@ func (h *APIHandler) GetVehicles(c echo.Context) error {
 		var plat, jenis, status string
 		if err := rows.Scan(&id, &plat, &jenis, &kapasitasKg, &status); err == nil {
 			list = append(list, map[string]interface{}{
-				"id":          id,
-				"plat":        plat,
-				"type":        jenis,
-				"capacity_kg": kapasitasKg,
-				"status":      status,
+				"id":           id,
+				"plat":         plat,
+				"type":         jenis,
+				"capacity_kg":  kapasitasKg,
+				"status":       status,
 			})
 		}
 	}
@@ -183,6 +184,7 @@ type CreateTrackingRequest struct {
 	Arah        *int    `json:"arah"`
 	Status      *string `json:"status"`
 	JumlahKoli  int     `json:"jumlah_koli"`
+	DurasiDetik *int    `json:"durasi_detik"`
 }
 
 func (h *APIHandler) PostTracking(c echo.Context) error {
@@ -191,29 +193,78 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		return response.Error(c, http.StatusBadRequest, "format request tidak valid: "+err.Error())
 	}
 
-	var ritaseID interface{}
-	if req.IDRitase != 0 {
-		ritaseID = req.IDRitase
+	if req.Status != nil {
+		switch *req.Status {
+		case "mulai_loading":
+			s := "Bongkar Muat Barang"
+			req.Status = &s
+		case "berangkat_gudang":
+			s := "Keluar Gudang"
+			req.Status = &s
+		case "menuju_seller":
+			s := "Sedang Menuju"
+			req.Status = &s
+		case "sampai_gudang":
+			s := "Tiba di Seller"
+			req.Status = &s
+		case "selesai":
+			s := "Selesai"
+			req.Status = &s
+		default:
+			if strings.HasPrefix(*req.Status, "Sedang Menuju") || strings.HasPrefix(*req.Status, "Menuju ") {
+				s := "Sedang Menuju"
+				req.Status = &s
+			} else if strings.HasPrefix(*req.Status, "Tiba di ") {
+				s := "Tiba di Seller"
+				req.Status = &s
+			}
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
+	var targetRitaseID int64 = req.IDRitase
+	if targetRitaseID == 0 {
+		_ = h.DB.QueryRow(ctx, `
+			SELECT id_ritase 
+			FROM ritase 
+			WHERE id_driver = $1 OR id_kendaraan = $2 
+			ORDER BY id_ritase DESC 
+			LIMIT 1
+		`, req.IDDriver, req.IDKendaraan).Scan(&targetRitaseID)
+	}
+
+	var ritaseID interface{}
+	if targetRitaseID != 0 {
+		ritaseID = targetRitaseID
+	}
+
 	_, err := h.DB.Exec(ctx, `
-		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, last_update)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
-		ON CONFLICT (id_kendaraan)
-		DO UPDATE SET id_driver   = EXCLUDED.id_driver,
-		              latitude    = EXCLUDED.latitude,
-		              longitude   = EXCLUDED.longitude,
-		              kecepatan   = EXCLUDED.kecepatan,
-		              arah        = EXCLUDED.arah,
-		              status      = EXCLUDED.status,
-		              last_update = now()
-	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status)
+		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, last_update)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+		ON CONFLICT (id_kendaraan) DO UPDATE 
+		SET id_ritase = EXCLUDED.id_ritase,
+		    id_driver = EXCLUDED.id_driver,
+		    latitude = EXCLUDED.latitude,
+		    longitude = EXCLUDED.longitude,
+		    kecepatan = EXCLUDED.kecepatan,
+		    arah = EXCLUDED.arah,
+		    status = EXCLUDED.status,
+		    jumlah_koli = EXCLUDED.jumlah_koli,
+		    last_update = now()
+	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, req.JumlahKoli)
 
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking: "+err.Error())
+	}
+
+	// Catat riwayat event ke tabel ritase_event tanpa mengubah struktur tabel
+	if targetRitaseID > 0 && req.Status != nil {
+		_, _ = h.DB.Exec(ctx, `
+			INSERT INTO ritase_event (id_ritase, status, latitude, longitude, durasi_detik, created_at)
+			VALUES ($1, $2, $3, $4, $5, now())
+		`, targetRitaseID, *req.Status, req.Latitude, req.Longitude, req.DurasiDetik)
 	}
 
 	return response.OK(c, "success")
