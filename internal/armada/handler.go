@@ -3,6 +3,7 @@ package armada
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -96,6 +97,25 @@ func (h *Handler) UpdateStatus(c echo.Context) error {
 	}
 	if req.Status == "" {
 		return response.Error(c, http.StatusBadRequest, "status wajib diisi")
+	}
+
+	switch req.Status {
+	case "mulai_loading":
+		req.Status = "Bongkar Muat Barang"
+	case "berangkat_gudang":
+		req.Status = "Keluar Gudang"
+	case "menuju_seller":
+		req.Status = "Sedang Menuju"
+	case "sampai_gudang":
+		req.Status = "Tiba di Seller"
+	case "selesai":
+		req.Status = "Selesai"
+	default:
+		if strings.HasPrefix(req.Status, "Sedang Menuju") || strings.HasPrefix(req.Status, "Menuju ") {
+			req.Status = "Sedang Menuju"
+		} else if strings.HasPrefix(req.Status, "Tiba di ") {
+			req.Status = "Tiba di Seller"
+		}
 	}
 
 	data, err := h.svc.UpdateStatus(c.Request().Context(), id, req)

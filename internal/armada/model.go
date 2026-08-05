@@ -51,9 +51,10 @@ type RitaseEvent struct {
 	IDRitase  int64     `json:"id_ritase"`
 	Status    string    `json:"status"`
 	Catatan   *string   `json:"catatan,omitempty"`
-	Latitude  *float64  `json:"latitude,omitempty"`
-	Longitude *float64  `json:"longitude,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	Latitude    *float64  `json:"latitude,omitempty"`
+	Longitude   *float64  `json:"longitude,omitempty"`
+	DurasiDetik *int      `json:"durasi_detik,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // RitaseDetail adalah ritase + seluruh timeline event-nya.
@@ -90,10 +91,11 @@ type CreateRitaseRequest struct {
 }
 
 type UpdateStatusRequest struct {
-	Status    string   `json:"status"`
-	Catatan   *string  `json:"catatan"`
-	Latitude  *float64 `json:"latitude"`
-	Longitude *float64 `json:"longitude"`
+	Status      string   `json:"status"`
+	Catatan     *string  `json:"catatan"`
+	Latitude    *float64 `json:"latitude"`
+	Longitude   *float64 `json:"longitude"`
+	DurasiDetik *int     `json:"durasi_detik"`
 }
 
 type UpdateMuatanRequest struct {
