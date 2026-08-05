@@ -160,6 +160,29 @@ func (h *Handler) CreateTracking(c echo.Context) error {
 	return response.Created(c, data)
 }
 
+// GetTrackingMap menangani GET /armada/tracking/map (posisi live + lokasi seller).
+func (h *Handler) GetTrackingMap(c echo.Context) error {
+	data, err := h.svc.GetTrackingMap(c.Request().Context())
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data peta tracking")
+	}
+	return response.OK(c, data)
+}
+
+// GetTrackingHistory menangani GET /armada/tracking/history?kendaraan_id=
+func (h *Handler) GetTrackingHistory(c echo.Context) error {
+	idKendaraan, _ := strconv.ParseInt(c.QueryParam("kendaraan_id"), 10, 64)
+	if idKendaraan <= 0 {
+		return response.Error(c, http.StatusBadRequest, "kendaraan_id wajib diisi")
+	}
+
+	data, err := h.svc.GetTrackingHistory(c.Request().Context(), idKendaraan)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil riwayat tracking")
+	}
+	return response.OK(c, data)
+}
+
 // RegisterRoutes memasang route armada di grup yang diberikan (butuh auth).
 func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	g.GET("/armada/kendaraan", h.ListKendaraan, authMW)
@@ -173,4 +196,6 @@ func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 
 	g.GET("/armada/tracking", h.ListTracking, authMW)
 	g.POST("/armada/tracking", h.CreateTracking, authMW)
+	g.GET("/armada/tracking/map", h.GetTrackingMap, authMW)
+	g.GET("/armada/tracking/history", h.GetTrackingHistory, authMW)
 }

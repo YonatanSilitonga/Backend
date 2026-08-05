@@ -240,11 +240,11 @@ func (r *Repository) AddEvent(ctx context.Context, idRitase int64, req UpdateSta
 
 	var ev RitaseEvent
 	err = tx.QueryRow(ctx, `
-		INSERT INTO ritase_event (id_ritase, status, catatan, latitude, longitude)
-		VALUES ($1,$2,$3,$4,$5)
-		RETURNING id_event, id_ritase, status, catatan, latitude, longitude, created_at
-	`, idRitase, req.Status, req.Catatan, req.Latitude, req.Longitude).Scan(
-		&ev.ID, &ev.IDRitase, &ev.Status, &ev.Catatan, &ev.Latitude, &ev.Longitude, &ev.CreatedAt)
+		INSERT INTO ritase_event (id_ritase, status, catatan, latitude, longitude, durasi_detik)
+		VALUES ($1,$2,$3,$4,$5,$6)
+		RETURNING id_event, id_ritase, status, catatan, latitude, longitude, durasi_detik, created_at
+	`, idRitase, req.Status, req.Catatan, req.Latitude, req.Longitude, req.DurasiDetik).Scan(
+		&ev.ID, &ev.IDRitase, &ev.Status, &ev.Catatan, &ev.Latitude, &ev.Longitude, &ev.DurasiDetik, &ev.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +281,7 @@ func (r *Repository) UpdateMuatan(ctx context.Context, idRitase int64, req Updat
 // ListEvents mengambil timeline status sebuah ritase.
 func (r *Repository) ListEvents(ctx context.Context, idRitase int64) ([]RitaseEvent, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_event, id_ritase, status, catatan, latitude, longitude, created_at
+		SELECT id_event, id_ritase, status, catatan, latitude, longitude, durasi_detik, created_at
 		FROM ritase_event
 		WHERE id_ritase = $1
 		ORDER BY created_at, id_event
@@ -294,7 +294,7 @@ func (r *Repository) ListEvents(ctx context.Context, idRitase int64) ([]RitaseEv
 	var items []RitaseEvent
 	for rows.Next() {
 		var e RitaseEvent
-		if err := rows.Scan(&e.ID, &e.IDRitase, &e.Status, &e.Catatan, &e.Latitude, &e.Longitude, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.IDRitase, &e.Status, &e.Catatan, &e.Latitude, &e.Longitude, &e.DurasiDetik, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, e)
@@ -332,12 +332,20 @@ func (r *Repository) ListTracking(ctx context.Context, limit int) ([]Tracking, e
 	return items, rows.Err()
 }
 
-// CreateTracking menyimpan posisi GPS terbaru.
+// CreateTracking menyimpan posisi GPS terbaru (1 baris live per kendaraan).
 func (r *Repository) CreateTracking(ctx context.Context, req CreateTrackingRequest) (*Tracking, error) {
 	var t Tracking
 	err := r.db.QueryRow(ctx, `
 		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, last_update)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+		ON CONFLICT (id_kendaraan)
+		DO UPDATE SET id_driver   = EXCLUDED.id_driver,
+		              latitude    = EXCLUDED.latitude,
+		              longitude   = EXCLUDED.longitude,
+		              kecepatan   = EXCLUDED.kecepatan,
+		              arah        = EXCLUDED.arah,
+		              status      = EXCLUDED.status,
+		              last_update = now()
 		RETURNING id_tracking, id_ritase, id_kendaraan, id_driver,
 		          latitude, longitude, kecepatan, arah, status, last_update
 	`, req.IDRitase, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude,
@@ -348,4 +356,85 @@ func (r *Repository) CreateTracking(ctx context.Context, req CreateTrackingReque
 		return nil, err
 	}
 	return &t, nil
+}
+
+// ListLatestTracking mengambil 1 posisi terbaru per kendaraan (data live untuk peta).
+func (r *Repository) ListLatestTracking(ctx context.Context) ([]TrackingLive, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT t.id_tracking, t.id_kendaraan, COALESCE(k.plat_nomor,''),
+		       t.id_driver, COALESCE(d.nama_driver,''),
+		       t.latitude, t.longitude, t.kecepatan, t.arah, t.status, t.last_update
+		FROM armada_tracking t
+		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
+		LEFT JOIN driver d ON d.id_driver = t.id_driver
+		ORDER BY t.last_update DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []TrackingLive
+	for rows.Next() {
+		var t TrackingLive
+		if err := rows.Scan(&t.ID, &t.IDKendaraan, &t.PlatNomor,
+			&t.IDDriver, &t.NamaDriver,
+			&t.Latitude, &t.Longitude, &t.Kecepatan, &t.Arah, &t.Status, &t.LastUpdate); err != nil {
+			return nil, err
+		}
+		items = append(items, t)
+	}
+	return items, rows.Err()
+}
+
+// ListSellerLocations mengambil seller yang punya koordinat (untuk peta).
+func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id_seller, COALESCE(nama_seller,''), COALESCE(alamat,''), COALESCE(kota,''),
+		       latitude, longitude
+		FROM seller
+		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+		ORDER BY id_seller ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []SellerLocation
+	for rows.Next() {
+		var s SellerLocation
+		if err := rows.Scan(&s.IDSeller, &s.NamaSeller, &s.Alamat, &s.Kota, &s.Latitude, &s.Longitude); err != nil {
+			return nil, err
+		}
+		items = append(items, s)
+	}
+	return items, rows.Err()
+}
+
+// ListTrackingHistory mengambil riwayat status (ritase_event) untuk sebuah kendaraan.
+func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan int64) ([]TrackingCheckpoint, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT e.id_event, e.id_ritase, COALESCE(r.kode_ritase,''),
+		       e.status, e.catatan, e.latitude, e.longitude, e.durasi_detik, e.created_at
+		FROM ritase_event e
+		JOIN ritase r ON r.id_ritase = e.id_ritase
+		WHERE r.id_kendaraan = $1
+		ORDER BY e.created_at DESC, e.id_event DESC
+	`, idKendaraan)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []TrackingCheckpoint
+	for rows.Next() {
+		var c TrackingCheckpoint
+		if err := rows.Scan(&c.IDEvent, &c.IDRitase, &c.KodeRitase,
+			&c.Status, &c.Catatan, &c.Latitude, &c.Longitude, &c.DurasiDetik, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, c)
+	}
+	return items, rows.Err()
 }

@@ -161,11 +161,11 @@ func (h *APIHandler) GetVehicles(c echo.Context) error {
 		var plat, jenis, status string
 		if err := rows.Scan(&id, &plat, &jenis, &kapasitasKg, &status); err == nil {
 			list = append(list, map[string]interface{}{
-				"id":           id,
-				"plat":         plat,
-				"type":         jenis,
-				"capacity_kg":  kapasitasKg,
-				"status":       status,
+				"id":          id,
+				"plat":        plat,
+				"type":        jenis,
+				"capacity_kg": kapasitasKg,
+				"status":      status,
 			})
 		}
 	}
@@ -200,9 +200,17 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 	defer cancel()
 
 	_, err := h.DB.Exec(ctx, `
-		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, last_update)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
-	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, req.JumlahKoli)
+		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, last_update)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+		ON CONFLICT (id_kendaraan)
+		DO UPDATE SET id_driver   = EXCLUDED.id_driver,
+		              latitude    = EXCLUDED.latitude,
+		              longitude   = EXCLUDED.longitude,
+		              kecepatan   = EXCLUDED.kecepatan,
+		              arah        = EXCLUDED.arah,
+		              status      = EXCLUDED.status,
+		              last_update = now()
+	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status)
 
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking: "+err.Error())

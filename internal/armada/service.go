@@ -49,3 +49,19 @@ func (s *Service) ListTracking(ctx context.Context, limit int) ([]Tracking, erro
 func (s *Service) CreateTracking(ctx context.Context, req CreateTrackingRequest) (*Tracking, error) {
 	return s.repo.CreateTracking(ctx, req)
 }
+
+func (s *Service) GetTrackingMap(ctx context.Context) (*MapTracking, error) {
+	vehicles, err := s.repo.ListLatestTracking(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sellers, err := s.repo.ListSellerLocations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &MapTracking{Vehicles: vehicles, Sellers: sellers}, nil
+}
+
+func (s *Service) GetTrackingHistory(ctx context.Context, idKendaraan int64) ([]TrackingCheckpoint, error) {
+	return s.repo.ListTrackingHistory(ctx, idKendaraan)
+}
