@@ -259,13 +259,5 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking: "+err.Error())
 	}
 
-	// Catat riwayat event ke tabel ritase_event tanpa mengubah struktur tabel
-	if targetRitaseID > 0 && req.Status != nil {
-		_, _ = h.DB.Exec(ctx, `
-			INSERT INTO ritase_event (id_ritase, status, latitude, longitude, durasi_detik, created_at)
-			VALUES ($1, $2, $3, $4, $5, now())
-		`, targetRitaseID, *req.Status, req.Latitude, req.Longitude, req.DurasiDetik)
-	}
-
 	return response.OK(c, "success")
 }
