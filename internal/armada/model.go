@@ -41,26 +41,40 @@ type Ritase struct {
 	AlasanTertinggal *string   `json:"alasan_tertinggal,omitempty"`
 	JamBerangkat     *string   `json:"jam_berangkat,omitempty"`
 	JamTiba          *string   `json:"jam_tiba,omitempty"`
+	JamMulai         *string   `json:"jam_mulai,omitempty"`  // jadwal RIT mulai
+	JamSelesai       *string   `json:"jam_selesai,omitempty"` // jadwal RIT selesai
 	Status           string    `json:"status"`
 	CreatedAt        time.Time `json:"created_at,omitempty"`
 }
 
+// RitaseStop adalah satu titik dalam rute ritase (gudang -> seller(s) -> drop_point/GTW).
+type RitaseStop struct {
+	IDStop      int64   `json:"id_stop"`
+	IDRitase    int64   `json:"id_ritase"`
+	Urutan      int     `json:"urutan"`
+	JenisStop   string  `json:"jenis_stop"` // gudang | seller | drop_point
+	IDSeller    *int64  `json:"id_seller,omitempty"`
+	IDDropPoint *int64  `json:"id_drop_point,omitempty"`
+	Keterangan  *string `json:"keterangan,omitempty"`
+}
+
 // RitaseEvent adalah satu baris timeline status perjalanan (10 status tombol driver).
 type RitaseEvent struct {
-	ID        int64     `json:"id_event"`
-	IDRitase  int64     `json:"id_ritase"`
-	Status    string    `json:"status"`
-	Catatan   *string   `json:"catatan,omitempty"`
+	ID          int64     `json:"id_event"`
+	IDRitase    int64     `json:"id_ritase"`
+	Status      string    `json:"status"`
+	Catatan     *string   `json:"catatan,omitempty"`
 	Latitude    *float64  `json:"latitude,omitempty"`
 	Longitude   *float64  `json:"longitude,omitempty"`
 	DurasiDetik *int      `json:"durasi_detik,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// RitaseDetail adalah ritase + seluruh timeline event-nya.
+// RitaseDetail adalah ritase + seluruh timeline event + rute (stops).
 type RitaseDetail struct {
 	Ritase
 	Events []RitaseEvent `json:"events"`
+	Stops  []RitaseStop  `json:"stops"`
 }
 
 // Tracking merepresentasikan tabel armada_tracking (posisi realtime).
@@ -88,6 +102,16 @@ type CreateRitaseRequest struct {
 	RitaseKe    *int   `json:"ritase_ke"`
 	TotalAWB    *int   `json:"total_awb"`
 	TotalKoli   *int   `json:"total_koli"`
+	Stops       []RitaseStopRequest `json:"stops"`
+}
+
+// RitaseStopRequest adalah satu titik rute saat membuat ritase.
+type RitaseStopRequest struct {
+	Urutan      int     `json:"urutan"`
+	JenisStop   string  `json:"jenis_stop"`
+	IDSeller    *int64  `json:"id_seller"`
+	IDDropPoint *int64  `json:"id_drop_point"`
+	Keterangan  *string `json:"keterangan"`
 }
 
 type UpdateStatusRequest struct {
@@ -114,4 +138,48 @@ type CreateTrackingRequest struct {
 	Kecepatan   *int    `json:"kecepatan"`
 	Arah        *int    `json:"arah"`
 	Status      *string `json:"status"`
+}
+
+// TrackingLive posisi terbaru per kendaraan + info kendaraan/driver untuk peta.
+type TrackingLive struct {
+	ID          int64     `json:"id_tracking"`
+	IDKendaraan int64     `json:"id_kendaraan"`
+	PlatNomor   string    `json:"plat_nomor"`
+	IDDriver    int64     `json:"id_driver"`
+	NamaDriver  string    `json:"nama_driver"`
+	Latitude    float64   `json:"latitude"`
+	Longitude   float64   `json:"longitude"`
+	Kecepatan   *int      `json:"kecepatan,omitempty"`
+	Arah        *int      `json:"arah,omitempty"`
+	Status      *string   `json:"status,omitempty"`
+	LastUpdate  time.Time `json:"last_update"`
+}
+
+// SellerLocation lokasi toko seller untuk peta.
+type SellerLocation struct {
+	IDSeller   int64   `json:"id_seller"`
+	NamaSeller string  `json:"nama_seller"`
+	Alamat     string  `json:"alamat"`
+	Kota       string  `json:"kota"`
+	Latitude   float64 `json:"latitude"`
+	Longitude  float64 `json:"longitude"`
+}
+
+// MapTracking gabungan posisi live kendaraan + lokasi seller (data peta).
+type MapTracking struct {
+	Vehicles []TrackingLive   `json:"vehicles"`
+	Sellers  []SellerLocation `json:"sellers"`
+}
+
+// TrackingCheckpoint satu baris riwayat status dari ritase_event.
+type TrackingCheckpoint struct {
+	IDEvent     int64     `json:"id_event"`
+	IDRitase    int64     `json:"id_ritase"`
+	KodeRitase  string    `json:"kode_ritase"`
+	Status      string    `json:"status"`
+	Catatan     *string   `json:"catatan,omitempty"`
+	Latitude    *float64  `json:"latitude,omitempty"`
+	Longitude   *float64  `json:"longitude,omitempty"`
+	DurasiDetik *int      `json:"durasi_detik,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
