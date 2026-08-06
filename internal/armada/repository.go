@@ -27,7 +27,7 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id_kendaraan, plat_nomor, jenis_kendaraan,
-		       kapasitas_koli, status_kendaraan
+		       kapasitas_kg, status_kendaraan
 		FROM kendaraan
 		ORDER BY id_kendaraan
 	`)
@@ -40,7 +40,7 @@ func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	for rows.Next() {
 		var k Kendaraan
 		if err := rows.Scan(&k.ID, &k.PlatNomor, &k.JenisKendaraan,
-			&k.KapasitasKoli, &k.StatusKendaraan); err != nil {
+			&k.KapasitasKg, &k.StatusKendaraan); err != nil {
 			return nil, err
 		}
 		items = append(items, k)
@@ -78,7 +78,10 @@ const ritaseSelect = `
 	SELECT r.id_ritase, r.kode_ritase, r.tanggal::text,
 	       r.id_driver, COALESCE(d.nama_driver,''),
 	       r.id_kendaraan, COALESCE(k.plat_nomor,''),
-	       r.id_seller, COALESCE(s.nama_seller,''),
+	       COALESCE((SELECT string_agg(DISTINCT s.nama_seller, ', ')
+	                 FROM ritase_stop rs
+	                 JOIN seller s ON s.id_seller = rs.id_seller
+	                 WHERE rs.id_ritase = r.id_ritase AND rs.jenis_stop = 'seller'), '') AS nama_seller,
 	       r.id_drop_point, COALESCE(dp.nama_drop_point,''),
 	       r.ritase_ke, r.total_awb, r.total_koli,
 	       r.paket_tertinggal, r.alasan_tertinggal,
@@ -88,7 +91,6 @@ const ritaseSelect = `
 	FROM ritase r
 	LEFT JOIN driver d ON d.id_driver = r.id_driver
 	LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
-	LEFT JOIN seller s ON s.id_seller = r.id_seller
 	LEFT JOIN drop_point dp ON dp.id_drop_point = r.id_drop_point
 `
 
@@ -97,7 +99,7 @@ func scanRitase(row pgx.Row) (*Ritase, error) {
 	err := row.Scan(&r.ID, &r.KodeRitase, &r.Tanggal,
 		&r.IDDriver, &r.NamaDriver,
 		&r.IDKendaraan, &r.PlatNomor,
-		&r.IDSeller, &r.NamaSeller,
+		&r.NamaSeller,
 		&r.IDDropPoint, &r.NamaDropPoint,
 		&r.RitaseKe, &r.TotalAWB, &r.TotalKoli,
 		&r.PaketTertinggal, &r.AlasanTertinggal,
@@ -169,10 +171,17 @@ func (r *Repository) GetRitase(ctx context.Context, id int64) (*RitaseDetail, er
 // ListStops mengambil urutan rute sebuah ritase.
 func (r *Repository) ListStops(ctx context.Context, idRitase int64) ([]RitaseStop, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_stop, id_ritase, urutan, jenis_stop, id_seller, id_drop_point, keterangan
-		FROM ritase_stop
-		WHERE id_ritase = $1
-		ORDER BY urutan
+		SELECT s.id_stop, s.id_ritase, s.urutan, s.jenis_stop,
+		       s.id_gudang, COALESCE(g.nama_gudang,''), COALESCE(g.tipe,''),
+		       s.id_seller, s.id_drop_point,
+		       COALESCE(seller.nama_seller,''), COALESCE(dp.nama_drop_point,''),
+		       s.keterangan
+		FROM ritase_stop s
+		LEFT JOIN gudang g ON g.id_gudang = s.id_gudang
+		LEFT JOIN seller seller ON seller.id_seller = s.id_seller
+		LEFT JOIN drop_point dp ON dp.id_drop_point = s.id_drop_point
+		WHERE s.id_ritase = $1
+		ORDER BY s.urutan
 	`, idRitase)
 	if err != nil {
 		return nil, err
@@ -182,9 +191,23 @@ func (r *Repository) ListStops(ctx context.Context, idRitase int64) ([]RitaseSto
 	var items []RitaseStop
 	for rows.Next() {
 		var st RitaseStop
+		var namaGudang, tipeGudang, namaSeller, namaDP string
 		if err := rows.Scan(&st.IDStop, &st.IDRitase, &st.Urutan, &st.JenisStop,
-			&st.IDSeller, &st.IDDropPoint, &st.Keterangan); err != nil {
+			&st.IDGudang, &namaGudang, &tipeGudang,
+			&st.IDSeller, &st.IDDropPoint, &namaSeller, &namaDP, &st.Keterangan); err != nil {
 			return nil, err
+		}
+		if namaGudang != "" {
+			st.NamaGudang = &namaGudang
+		}
+		if tipeGudang != "" {
+			st.TipeGudang = &tipeGudang
+		}
+		if namaSeller != "" {
+			st.NamaSeller = &namaSeller
+		}
+		if namaDP != "" {
+			st.NamaDropPoint = &namaDP
 		}
 		items = append(items, st)
 	}
@@ -201,10 +224,10 @@ func (r *Repository) CreateRitase(ctx context.Context, req CreateRitaseRequest) 
 
 	var newID int64
 	err = tx.QueryRow(ctx, `
-		INSERT INTO ritase (kode_ritase, tanggal, id_driver, id_kendaraan, id_seller, id_drop_point, ritase_ke, total_awb, total_koli, status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'direncanakan')
+		INSERT INTO ritase (kode_ritase, tanggal, id_driver, id_kendaraan, id_drop_point, ritase_ke, total_awb, total_koli, status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'direncanakan')
 		RETURNING id_ritase
-	`, req.KodeRitase, req.Tanggal, req.IDDriver, req.IDKendaraan, req.IDSeller, req.IDDropPoint,
+	`, req.KodeRitase, req.Tanggal, req.IDDriver, req.IDKendaraan, req.IDDropPoint,
 		req.RitaseKe, req.TotalAWB, req.TotalKoli).Scan(&newID)
 	if err != nil {
 		return nil, err
@@ -212,9 +235,9 @@ func (r *Repository) CreateRitase(ctx context.Context, req CreateRitaseRequest) 
 
 	for _, s := range req.Stops {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO ritase_stop (id_ritase, urutan, jenis_stop, id_seller, id_drop_point, keterangan)
-			VALUES ($1,$2,$3,$4,$5,$6)
-		`, newID, s.Urutan, s.JenisStop, s.IDSeller, s.IDDropPoint, s.Keterangan); err != nil {
+			INSERT INTO ritase_stop (id_ritase, urutan, jenis_stop, id_gudang, id_seller, id_drop_point, keterangan)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
+		`, newID, s.Urutan, s.JenisStop, s.IDGudang, s.IDSeller, s.IDDropPoint, s.Keterangan); err != nil {
 			return nil, err
 		}
 	}
@@ -390,7 +413,8 @@ func (r *Repository) ListLatestTracking(ctx context.Context) ([]TrackingLive, er
 // ListSellerLocations mengambil seller yang punya koordinat (untuk peta).
 func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_seller, COALESCE(nama_seller,''), COALESCE(alamat,''), COALESCE(kota,''),
+		SELECT id_seller, COALESCE(kode_seller,''), COALESCE(nama_seller,''), COALESCE(alamat,''),
+		       COALESCE(kota,''), COALESCE(pic,''), COALESCE(no_hp,''),
 		       latitude, longitude
 		FROM seller
 		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
@@ -404,7 +428,7 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 	var items []SellerLocation
 	for rows.Next() {
 		var s SellerLocation
-		if err := rows.Scan(&s.IDSeller, &s.NamaSeller, &s.Alamat, &s.Kota, &s.Latitude, &s.Longitude); err != nil {
+		if err := rows.Scan(&s.IDSeller, &s.KodeSeller, &s.NamaSeller, &s.Alamat, &s.Kota, &s.PIC, &s.NoHP, &s.Latitude, &s.Longitude); err != nil {
 			return nil, err
 		}
 		items = append(items, s)

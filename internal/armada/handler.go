@@ -81,8 +81,8 @@ func (h *Handler) CreateRitase(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
 	}
-	if req.KodeRitase == "" || req.IDDriver == 0 || req.IDKendaraan == 0 || req.IDSeller == 0 {
-		return response.Error(c, http.StatusBadRequest, "kode_ritase, id_driver, id_kendaraan, id_seller wajib diisi")
+	if req.KodeRitase == "" || req.IDDriver == 0 || req.IDKendaraan == 0 {
+		return response.Error(c, http.StatusBadRequest, "kode_ritase, id_driver, id_kendaraan wajib diisi")
 	}
 
 	data, err := h.svc.CreateRitase(c.Request().Context(), req)

@@ -43,7 +43,10 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 		{&s.TotalKoli, "SELECT COALESCE(sum(total_koli),0) FROM ritase"},
 		{&s.PaketTertinggal, "SELECT COALESCE(sum(paket_tertinggal),0) FROM ritase"},
 		{&s.TotalSeller, "SELECT count(*) FROM seller"},
-		{&s.SellerTerlayani, "SELECT count(DISTINCT id_seller) FROM ritase WHERE LOWER(status) IN ('selesai','completed','done')"},
+		{&s.SellerTerlayani, `SELECT count(DISTINCT rs.id_seller)
+			FROM ritase_stop rs
+			JOIN ritase r ON r.id_ritase = rs.id_ritase
+			WHERE rs.jenis_stop = 'seller' AND LOWER(r.status) IN ('selesai','completed','done')`},
 		{&s.TotalDropPoint, "SELECT count(*) FROM drop_point"},
 		{&s.TotalKaryawan, "SELECT count(*) FROM karyawan"},
 		{&s.TotalManpower, "SELECT COALESCE(sum(jumlah_manpower),0) FROM implant"},
@@ -128,12 +131,15 @@ func (r *Repository) GetBottleneck(ctx context.Context) ([]Bottleneck, error) {
 	var items []Bottleneck
 
 	// seller dengan ritase paling banyak tapi lama tidak selesai
+	// (relasi seller via ritase_stop — skema baru, ritase gak punya id_seller lagi)
 	rows, err := r.db.Query(ctx, `
-		SELECT 'seller', s.nama_seller, 'ritase terbanyak', count(*)::float8
-		FROM ritase r JOIN seller s ON s.id_seller = r.id_seller
-		WHERE r.status NOT IN ('selesai','completed','done')
+		SELECT 'seller', s.nama_seller, 'ritase terbanyak', count(DISTINCT rs.id_ritase)::float8
+		FROM ritase_stop rs
+		JOIN ritase r ON r.id_ritase = rs.id_ritase
+		JOIN seller s ON s.id_seller = rs.id_seller
+		WHERE rs.jenis_stop = 'seller' AND r.status NOT IN ('selesai','completed','done')
 		GROUP BY s.nama_seller
-		ORDER BY count(*) DESC
+		ORDER BY count(DISTINCT rs.id_ritase) DESC
 		LIMIT 3
 	`)
 	if err != nil {

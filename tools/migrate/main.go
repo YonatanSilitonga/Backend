@@ -42,6 +42,17 @@ ALTER TABLE driver ADD COLUMN IF NOT EXISTS jenis_driver VARCHAR DEFAULT 'tetap'
 ALTER TABLE armada_tracking ADD COLUMN IF NOT EXISTS jumlah_koli INTEGER DEFAULT 0;
 ALTER TABLE seller ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
 ALTER TABLE seller ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
+
+-- 000004: gudang + relasi di ritase_stop
+CREATE TABLE IF NOT EXISTS gudang (
+  id_gudang   BIGSERIAL PRIMARY KEY,
+  nama_gudang VARCHAR NOT NULL,
+  tipe        VARCHAR NOT NULL DEFAULT 'outgoing',
+  alamat      TEXT,
+  latitude    DOUBLE PRECISION,
+  longitude   DOUBLE PRECISION
+);
+ALTER TABLE ritase_stop ADD COLUMN IF NOT EXISTS id_gudang INTEGER;
 `
 
 func main() {

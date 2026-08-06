@@ -10,6 +10,9 @@ Backend: Go + Echo, satu API `/api/v1`, dipakai **dua client**:
 2. **Login satu handler**: `POST /auth/login` terima `username` ATAU `email`, respons `{ user, token }`.
 3. Kalau mau ubah respons endpoint yang dipakai bareng → konfirmasi dulu di sini.
 4. Format respons semua endpoint: `{ success, data, message }`.
+5. **JANGAN hapus tipe di `internal/armada/model_route.go`** (RitaseStop + gudang, RitaseStopRequest, SellerLocation + kode/pic/no_hp). Itu milik WEB & backend (peta, rute, seller detail). Kalau model.go di-refactor, biarkan file ini utuh.
+6. Kolom yang "suci" (jangan di-revert): `ritase_stop.id_gudang`, `gudang.*`, `seller.kode_seller/pic/no_hp`, `users.id_driver`, `driver.jenis_driver`, `ritase.jam_mulai/jam_selesai`.
+7. **Relasi seller-ritase**: kolom `ritase.id_seller` SUDAH HAPUS di DB. Sekarang relasi lewat `ritase_stop` (`jenis_stop='seller'`, `id_seller`) — satu ritase bisa banyak seller. Respons web `GET /armada/ritase` TIDAK lagi menyertakan `id_seller`; `nama_seller` diisi backend (gabungan nama seller dari stops). Jangan kembalikan `id_seller` ke query ritase.
 
 ## Endpoint
 
