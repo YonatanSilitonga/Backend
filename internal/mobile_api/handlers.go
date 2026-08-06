@@ -187,6 +187,7 @@ type CreateTrackingRequest struct {
 	Arah        *int    `json:"arah"`
 	Status      *string `json:"status"`
 	JumlahKoli  int     `json:"jumlah_koli"`
+	JumlahEcer  int     `json:"jumlah_ecer"`
 	DurasiDetik *int    `json:"durasi_detik"`
 }
 
@@ -244,8 +245,8 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 	}
 
 	_, err := h.DB.Exec(ctx, `
-		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, last_update)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, jumlah_ecer, last_update)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
 		ON CONFLICT (id_kendaraan) DO UPDATE 
 		SET id_ritase = EXCLUDED.id_ritase,
 		    id_driver = EXCLUDED.id_driver,
@@ -255,8 +256,9 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		    arah = EXCLUDED.arah,
 		    status = EXCLUDED.status,
 		    jumlah_koli = EXCLUDED.jumlah_koli,
+		    jumlah_ecer = EXCLUDED.jumlah_ecer,
 		    last_update = now()
-	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, req.JumlahKoli)
+	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, req.JumlahKoli, req.JumlahEcer)
 
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking: "+err.Error())

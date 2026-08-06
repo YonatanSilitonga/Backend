@@ -57,6 +57,8 @@ type RitaseEvent struct {
 	Latitude    *float64  `json:"latitude,omitempty"`
 	Longitude   *float64  `json:"longitude,omitempty"`
 	DurasiDetik *int      `json:"durasi_detik,omitempty"`
+	JumlahKoli  *int      `json:"jumlah_koli,omitempty"`
+	JumlahEcer  *int      `json:"jumlah_ecer,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -94,6 +96,8 @@ type TrackingLive struct {
 	Kecepatan   *int      `json:"kecepatan,omitempty"`
 	Arah        *int      `json:"arah,omitempty"`
 	Status      *string   `json:"status,omitempty"`
+	JumlahKoli  *int      `json:"jumlah_koli,omitempty"`
+	JumlahEcer  *int      `json:"jumlah_ecer,omitempty"`
 	LastUpdate  time.Time `json:"last_update"`
 }
 
@@ -139,6 +143,8 @@ type UpdateStatusRequest struct {
 	Latitude    *float64 `json:"latitude"`
 	Longitude   *float64 `json:"longitude"`
 	DurasiDetik *int     `json:"durasi_detik"`
+	JumlahKoli  *int     `json:"jumlah_koli"`
+	JumlahEcer  *int     `json:"jumlah_ecer"`
 }
 
 type UpdateMuatanRequest struct {
@@ -157,4 +163,7 @@ type CreateTrackingRequest struct {
 	Kecepatan   *int    `json:"kecepatan"`
 	Arah        *int    `json:"arah"`
 	Status      *string `json:"status"`
+	JumlahKoli  int     `json:"jumlah_koli"`
+	JumlahEcer  int     `json:"jumlah_ecer"`
+	DurasiDetik *int    `json:"durasi_detik"`
 }

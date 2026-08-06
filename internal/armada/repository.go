@@ -263,13 +263,24 @@ func (r *Repository) AddEvent(ctx context.Context, idRitase int64, req UpdateSta
 
 	var ev RitaseEvent
 	err = tx.QueryRow(ctx, `
-		INSERT INTO ritase_event (id_ritase, status, catatan, latitude, longitude, durasi_detik)
-		VALUES ($1,$2,$3,$4,$5,$6)
-		RETURNING id_event, id_ritase, status, catatan, latitude, longitude, durasi_detik, created_at
-	`, idRitase, req.Status, req.Catatan, req.Latitude, req.Longitude, req.DurasiDetik).Scan(
-		&ev.ID, &ev.IDRitase, &ev.Status, &ev.Catatan, &ev.Latitude, &ev.Longitude, &ev.DurasiDetik, &ev.CreatedAt)
+		INSERT INTO ritase_event (id_ritase, status, catatan, latitude, longitude, durasi_detik, jumlah_koli, jumlah_ecer)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		RETURNING id_event, id_ritase, status, catatan, latitude, longitude, durasi_detik, jumlah_koli, jumlah_ecer, created_at
+	`, idRitase, req.Status, req.Catatan, req.Latitude, req.Longitude, req.DurasiDetik, req.JumlahKoli, req.JumlahEcer).Scan(
+		&ev.ID, &ev.IDRitase, &ev.Status, &ev.Catatan, &ev.Latitude, &ev.Longitude, &ev.DurasiDetik, &ev.JumlahKoli, &ev.JumlahEcer, &ev.CreatedAt)
 	if err != nil {
 		return nil, err
+	}
+
+	if req.JumlahKoli != nil || req.JumlahEcer != nil {
+		if _, err := tx.Exec(ctx, `
+			UPDATE armada_tracking 
+			SET jumlah_koli = COALESCE($1, jumlah_koli), 
+			    jumlah_ecer = COALESCE($2, jumlah_ecer) 
+			WHERE id_ritase = $3`, 
+			req.JumlahKoli, req.JumlahEcer, idRitase); err != nil {
+			return nil, err
+		}
 	}
 
 	if _, err := tx.Exec(ctx, "UPDATE ritase SET status = $1 WHERE id_ritase = $2", req.Status, idRitase); err != nil {
