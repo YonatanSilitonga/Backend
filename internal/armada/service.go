@@ -62,6 +62,6 @@ func (s *Service) GetTrackingMap(ctx context.Context) (*MapTracking, error) {
 	return &MapTracking{Vehicles: vehicles, Sellers: sellers}, nil
 }
 
-func (s *Service) GetTrackingHistory(ctx context.Context, idKendaraan int64) ([]TrackingCheckpoint, error) {
-	return s.repo.ListTrackingHistory(ctx, idKendaraan)
+func (s *Service) GetTrackingHistory(ctx context.Context, idKendaraan int64, tanggal string) ([]TrackingCheckpoint, error) {
+	return s.repo.ListTrackingHistory(ctx, idKendaraan, tanggal)
 }

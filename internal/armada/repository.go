@@ -412,16 +412,22 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 	return items, rows.Err()
 }
 
-// ListTrackingHistory mengambil riwayat status (ritase_event) untuk sebuah kendaraan.
-func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan int64) ([]TrackingCheckpoint, error) {
-	rows, err := r.db.Query(ctx, `
+func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan int64, tanggal string) ([]TrackingCheckpoint, error) {
+	query := `
 		SELECT e.id_event, e.id_ritase, COALESCE(r.kode_ritase,''),
 		       e.status, e.catatan, e.latitude, e.longitude, e.durasi_detik, e.created_at
 		FROM ritase_event e
 		JOIN ritase r ON r.id_ritase = e.id_ritase
 		WHERE r.id_kendaraan = $1
-		ORDER BY e.created_at DESC, e.id_event DESC
-	`, idKendaraan)
+	`
+	var args []interface{} = []interface{}{idKendaraan}
+	if tanggal != "" {
+		args = append(args, tanggal)
+		query += " AND e.created_at::date = $" + fmt.Sprint(len(args))
+	}
+	query += " ORDER BY e.created_at DESC, e.id_event DESC"
+
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -189,14 +189,15 @@ func (h *Handler) GetTrackingMap(c echo.Context) error {
 	return response.OK(c, data)
 }
 
-// GetTrackingHistory menangani GET /armada/tracking/history?kendaraan_id=
+// GetTrackingHistory menangani GET /armada/tracking/history?kendaraan_id=&tanggal=
 func (h *Handler) GetTrackingHistory(c echo.Context) error {
 	idKendaraan, _ := strconv.ParseInt(c.QueryParam("kendaraan_id"), 10, 64)
 	if idKendaraan <= 0 {
 		return response.Error(c, http.StatusBadRequest, "kendaraan_id wajib diisi")
 	}
+	tanggal := c.QueryParam("tanggal")
 
-	data, err := h.svc.GetTrackingHistory(c.Request().Context(), idKendaraan)
+	data, err := h.svc.GetTrackingHistory(c.Request().Context(), idKendaraan, tanggal)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal mengambil riwayat tracking")
 	}
