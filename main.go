@@ -92,6 +92,8 @@ func main() {
 	v1.GET("/vehicles", handler.GetVehicles)
 	v1.GET("/driver/active-ritase", handler.GetActiveRitase)
 	v1.POST("/driver/tracking", handler.PostTracking)
+	v1.POST("/driver/start-free-trip", handler.StartFreeTrip)
+	v1.POST("/driver/add-stop", handler.AddRitaseStop)
 
 	// ── ROUTE AUTH WEB (login JWT + me + logout) ──
 	authH.RegisterRoutes(v1, authMW)

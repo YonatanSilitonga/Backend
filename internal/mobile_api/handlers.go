@@ -2,6 +2,7 @@ package mobile_api
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -350,5 +351,74 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		"kode_ritase":       kodeRitase,
 		"status":            statusRitase,
 		"stops":             stops,
+	})
+}
+
+func (h *APIHandler) StartFreeTrip(c echo.Context) error {
+	ctx := c.Request().Context()
+	var req struct {
+		IdDriver    int64 `json:"id_driver"`
+		IdKendaraan int64 `json:"id_kendaraan"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "Invalid request payload")
+	}
+
+	// Generate kode ritase (e.g. TR-20231015150405-3)
+	kodeRitase := fmt.Sprintf("TR-%s-%d", time.Now().Format("20060102150405"), req.IdDriver)
+
+	var idRitase int64
+	err := h.DB.QueryRow(ctx, `
+		INSERT INTO ritase (kode_ritase, id_driver, id_kendaraan, status, tanggal, id_drop_point, ritase_ke, created_at)
+		VALUES ($1, $2, $3, 'mulai_loading', CURRENT_DATE, 1, 1, NOW())
+		RETURNING id_ritase
+	`, kodeRitase, req.IdDriver, req.IdKendaraan).Scan(&idRitase)
+
+	if err != nil {
+		log.Printf("Failed to create free trip: %v", err)
+		return response.Error(c, http.StatusInternalServerError, "Gagal memulai perjalanan bebas")
+	}
+
+	return response.OK(c, map[string]interface{}{
+		"id_ritase": idRitase,
+		"kode_ritase": kodeRitase,
+	})
+}
+
+func (h *APIHandler) AddRitaseStop(c echo.Context) error {
+	ctx := c.Request().Context()
+	var req struct {
+		IdRitase int64 `json:"id_ritase"`
+		IdSeller int64 `json:"id_seller"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "Invalid request payload")
+	}
+
+	// Get max urutan
+	var currentMax int
+	err := h.DB.QueryRow(ctx, `SELECT COALESCE(MAX(urutan), 0) FROM ritase_stop WHERE id_ritase = $1`, req.IdRitase).Scan(&currentMax)
+	if err != nil {
+		log.Printf("Failed to get max urutan: %v", err)
+		return response.Error(c, http.StatusInternalServerError, "Gagal mendapatkan urutan stop")
+	}
+
+	newUrutan := currentMax + 1
+
+	var newIdStop int64
+	err = h.DB.QueryRow(ctx, `
+		INSERT INTO ritase_stop (id_ritase, urutan, jenis_stop, id_seller)
+		VALUES ($1, $2, 'seller', $3)
+		RETURNING id_stop
+	`, req.IdRitase, newUrutan, req.IdSeller).Scan(&newIdStop)
+
+	if err != nil {
+		log.Printf("Failed to add ritase stop: %v", err)
+		return response.Error(c, http.StatusInternalServerError, "Gagal menambahkan lokasi")
+	}
+
+	return response.OK(c, map[string]interface{}{
+		"id_stop": newIdStop,
+		"urutan": newUrutan,
 	})
 }
