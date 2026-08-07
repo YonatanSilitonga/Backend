@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 
 	"backend/internal/auth"
-	"backend/internal/database"
 	"backend/internal/config"
+	"backend/internal/database"
+
 	"github.com/joho/godotenv"
 )
 

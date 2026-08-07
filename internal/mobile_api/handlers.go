@@ -165,11 +165,11 @@ func (h *APIHandler) GetVehicles(c echo.Context) error {
 		var plat, jenis, status string
 		if err := rows.Scan(&id, &plat, &jenis, &kapasitasKg, &status); err == nil {
 			list = append(list, map[string]interface{}{
-				"id":           id,
-				"plat":         plat,
-				"type":         jenis,
-				"capacity_kg":  kapasitasKg,
-				"status":       status,
+				"id":          id,
+				"plat":        plat,
+				"type":        jenis,
+				"capacity_kg": kapasitasKg,
+				"status":      status,
 			})
 		}
 	}
@@ -382,7 +382,7 @@ func (h *APIHandler) StartFreeTrip(c echo.Context) error {
 	}
 
 	return response.OK(c, map[string]interface{}{
-		"id_ritase": idRitase,
+		"id_ritase":   idRitase,
 		"kode_ritase": kodeRitase,
 	})
 }
@@ -421,6 +421,6 @@ func (h *APIHandler) AddRitaseStop(c echo.Context) error {
 
 	return response.OK(c, map[string]interface{}{
 		"id_stop": newIdStop,
-		"urutan": newUrutan,
+		"urutan":  newUrutan,
 	})
 }
