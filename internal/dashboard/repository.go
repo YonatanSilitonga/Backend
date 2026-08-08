@@ -84,6 +84,14 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 		return nil, err
 	}
 
+	// Armada online = ada posisi terbaru ≤ 5 menit (GPS fresh).
+	if err := r.db.QueryRow(ctx, `
+		SELECT count(*) FROM armada_tracking
+		WHERE last_update > now() - interval '5 minutes'
+	`).Scan(&s.ArmadaOnline); err != nil {
+		return nil, err
+	}
+
 	// driver telat: ritase berjalan yang umurnya > 6 jam sejak event pertama
 	if err := r.db.QueryRow(ctx, `
 		SELECT count(DISTINCT r.id_driver)

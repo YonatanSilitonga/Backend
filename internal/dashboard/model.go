@@ -9,6 +9,8 @@ type Summary struct {
 	ArmadaAktif    int64 `json:"armada_aktif"`
 	ArmadaSelesai  int64 `json:"armada_selesai"`
 	ArmadaIdle     int64 `json:"armada_idle"`
+	// ArmadaOnline = jumlah kendaraan yang punya posisi terbaru ≤ 5 menit (GPS fresh).
+	ArmadaOnline int64 `json:"armada_online"`
 	// Driver
 	TotalDriver    int64 `json:"total_driver"`
 	DriverAktif    int64 `json:"driver_aktif"`
