@@ -11,10 +11,9 @@ func Setup(e *echo.Echo) {
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{
-			"http://localhost:3000",
-			"http://127.0.0.1:3000",
-		},
+		// "*" biar web lokal (localhost:3000) & web via ngrok/Vercel semua bisa.
+		// Endpoint web dilindungi JWT, jadi aman untuk MVP.
+		AllowOrigins: []string{"*"},
 		AllowMethods: []string{
 			echo.GET, echo.POST, echo.PATCH, echo.PUT, echo.DELETE, echo.OPTIONS,
 		},
@@ -23,6 +22,7 @@ func Setup(e *echo.Echo) {
 			echo.HeaderContentType,
 			echo.HeaderAccept,
 			echo.HeaderOrigin,
+			"ngrok-skip-browser-warning", // wajib buat request browser lewat ngrok-free
 		},
 	}))
 }
