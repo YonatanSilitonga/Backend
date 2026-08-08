@@ -397,7 +397,8 @@ func (r *Repository) ListLatestTracking(ctx context.Context) ([]TrackingLive, er
 	rows, err := r.db.Query(ctx, `
 		SELECT t.id_tracking, t.id_kendaraan, COALESCE(k.plat_nomor,''),
 		       t.id_driver, COALESCE(d.nama_driver,''),
-		       t.latitude, t.longitude, t.kecepatan, t.arah, t.status, t.last_update
+		       t.latitude, t.longitude, t.kecepatan, t.arah, t.status, t.last_update,
+		       (t.last_update < now() - interval '5 minutes') AS offline
 		FROM armada_tracking t
 		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
 		LEFT JOIN driver d ON d.id_driver = t.id_driver
@@ -413,7 +414,8 @@ func (r *Repository) ListLatestTracking(ctx context.Context) ([]TrackingLive, er
 		var t TrackingLive
 		if err := rows.Scan(&t.ID, &t.IDKendaraan, &t.PlatNomor,
 			&t.IDDriver, &t.NamaDriver,
-			&t.Latitude, &t.Longitude, &t.Kecepatan, &t.Arah, &t.Status, &t.LastUpdate); err != nil {
+			&t.Latitude, &t.Longitude, &t.Kecepatan, &t.Arah, &t.Status, &t.LastUpdate,
+			&t.Offline); err != nil {
 			return nil, err
 		}
 		items = append(items, t)

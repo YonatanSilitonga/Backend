@@ -96,9 +96,9 @@ type TrackingLive struct {
 	Kecepatan   *int      `json:"kecepatan,omitempty"`
 	Arah        *int      `json:"arah,omitempty"`
 	Status      *string   `json:"status,omitempty"`
-	JumlahKoli  *int      `json:"jumlah_koli,omitempty"`
-	JumlahEcer  *int      `json:"jumlah_ecer,omitempty"`
 	LastUpdate  time.Time `json:"last_update"`
+	// Offline = last_update lebih lama dari 5 menit (tidak ada kirim GPS terbaru).
+	Offline     bool      `json:"offline"`
 }
 
 // MapTracking gabungan posisi live kendaraan + titik seller + gudang + drop_point (data peta).
