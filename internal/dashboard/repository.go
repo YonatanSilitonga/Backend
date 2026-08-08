@@ -18,57 +18,73 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 }
 
 // GetSummary menghitung ringkasan KPI dari tabel-tabel existing.
+// Query DIKONSOLIDASI (GROUP BY / FILTER) biar gak 24x roundtrip ke DB.
 func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 	s := &Summary{}
 	today := time.Now().Format("2006-01-02")
 
-	// hitung satu per satu biar query-nya jelas & aman
-	counts := []struct {
-		dst *int64
-		sql string
-	}{
-		{&s.TotalKendaraan, "SELECT count(*) FROM kendaraan"},
-		{&s.ArmadaAktif, "SELECT count(*) FROM kendaraan WHERE LOWER(status_kendaraan) IN ('aktif','berjalan','bertugas','tersedia')"},
-		{&s.ArmadaSelesai, "SELECT count(*) FROM kendaraan WHERE LOWER(status_kendaraan) IN ('selesai','istirahat')"},
-		{&s.ArmadaIdle, "SELECT count(*) FROM kendaraan WHERE LOWER(status_kendaraan) IN ('tersedia','idle','off')"},
-		{&s.TotalDriver, "SELECT count(*) FROM driver"},
-		{&s.DriverAktif, "SELECT count(*) FROM driver WHERE LOWER(status_driver) IN ('aktif','bertugas','on_duty')"},
-		{&s.DriverLibur, "SELECT count(*) FROM driver WHERE LOWER(status_driver) IN ('libur','off','cuti')"},
-		{&s.TotalRitase, "SELECT count(*) FROM ritase"},
-		{&s.RitaseAktif, "SELECT count(*) FROM ritase WHERE LOWER(status) NOT IN ('selesai','completed','done','batal','cancelled')"},
-		{&s.RitaseSelesai, "SELECT count(*) FROM ritase WHERE LOWER(status) IN ('selesai','completed','done')"},
-		{&s.RitaseToday, "SELECT count(*) FROM ritase WHERE tanggal = $1"},
-		{&s.TotalAWB, "SELECT COALESCE(sum(total_awb),0) FROM ritase"},
-		{&s.TotalAWBToday, "SELECT COALESCE(sum(total_awb),0) FROM ritase WHERE tanggal = $1"},
-		{&s.TotalKoli, "SELECT COALESCE(sum(total_koli),0) FROM ritase"},
-		{&s.PaketTertinggal, "SELECT COALESCE(sum(paket_tertinggal),0) FROM ritase"},
-		{&s.TotalSeller, "SELECT count(*) FROM seller"},
-		{&s.SellerTerlayani, `SELECT count(DISTINCT rs.id_seller)
-			FROM ritase_stop rs
-			JOIN ritase r ON r.id_ritase = rs.id_ritase
-			WHERE rs.jenis_stop = 'seller' AND LOWER(r.status) IN ('selesai','completed','done')`},
-		{&s.TotalDropPoint, "SELECT count(*) FROM drop_point"},
-		{&s.TotalKaryawan, "SELECT count(*) FROM karyawan"},
-		{&s.TotalManpower, "SELECT COALESCE(sum(jumlah_manpower),0) FROM implant"},
-		{&s.TotalAbsensi, "SELECT count(*) FROM absensi"},
-		{&s.TotalImplant, "SELECT count(*) FROM implant"},
-		{&s.TotalTracking, "SELECT count(*) FROM armada_tracking"},
+	// Kendaraan — 1 query (dulu 4)
+	if err := r.db.QueryRow(ctx, `
+		SELECT count(*),
+		       count(*) FILTER (WHERE LOWER(status_kendaraan) IN ('aktif','berjalan','bertugas','tersedia')),
+		       count(*) FILTER (WHERE LOWER(status_kendaraan) IN ('selesai','istirahat')),
+		       count(*) FILTER (WHERE LOWER(status_kendaraan) IN ('tersedia','idle','off'))
+		FROM kendaraan
+	`).Scan(&s.TotalKendaraan, &s.ArmadaAktif, &s.ArmadaSelesai, &s.ArmadaIdle); err != nil {
+		return nil, err
 	}
 
-	for _, c := range counts {
-		if c.sql == "SELECT count(*) FROM ritase WHERE tanggal = $1" ||
-			c.sql == "SELECT COALESCE(sum(total_awb),0) FROM ritase WHERE tanggal = $1" {
-			if err := r.db.QueryRow(ctx, c.sql, today).Scan(c.dst); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if err := r.db.QueryRow(ctx, c.sql).Scan(c.dst); err != nil {
-			return nil, err
-		}
+	// Driver — 1 query (dulu 3)
+	if err := r.db.QueryRow(ctx, `
+		SELECT count(*),
+		       count(*) FILTER (WHERE LOWER(status_driver) IN ('aktif','bertugas','on_duty')),
+		       count(*) FILTER (WHERE LOWER(status_driver) IN ('libur','off','cuti'))
+		FROM driver
+	`).Scan(&s.TotalDriver, &s.DriverAktif, &s.DriverLibur); err != nil {
+		return nil, err
 	}
 
-	// driver terlambat: ritase berjalan yang umurnya > 6 jam sejak event pertama
+	// Ritase + muatan — 1 query (dulu ~8)
+	if err := r.db.QueryRow(ctx, `
+		SELECT count(*),
+		       count(*) FILTER (WHERE LOWER(status) NOT IN ('selesai','completed','done','batal','cancelled')),
+		       count(*) FILTER (WHERE LOWER(status) IN ('selesai','completed','done')),
+		       count(*) FILTER (WHERE tanggal = $1),
+		       COALESCE(sum(total_awb),0),
+		       COALESCE(sum(total_awb) FILTER (WHERE tanggal = $1),0),
+		       COALESCE(sum(total_koli),0),
+		       COALESCE(sum(paket_tertinggal),0)
+		FROM ritase
+	`, today).Scan(&s.TotalRitase, &s.RitaseAktif, &s.RitaseSelesai, &s.RitaseToday,
+		&s.TotalAWB, &s.TotalAWBToday, &s.TotalKoli, &s.PaketTertinggal); err != nil {
+		return nil, err
+	}
+
+	// Seller terlayani — 1 query (relasi via ritase_stop)
+	if err := r.db.QueryRow(ctx, `
+		SELECT count(DISTINCT rs.id_seller)
+		FROM ritase_stop rs
+		JOIN ritase r ON r.id_ritase = rs.id_ritase
+		WHERE rs.jenis_stop = 'seller' AND LOWER(r.status) IN ('selesai','completed','done')
+	`).Scan(&s.SellerTerlayani); err != nil {
+		return nil, err
+	}
+
+	// Master lainnya — 1 query (scalar subquery)
+	if err := r.db.QueryRow(ctx, `
+		SELECT (SELECT count(*) FROM seller),
+		       (SELECT count(*) FROM drop_point),
+		       (SELECT count(*) FROM karyawan),
+		       (SELECT COALESCE(sum(jumlah_manpower),0) FROM implant),
+		       (SELECT count(*) FROM absensi),
+		       (SELECT count(*) FROM implant),
+		       (SELECT count(*) FROM armada_tracking)
+	`).Scan(&s.TotalSeller, &s.TotalDropPoint, &s.TotalKaryawan,
+		&s.TotalManpower, &s.TotalAbsensi, &s.TotalImplant, &s.TotalTracking); err != nil {
+		return nil, err
+	}
+
+	// driver telat: ritase berjalan yang umurnya > 6 jam sejak event pertama
 	if err := r.db.QueryRow(ctx, `
 		SELECT count(DISTINCT r.id_driver)
 		FROM ritase r

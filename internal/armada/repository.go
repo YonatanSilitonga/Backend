@@ -426,7 +426,7 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 	rows, err := r.db.Query(ctx, `
 		SELECT id_seller, COALESCE(kode_seller,''), COALESCE(nama_seller,''), COALESCE(alamat,''),
 		       COALESCE(kota,''), COALESCE(pic,''), COALESCE(no_hp,''),
-		       latitude, longitude
+		       latitude, longitude, jarak_tempuh_km, jarak_dc_km
 		FROM seller
 		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
 		ORDER BY id_seller ASC
@@ -439,10 +439,59 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 	var items []SellerLocation
 	for rows.Next() {
 		var s SellerLocation
-		if err := rows.Scan(&s.IDSeller, &s.KodeSeller, &s.NamaSeller, &s.Alamat, &s.Kota, &s.PIC, &s.NoHP, &s.Latitude, &s.Longitude); err != nil {
+		if err := rows.Scan(&s.IDSeller, &s.KodeSeller, &s.NamaSeller, &s.Alamat, &s.Kota, &s.PIC, &s.NoHP, &s.Latitude, &s.Longitude, &s.JarakTempuhKm, &s.JarakDcKm); err != nil {
 			return nil, err
 		}
 		items = append(items, s)
+	}
+	return items, rows.Err()
+}
+
+// ListGudangLocations mengambil posisi gudang yang punya koordinat (peta).
+func (r *Repository) ListGudangLocations(ctx context.Context) ([]GudangPoint, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id_gudang, COALESCE(nama_gudang,''), COALESCE(tipe,''), latitude, longitude
+		FROM gudang
+		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+		ORDER BY id_gudang ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []GudangPoint
+	for rows.Next() {
+		var g GudangPoint
+		if err := rows.Scan(&g.IDGudang, &g.NamaGudang, &g.Tipe, &g.Latitude, &g.Longitude); err != nil {
+			return nil, err
+		}
+		items = append(items, g)
+	}
+	return items, rows.Err()
+}
+
+// ListDropPoints mengambil posisi drop_point yang punya koordinat (peta).
+func (r *Repository) ListDropPoints(ctx context.Context) ([]DropPointPoi, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id_drop_point, COALESCE(kode_dp,''), COALESCE(nama_drop_point,''), latitude, longitude,
+		       jarak_tempuh_km, jarak_dc_km
+		FROM drop_point
+		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+		ORDER BY id_drop_point ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []DropPointPoi
+	for rows.Next() {
+		var p DropPointPoi
+		if err := rows.Scan(&p.IDDropPoint, &p.KodeDP, &p.NamaDP, &p.Latitude, &p.Longitude, &p.JarakTempuhKm, &p.JarakDcKm); err != nil {
+			return nil, err
+		}
+		items = append(items, p)
 	}
 	return items, rows.Err()
 }

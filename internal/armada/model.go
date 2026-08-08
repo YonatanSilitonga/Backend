@@ -101,10 +101,12 @@ type TrackingLive struct {
 	LastUpdate  time.Time `json:"last_update"`
 }
 
-// MapTracking gabungan posisi live kendaraan + titik seller (data peta).
+// MapTracking gabungan posisi live kendaraan + titik seller + gudang + drop_point (data peta).
 type MapTracking struct {
-	Vehicles []TrackingLive   `json:"vehicles"`
-	Sellers  []SellerLocation `json:"sellers"` // SellerLocation di model_route.go
+	Vehicles   []TrackingLive   `json:"vehicles"`
+	Sellers    []SellerLocation `json:"sellers"`   // SellerLocation di model_route.go
+	Gudang     []GudangPoint    `json:"gudang"`    // GudangPoint di model_route.go
+	DropPoints []DropPointPoi   `json:"drop_points"` // DropPointPoi di model_route.go
 }
 
 // TrackingCheckpoint satu baris riwayat status dari ritase_event.

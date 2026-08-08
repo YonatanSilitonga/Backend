@@ -53,6 +53,25 @@ CREATE TABLE IF NOT EXISTS gudang (
   longitude   DOUBLE PRECISION
 );
 ALTER TABLE ritase_stop ADD COLUMN IF NOT EXISTS id_gudang INTEGER;
+
+-- 000005: jarak tempuh DC -> seller (konstan, dihitung sekali pakai OSRM/tool fill_jarak)
+ALTER TABLE seller ADD COLUMN IF NOT EXISTS jarak_tempuh_km DOUBLE PRECISION;
+
+-- 000006: jarak tempuh dari GUDANG DC (Buaran Indah) -> seller
+ALTER TABLE seller ADD COLUMN IF NOT EXISTS jarak_dc_km DOUBLE PRECISION;
+
+-- 000007: index pendukung dashboard (additive)
+CREATE INDEX IF NOT EXISTS idx_ritase_status       ON ritase(status);
+CREATE INDEX IF NOT EXISTS idx_ritase_tanggal      ON ritase(tanggal);
+CREATE INDEX IF NOT EXISTS idx_ritase_id_driver    ON ritase(id_driver);
+CREATE INDEX IF NOT EXISTS idx_ritase_id_kendaraan ON ritase(id_kendaraan);
+CREATE INDEX IF NOT EXISTS idx_ritase_event_status ON ritase_event(status);
+CREATE INDEX IF NOT EXISTS idx_seller_lat_lng      ON seller(latitude, longitude);
+CREATE INDEX IF NOT EXISTS idx_gudang_tipe         ON gudang(tipe);
+
+-- 000008: jarak tempuh dari OUTGOING & DC -> drop_point (gateway)
+ALTER TABLE drop_point ADD COLUMN IF NOT EXISTS jarak_tempuh_km DOUBLE PRECISION;
+ALTER TABLE drop_point ADD COLUMN IF NOT EXISTS jarak_dc_km DOUBLE PRECISION;
 `
 
 func main() {

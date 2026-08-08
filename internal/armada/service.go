@@ -59,7 +59,15 @@ func (s *Service) GetTrackingMap(ctx context.Context) (*MapTracking, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &MapTracking{Vehicles: vehicles, Sellers: sellers}, nil
+	gudang, err := s.repo.ListGudangLocations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	drops, err := s.repo.ListDropPoints(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &MapTracking{Vehicles: vehicles, Sellers: sellers, Gudang: gudang, DropPoints: drops}, nil
 }
 
 func (s *Service) GetTrackingHistory(ctx context.Context, idKendaraan int64, tanggal string) ([]TrackingCheckpoint, error) {
