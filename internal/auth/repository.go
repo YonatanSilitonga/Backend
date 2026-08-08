@@ -67,3 +67,15 @@ func (r *Repository) FindByID(ctx context.Context, id int64) (*User, error) {
 	}
 	return &u, nil
 }
+
+// SetLastLogin menandai user sedang online (session aktif).
+func (r *Repository) SetLastLogin(ctx context.Context, id int64) error {
+	_, err := r.db.Exec(ctx, `UPDATE users SET last_login = now() WHERE id_user = $1`, id)
+	return err
+}
+
+// ClearLastLogin menandai user logout (session selesai).
+func (r *Repository) ClearLastLogin(ctx context.Context, id int64) error {
+	_, err := r.db.Exec(ctx, `UPDATE users SET last_login = NULL WHERE id_user = $1`, id)
+	return err
+}

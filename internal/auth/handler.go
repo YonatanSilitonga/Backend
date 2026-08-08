@@ -45,8 +45,10 @@ func (h *Handler) Me(c echo.Context) error {
 	return response.OK(c, user)
 }
 
-// Logout menangani POST /auth/logout (token stateless, client cukup hapus lokal).
+// Logout menangani POST /auth/logout (hapus penanda session online).
 func (h *Handler) Logout(c echo.Context) error {
+	userID := c.Get(appMiddleware.CtxUserID).(int64)
+	_ = h.svc.Logout(c.Request().Context(), userID)
 	return response.OK(c, map[string]string{"status": "logged_out"})
 }
 

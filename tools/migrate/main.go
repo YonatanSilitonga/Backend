@@ -72,6 +72,9 @@ CREATE INDEX IF NOT EXISTS idx_gudang_tipe         ON gudang(tipe);
 -- 000008: jarak tempuh dari OUTGOING & DC -> drop_point (gateway)
 ALTER TABLE drop_point ADD COLUMN IF NOT EXISTS jarak_tempuh_km DOUBLE PRECISION;
 ALTER TABLE drop_point ADD COLUMN IF NOT EXISTS jarak_dc_km DOUBLE PRECISION;
+
+-- 000009: session online driver (login/logout)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP;
 `
 
 func main() {

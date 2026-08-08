@@ -45,10 +45,10 @@ func main() {
 
 	// modul web: armada + dashboard
 	armadaRepo := armada.NewRepository(db)
-	armadaSvc := armada.NewService(armadaRepo)
+	armadaSvc := armada.NewService(armadaRepo, cfg.TrackingOfflineMin)
 	armadaH := armada.NewHandler(armadaSvc)
 
-	dashRepo := dashboard.NewRepository(db)
+	dashRepo := dashboard.NewRepository(db, cfg.TrackingOfflineMin)
 	dashSvc := dashboard.NewService(dashRepo)
 	dashH := dashboard.NewHandler(dashSvc)
 

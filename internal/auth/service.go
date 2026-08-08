@@ -50,7 +50,16 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*AuthResponse, e
 		return nil, err
 	}
 
+	// Tandai session online (dipakai web: driver "Online" selama belum logout,
+	// walau GPS-nya stale karena background/layar mati).
+	_ = s.repo.SetLastLogin(ctx, user.ID)
+
 	return &AuthResponse{User: *user, Token: token}, nil
+}
+
+// Logout membersihkan penanda session online.
+func (s *Service) Logout(ctx context.Context, userID int64) error {
+	return s.repo.ClearLastLogin(ctx, userID)
 }
 
 // Me mengambil user berdasarkan ID dari token.

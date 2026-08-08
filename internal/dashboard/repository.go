@@ -11,10 +11,15 @@ import (
 // Repository mengakses data agregat untuk dashboard.
 type Repository struct {
 	db *pgxpool.Pool
+	// Ambang offline (menit tanpa GPS) — default 15.
+	offlineMin int
 }
 
-func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{db: db}
+func NewRepository(db *pgxpool.Pool, offlineMin int) *Repository {
+	if offlineMin <= 0 {
+		offlineMin = 15
+	}
+	return &Repository{db: db, offlineMin: offlineMin}
 }
 
 // GetSummary menghitung ringkasan KPI dari tabel-tabel existing.
@@ -84,11 +89,11 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 		return nil, err
 	}
 
-	// Armada online = ada posisi terbaru ≤ 5 menit (GPS fresh).
-	if err := r.db.QueryRow(ctx, `
+	// Armada online = ada posisi terbaru ≤ ambang offline (menit).
+	if err := r.db.QueryRow(ctx, fmt.Sprintf(`
 		SELECT count(*) FROM armada_tracking
-		WHERE last_update > now() - interval '5 minutes'
-	`).Scan(&s.ArmadaOnline); err != nil {
+		WHERE last_update > now() - make_interval(mins => %d)
+	`, r.offlineMin)).Scan(&s.ArmadaOnline); err != nil {
 		return nil, err
 	}
 

@@ -5,10 +5,15 @@ import "context"
 // Service berisi logic bisnis modul armada.
 type Service struct {
 	repo *Repository
+	// Ambang offline (menit tanpa GPS) — default 15.
+	offlineMin int
 }
 
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo *Repository, offlineMin int) *Service {
+	if offlineMin <= 0 {
+		offlineMin = 15
+	}
+	return &Service{repo: repo, offlineMin: offlineMin}
 }
 
 func (s *Service) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
@@ -51,7 +56,7 @@ func (s *Service) CreateTracking(ctx context.Context, req CreateTrackingRequest)
 }
 
 func (s *Service) GetTrackingMap(ctx context.Context) (*MapTracking, error) {
-	vehicles, err := s.repo.ListLatestTracking(ctx)
+	vehicles, err := s.repo.ListLatestTracking(ctx, s.offlineMin)
 	if err != nil {
 		return nil, err
 	}
