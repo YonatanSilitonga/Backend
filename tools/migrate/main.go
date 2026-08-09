@@ -75,6 +75,9 @@ ALTER TABLE drop_point ADD COLUMN IF NOT EXISTS jarak_dc_km DOUBLE PRECISION;
 
 -- 000009: session online driver (login/logout)
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP;
+
+-- 000010: kapan terakhir app mobile dibuka (telemetry)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_open TIMESTAMP;
 `
 
 func main() {

@@ -62,6 +62,11 @@ func (s *Service) Logout(ctx context.Context, userID int64) error {
 	return s.repo.ClearLastLogin(ctx, userID)
 }
 
+// OpenApp mencatat kapan terakhir app dibuka (dipanggil mobile saat start/resume).
+func (s *Service) OpenApp(ctx context.Context, userID int64) error {
+	return s.repo.SetLastOpen(ctx, userID)
+}
+
 // Me mengambil user berdasarkan ID dari token.
 func (s *Service) Me(ctx context.Context, userID int64) (*User, error) {
 	return s.repo.FindByID(ctx, userID)

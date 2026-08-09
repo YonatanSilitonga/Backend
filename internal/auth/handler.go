@@ -52,9 +52,19 @@ func (h *Handler) Logout(c echo.Context) error {
 	return response.OK(c, map[string]string{"status": "logged_out"})
 }
 
+// OpenApp menangani POST /driver/open — catat kapan app mobile dibuka.
+func (h *Handler) OpenApp(c echo.Context) error {
+	userID := c.Get(appMiddleware.CtxUserID).(int64)
+	if err := h.svc.OpenApp(c.Request().Context(), userID); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mencatat aktivitas app")
+	}
+	return response.OK(c, map[string]string{"status": "ok"})
+}
+
 // RegisterRoutes memasang route auth di grup yang diberikan.
 func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	g.POST("/auth/login", h.Login)
 	g.GET("/auth/me", h.Me, authMW)
 	g.POST("/auth/logout", h.Logout, authMW)
+	g.POST("/driver/open", h.OpenApp, authMW) // telemetry app dibuka (mobile)
 }

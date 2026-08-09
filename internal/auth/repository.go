@@ -79,3 +79,9 @@ func (r *Repository) ClearLastLogin(ctx context.Context, id int64) error {
 	_, err := r.db.Exec(ctx, `UPDATE users SET last_login = NULL WHERE id_user = $1`, id)
 	return err
 }
+
+// SetLastOpen mencatat kapan terakhir app mobile dibuka.
+func (r *Repository) SetLastOpen(ctx context.Context, id int64) error {
+	_, err := r.db.Exec(ctx, `UPDATE users SET last_open = now() WHERE id_user = $1`, id)
+	return err
+}

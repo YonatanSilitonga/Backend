@@ -15,6 +15,9 @@ type Config struct {
 	// Ambang offline armada (menit tanpa GPS terbaru). Default 15 menit —
 	// menoleransi heartbeat hemat baterai (3 mnt) + retry jaringan.
 	TrackingOfflineMin int
+	// Ambang session online (jam sejak login tanpa aktivitas). Default 12 jam —
+	// anti "hantu online" kalau driver force-stop/off tanpa logout.
+	SessionOfflineHours int
 }
 
 // Load membaca file .env (jika ada) lalu mengumpulkan konfigurasi dari environment.
@@ -25,7 +28,8 @@ func Load() *Config {
 		Port:               getEnv("PORT", "8080"),
 		DatabaseURL:        getEnv("DATABASE_URL", ""),
 		JWTSecret:          getEnv("JWT_SECRET", "change-me-in-production"),
-		TrackingOfflineMin: getEnvInt("TRACKING_OFFLINE_MIN", 15),
+		TrackingOfflineMin:  getEnvInt("TRACKING_OFFLINE_MIN", 15),
+		SessionOfflineHours: getEnvInt("SESSION_OFFLINE_HOURS", 12),
 	}
 }
 

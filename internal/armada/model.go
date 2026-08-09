@@ -99,9 +99,11 @@ type TrackingLive struct {
 	LastUpdate  time.Time `json:"last_update"`
 	// Offline = last_update lebih lama dari ambang (default 15 menit) — tidak ada GPS terbaru.
 	Offline bool `json:"offline"`
-	// SessionOnline = driver belum logout (users.last_login terisi). Background/screen-off
-	// tetap "online" selama session aktif, walau GPS-nya stale.
+	// SessionOnline = driver belum logout (users.last_login terisi & belum lewat ambang
+	// session). Background/screen-off tetap "online" selama session aktif, walau GPS stale.
 	SessionOnline bool `json:"session_online"`
+	// LastOpen = kapan terakhir app mobile dibuka (users.last_open).
+	LastOpen *time.Time `json:"last_open,omitempty"`
 }
 
 // MapTracking gabungan posisi live kendaraan + titik seller + gudang + drop_point (data peta).

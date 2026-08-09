@@ -393,20 +393,22 @@ func (r *Repository) CreateTracking(ctx context.Context, req CreateTrackingReque
 }
 
 // ListLatestTracking mengambil 1 posisi terbaru per kendaraan (data live untuk peta).
-// offlineMin = ambang (menit) tanpa GPS terbaru → dianggap offline.
-func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int) ([]TrackingLive, error) {
+// offlineMin = ambang (menit) tanpa GPS terbaru → offline.
+// sessionHours = ambang (jam) sejak login tanpa aktivitas → session dianggap mati.
+func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, sessionHours int) ([]TrackingLive, error) {
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT t.id_tracking, t.id_kendaraan, COALESCE(k.plat_nomor,''),
 		       t.id_driver, COALESCE(d.nama_driver,''),
 		       t.latitude, t.longitude, t.kecepatan, t.arah, t.status, t.last_update,
 		       (t.last_update < now() - make_interval(mins => %d)) AS offline,
-		       (u.last_login IS NOT NULL) AS session_online
+		       (u.last_login IS NOT NULL AND u.last_login > now() - make_interval(hours => %d)) AS session_online,
+		       u.last_open
 		FROM armada_tracking t
 		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
 		LEFT JOIN driver d ON d.id_driver = t.id_driver
 		LEFT JOIN users u ON u.id_driver = d.id_driver
 		ORDER BY t.last_update DESC
-	`, offlineMin))
+	`, offlineMin, sessionHours))
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +420,7 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int) ([]
 		if err := rows.Scan(&t.ID, &t.IDKendaraan, &t.PlatNomor,
 			&t.IDDriver, &t.NamaDriver,
 			&t.Latitude, &t.Longitude, &t.Kecepatan, &t.Arah, &t.Status, &t.LastUpdate,
-			&t.Offline, &t.SessionOnline); err != nil {
+			&t.Offline, &t.SessionOnline, &t.LastOpen); err != nil {
 			return nil, err
 		}
 		items = append(items, t)
