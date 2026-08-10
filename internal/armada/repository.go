@@ -54,7 +54,7 @@ func (r *Repository) ListDriver(ctx context.Context, offlineMin int) ([]Driver, 
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT d.id_driver, d.nama_driver, d.no_hp, d.no_sim, d.jenis_sim, d.status_driver,
 		       lat.plat_nomor, lat.id_kendaraan,
-		       (lat.last_update > now() - make_interval(mins => %d)) AS tracking_fresh
+		       COALESCE((lat.last_update > now() - make_interval(mins => %d)), false) AS tracking_fresh
 		FROM driver d
 		LEFT JOIN LATERAL (
 			SELECT k.plat_nomor, t.id_kendaraan, t.last_update
