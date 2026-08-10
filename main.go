@@ -95,6 +95,12 @@ func main() {
 	v1.POST("/driver/start-free-trip", handler.StartFreeTrip)
 	v1.POST("/driver/add-stop", handler.AddRitaseStop)
 
+	// Admin Ritase Endpoints (Tower Control Web)
+	v1.GET("/admin/ritases", handler.AdminGetRitases)
+	v1.POST("/admin/ritase/generate", handler.AdminGenerateDailyRitase)
+	v1.PUT("/admin/ritase/:id", handler.AdminUpdateRitase)
+	v1.DELETE("/admin/ritase/:id", handler.AdminDeleteRitase)
+
 	// ── ROUTE AUTH WEB (login JWT + me + logout) ──
 	authH.RegisterRoutes(v1, authMW)
 

@@ -30,12 +30,22 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("gagal buat pool: %w", err)
 	}
 
-	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	pingCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	if err := pool.Ping(pingCtx); err != nil {
+	var pingErr error
+	// Retry ping up to 3 times for flaky connections
+	for i := 0; i < 3; i++ {
+		pingErr = pool.Ping(pingCtx)
+		if pingErr == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if pingErr != nil {
 		pool.Close()
-		return nil, fmt.Errorf("gagal konek ke database: %w", err)
+		return nil, fmt.Errorf("gagal konek ke database: %w", pingErr)
 	}
 
 	return pool, nil
