@@ -98,6 +98,7 @@ func main() {
 	// Admin Ritase Endpoints (Tower Control Web)
 	v1.GET("/admin/ritases", handler.AdminGetRitases)
 	v1.POST("/admin/ritase/generate", handler.AdminGenerateDailyRitase)
+	v1.POST("/admin/ritase", handler.AdminCreateRitase)
 	v1.PUT("/admin/ritase/:id", handler.AdminUpdateRitase)
 	v1.DELETE("/admin/ritase/:id", handler.AdminDeleteRitase)
 

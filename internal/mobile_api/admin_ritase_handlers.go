@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"backend/internal/pkg/response"
@@ -128,7 +129,8 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
 	defer cancel()
 
-	// 1. Clear current date's uncompleted ritase to avoid duplicate conflict
+	// 1. Clear current date's uncompleted ritase and stops to cleanly overwrite/replace
+	_, _ = h.DB.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = CURRENT_DATE AND status != 'selesai')")
 	_, _ = h.DB.Exec(ctx, "DELETE FROM ritase WHERE tanggal = CURRENT_DATE AND status != 'selesai'")
 
 	countGenerated := 0
@@ -164,7 +166,7 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 
 	return response.OK(c, map[string]interface{}{
 		"total_generated": countGenerated,
-		"message":         fmt.Sprintf("Berhasil meng-generate %d ritase harian otomatis!", countGenerated),
+		"message":         fmt.Sprintf("Berhasil menimpa & meng-generate %d ritase harian!", countGenerated),
 	})
 }
 
@@ -210,7 +212,8 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			continue
 		}
 
-		// Ambil stops untuk ritase ini
+		// Ambil stops untuk ritase ini (pastikan selalu slice kosong, bukan nil)
+		stops := make([]map[string]interface{}, 0)
 		stopRows, _ := h.DB.Query(ctx, `
 			SELECT 
 				rs.id_stop, rs.urutan, rs.jenis_stop,
@@ -224,7 +227,6 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			ORDER BY rs.urutan ASC
 		`, idRitase)
 
-		var stops []map[string]interface{}
 		if stopRows != nil {
 			for stopRows.Next() {
 				var idStop int64
@@ -354,6 +356,74 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 
 	return response.OK(c, map[string]interface{}{
 		"message": "Jadwal ritase berhasil diperbarui",
+	})
+}
+
+type CreateRitaseRequest struct {
+	Tanggal     string      `json:"tanggal"`
+	IDDriver    int64       `json:"id_driver"`
+	IDKendaraan int64       `json:"id_kendaraan"`
+	IDDropPoint int64       `json:"id_drop_point"`
+	RitaseKe    int         `json:"ritase_ke"`
+	Stops       []FixedStop `json:"stops"`
+}
+
+// AdminCreateRitase Handler untuk membuat ritase manual baru
+func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
+	var req CreateRitaseRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "Format payload tidak valid")
+	}
+
+	if req.IDDriver == 0 || req.IDKendaraan == 0 || req.IDDropPoint == 0 {
+		return response.Error(c, http.StatusBadRequest, "Driver, Kendaraan, dan Drop Point wajib dipilih")
+	}
+
+	if req.Tanggal == "" {
+		req.Tanggal = time.Now().Format("2006-01-02")
+	}
+	if req.RitaseKe == 0 {
+		req.RitaseKe = 1
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
+	defer cancel()
+
+	todayClean := strings.ReplaceAll(req.Tanggal, "-", "")
+	kodeRitase := fmt.Sprintf("TR-%s-D%d-R%d", todayClean, req.IDDriver, req.RitaseKe)
+
+	var idRitase int64
+	err := h.DB.QueryRow(ctx, `
+		INSERT INTO ritase (
+			kode_ritase, tanggal, id_driver, id_kendaraan, id_drop_point, ritase_ke, status
+		) VALUES (
+			$1, $2::date, $3, $4, $5, $6, 'direncanakan'
+		) RETURNING id_ritase
+	`, kodeRitase, req.Tanggal, req.IDDriver, req.IDKendaraan, req.IDDropPoint, req.RitaseKe).Scan(&idRitase)
+
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "Gagal membuat ritase: "+err.Error())
+	}
+
+	for _, stop := range req.Stops {
+		kolom := "id_seller"
+		if stop.Jenis == "gudang" {
+			kolom = "id_gudang"
+		} else if stop.Jenis == "drop_point" {
+			kolom = "id_drop_point"
+		}
+
+		query := fmt.Sprintf(`
+			INSERT INTO ritase_stop (id_ritase, urutan, jenis_stop, %s, keterangan)
+			VALUES ($1, $2, $3, $4, $5)
+		`, kolom)
+
+		_, _ = h.DB.Exec(ctx, query, idRitase, stop.Urutan, stop.Jenis, stop.IDLokasi, stop.Keterangan)
+	}
+
+	return response.Created(c, map[string]interface{}{
+		"id_ritase": idRitase,
+		"message":   "Jadwal ritase baru berhasil dibuat!",
 	})
 }
 
