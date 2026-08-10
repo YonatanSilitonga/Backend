@@ -26,7 +26,7 @@ func (s *Service) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 }
 
 func (s *Service) ListDriver(ctx context.Context) ([]Driver, error) {
-	return s.repo.ListDriver(ctx)
+	return s.repo.ListDriver(ctx, s.offlineMin)
 }
 
 func (s *Service) ListRitase(ctx context.Context, idDriver int64, tanggal string) ([]Ritase, error) {

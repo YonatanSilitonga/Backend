@@ -13,12 +13,17 @@ type Kendaraan struct {
 
 // Driver merepresentasikan tabel driver.
 type Driver struct {
-	ID           int64   `json:"id_driver"`
-	NamaDriver   string  `json:"nama_driver"`
-	NoHP         *string `json:"no_hp,omitempty"`
-	NoSIM        *string `json:"no_sim,omitempty"`
-	JenisSIM     *string `json:"jenis_sim,omitempty"`
-	StatusDriver string  `json:"status_driver"`
+	ID           int64    `json:"id_driver"`
+	NamaDriver   string   `json:"nama_driver"`
+	NoHP         *string  `json:"no_hp,omitempty"`
+	NoSIM        *string  `json:"no_sim,omitempty"`
+	JenisSIM     *string  `json:"jenis_sim,omitempty"`
+	StatusDriver string   `json:"status_driver"`
+	// Kendaraan terakhir yang dia track (armada_tracking) — "lagi nyetir apa".
+	PlatNomor    *string `json:"plat_nomor,omitempty"`
+	IDKendaraan  *int64  `json:"id_kendaraan,omitempty"`
+	// TrackingFresh = posisi terakhir masih ≤ ambang offline (sedang aktif di armada).
+	TrackingFresh bool   `json:"tracking_fresh"`
 }
 
 // Ritase merepresentasikan tabel ritase (penugasan perjalanan angkut).
