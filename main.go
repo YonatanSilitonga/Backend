@@ -94,6 +94,7 @@ func main() {
 	v1.POST("/driver/tracking", handler.PostTracking)
 	v1.POST("/driver/start-free-trip", handler.StartFreeTrip)
 	v1.POST("/driver/add-stop", handler.AddRitaseStop)
+	v1.POST("/driver/finish-ritase", handler.FinishRitase)
 
 	// Admin Ritase Endpoints (Tower Control Web)
 	v1.GET("/admin/master-options", handler.AdminGetMasterOptions)

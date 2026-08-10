@@ -287,7 +287,7 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 	err := h.DB.QueryRow(ctx, `
 		SELECT id_ritase, status, kode_ritase
 		FROM ritase
-		WHERE id_driver = $1 AND id_kendaraan = $2 AND status != 'selesai'
+		WHERE id_driver = $1 AND id_kendaraan = $2 AND status != 'selesai' AND (tanggal = CURRENT_DATE OR tanggal IS NULL)
 		ORDER BY id_ritase ASC
 		LIMIT 1
 	`, idDriver, idKendaraan).Scan(&idRitase, &statusRitase, &kodeRitase)
@@ -347,11 +347,18 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		}
 	}
 
+	var countUnfinished int
+	_ = h.DB.QueryRow(ctx, `
+		SELECT COUNT(*) FROM ritase
+		WHERE id_driver = $1 AND id_kendaraan = $2 AND status != 'selesai' AND (tanggal = CURRENT_DATE OR tanggal IS NULL)
+	`, idDriver, idKendaraan).Scan(&countUnfinished)
+
 	return response.OK(c, map[string]interface{}{
 		"has_active_ritase": true,
 		"id_ritase":         idRitase,
 		"kode_ritase":       kodeRitase,
 		"status":            statusRitase,
+		"is_last_ritase":    countUnfinished <= 1,
 		"stops":             stops,
 	})
 }
@@ -423,4 +430,30 @@ func (h *APIHandler) AddRitaseStop(c echo.Context) error {
 		"id_stop": newIdStop,
 		"urutan":  newUrutan,
 	})
+}
+
+type FinishRitaseReq struct {
+	IdRitase int64 `json:"id_ritase"`
+}
+
+func (h *APIHandler) FinishRitase(c echo.Context) error {
+	var req FinishRitaseReq
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "invalid request")
+	}
+
+	if req.IdRitase == 0 {
+		return response.Error(c, http.StatusBadRequest, "id_ritase is required")
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel()
+
+	_, err := h.DB.Exec(ctx, `UPDATE ritase SET status = 'selesai' WHERE id_ritase = $1`, req.IdRitase)
+	if err != nil {
+		log.Printf("Failed to update ritase status: %v", err)
+		return response.Error(c, http.StatusInternalServerError, "Gagal menyelesaikan ritase")
+	}
+
+	return response.OK(c, "success")
 }
