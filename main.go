@@ -96,6 +96,7 @@ func main() {
 	v1.POST("/driver/add-stop", handler.AddRitaseStop)
 
 	// Admin Ritase Endpoints (Tower Control Web)
+	v1.GET("/admin/master-options", handler.AdminGetMasterOptions)
 	v1.GET("/admin/ritases", handler.AdminGetRitases)
 	v1.POST("/admin/ritase/generate", handler.AdminGenerateDailyRitase)
 	v1.POST("/admin/ritase", handler.AdminCreateRitase)

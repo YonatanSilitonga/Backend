@@ -427,3 +427,90 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 	})
 }
 
+// AdminGetMasterOptions Ambil opsi master data (drivers, kendaraan, drop_points, sellers, gudangs)
+func (h *APIHandler) AdminGetMasterOptions(c echo.Context) error {
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
+	defer cancel()
+
+	// 1. Drivers
+	drivers := make([]map[string]interface{}, 0)
+	dRows, _ := h.DB.Query(ctx, "SELECT id_driver, nama_driver, COALESCE(jabatan, 'TRANSPORTER') FROM driver ORDER BY id_driver ASC")
+	if dRows != nil {
+		for dRows.Next() {
+			var id int64
+			var nama, jabatan string
+			if err := dRows.Scan(&id, &nama, &jabatan); err == nil {
+				drivers = append(drivers, map[string]interface{}{"id_driver": id, "nama_driver": nama, "jabatan": jabatan})
+			}
+		}
+		dRows.Close()
+	}
+
+	// 2. Kendaraan
+	kendaraans := make([]map[string]interface{}, 0)
+	kRows, _ := h.DB.Query(ctx, "SELECT id_kendaraan, plat_nomor, jenis_kendaraan FROM kendaraan ORDER BY id_kendaraan ASC")
+	if kRows != nil {
+		for kRows.Next() {
+			var id int64
+			var plat, jenis string
+			if err := kRows.Scan(&id, &plat, &jenis); err == nil {
+				kendaraans = append(kendaraans, map[string]interface{}{"id_kendaraan": id, "plat_nomor": plat, "jenis_kendaraan": jenis})
+			}
+		}
+		kRows.Close()
+	}
+
+	// 3. Drop Points
+	dropPoints := make([]map[string]interface{}, 0)
+	dpRows, _ := h.DB.Query(ctx, "SELECT id_drop_point, nama_drop_point, kode_dp FROM drop_point ORDER BY id_drop_point ASC")
+	if dpRows != nil {
+		for dpRows.Next() {
+			var id int64
+			var nama, kode string
+			if err := dpRows.Scan(&id, &nama, &kode); err == nil {
+				dropPoints = append(dropPoints, map[string]interface{}{"id_drop_point": id, "nama_drop_point": nama, "kode_dp": kode})
+			}
+		}
+		dpRows.Close()
+	}
+
+	// 4. Sellers
+	sellers := make([]map[string]interface{}, 0)
+	sRows, _ := h.DB.Query(ctx, "SELECT id_seller, nama_seller, kode_seller FROM seller ORDER BY id_seller ASC")
+	if sRows != nil {
+		for sRows.Next() {
+			var id int64
+			var nama, kode string
+			if err := sRows.Scan(&id, &nama, &kode); err == nil {
+				sellers = append(sellers, map[string]interface{}{"id_seller": id, "nama_seller": nama, "kode_seller": kode})
+			}
+		}
+		sRows.Close()
+	}
+
+	// 5. Gudang
+	gudangs := make([]map[string]interface{}, 0)
+	gRows, err := h.DB.Query(ctx, "SELECT id_gudang, nama_gudang FROM gudang ORDER BY id_gudang ASC")
+	if err != nil {
+		log.Printf("Err query gudang: %v", err)
+	}
+	if gRows != nil {
+		for gRows.Next() {
+			var id int64
+			var nama string
+			if err := gRows.Scan(&id, &nama); err == nil {
+				gudangs = append(gudangs, map[string]interface{}{"id_gudang": id, "nama_gudang": nama})
+			}
+		}
+		gRows.Close()
+	}
+
+	return response.OK(c, map[string]interface{}{
+		"drivers":     drivers,
+		"kendaraan":   kendaraans,
+		"drop_points": dropPoints,
+		"sellers":     sellers,
+		"gudangs":     gudangs,
+	})
+}
+
