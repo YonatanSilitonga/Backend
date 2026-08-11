@@ -287,15 +287,22 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 	err := h.DB.QueryRow(ctx, `
 		SELECT id_ritase, status, kode_ritase
 		FROM ritase
-		WHERE id_driver = $1 AND id_kendaraan = $2 AND status != 'selesai' AND (tanggal = CURRENT_DATE OR tanggal IS NULL)
+		WHERE id_driver = $1 AND id_kendaraan = $2 AND status != 'selesai' AND tanggal = CURRENT_DATE
 		ORDER BY id_ritase ASC
 		LIMIT 1
 	`, idDriver, idKendaraan).Scan(&idRitase, &statusRitase, &kodeRitase)
 
 	if err != nil {
+		var countFinishedToday int
+		_ = h.DB.QueryRow(ctx, `
+			SELECT COUNT(*) FROM ritase
+			WHERE id_driver = $1 AND id_kendaraan = $2 AND status = 'selesai' AND tanggal = CURRENT_DATE
+		`, idDriver, idKendaraan).Scan(&countFinishedToday)
+
 		// Jika tidak ada ritase, kembalikan response sukses tapi kosong (menandakan tidak ada rute)
 		return response.OK(c, map[string]interface{}{
 			"has_active_ritase": false,
+			"all_completed":     countFinishedToday > 0,
 		})
 	}
 
@@ -350,7 +357,7 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 	var countUnfinished int
 	_ = h.DB.QueryRow(ctx, `
 		SELECT COUNT(*) FROM ritase
-		WHERE id_driver = $1 AND id_kendaraan = $2 AND status != 'selesai' AND (tanggal = CURRENT_DATE OR tanggal IS NULL)
+		WHERE id_driver = $1 AND id_kendaraan = $2 AND status != 'selesai' AND tanggal = CURRENT_DATE
 	`, idDriver, idKendaraan).Scan(&countUnfinished)
 
 	return response.OK(c, map[string]interface{}{
@@ -453,6 +460,29 @@ func (h *APIHandler) FinishRitase(c echo.Context) error {
 	if err != nil {
 		log.Printf("Failed to update ritase status: %v", err)
 		return response.Error(c, http.StatusInternalServerError, "Gagal menyelesaikan ritase")
+	}
+
+	return response.OK(c, "success")
+}
+
+type ResetTestRitaseReq struct {
+	IdDriver int64 `json:"id_driver"`
+}
+
+func (h *APIHandler) ResetTestRitase(c echo.Context) error {
+	var req ResetTestRitaseReq
+	_ = c.Bind(&req)
+
+	if req.IdDriver == 0 {
+		return response.Error(c, http.StatusBadRequest, "id_driver is required")
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel()
+
+	_, err := h.DB.Exec(ctx, `UPDATE ritase SET status = 'direncanakan' WHERE id_driver = $1 AND (tanggal = CURRENT_DATE OR tanggal IS NULL)`, req.IdDriver)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "Gagal mereset ritase test")
 	}
 
 	return response.OK(c, "success")
