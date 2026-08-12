@@ -190,6 +190,7 @@ type CreateTrackingRequest struct {
 	JumlahKoli  int     `json:"jumlah_koli"`
 	JumlahEcer  int     `json:"jumlah_ecer"`
 	DurasiDetik *int    `json:"durasi_detik"`
+	NamaLokasi  *string `json:"nama_lokasi"`
 	// Offline = sinyal "app berhenti" (onDestroy). Backend langsung cap kendaraan
 	// offline (last_update di-stamp basi) TANPA mengubah posisi terakhir.
 	Offline *bool `json:"offline"`
@@ -277,8 +278,8 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 	}
 
 	_, err := h.DB.Exec(ctx, `
-		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, jumlah_ecer, last_update)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, jumlah_ecer, nama_lokasi, last_update)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
 		ON CONFLICT (id_kendaraan) DO UPDATE 
 		SET id_ritase = EXCLUDED.id_ritase,
 		    id_driver = EXCLUDED.id_driver,
@@ -289,8 +290,9 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		    status = EXCLUDED.status,
 		    jumlah_koli = EXCLUDED.jumlah_koli,
 		    jumlah_ecer = EXCLUDED.jumlah_ecer,
+		    nama_lokasi = EXCLUDED.nama_lokasi,
 		    last_update = now()
-	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, req.JumlahKoli, req.JumlahEcer)
+	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, req.JumlahKoli, req.JumlahEcer, req.NamaLokasi)
 
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking: "+err.Error())
@@ -528,4 +530,85 @@ func (h *APIHandler) ResetTestRitase(c echo.Context) error {
 	}
 
 	return response.OK(c, "success")
+}
+
+// PostTripStatus mencatat event status perjalanan ke ritase_event dan update armada_tracking.
+// Endpoint khusus driver: POST /driver/trip-status
+type TripStatusRequest struct {
+	IDRitase    int64   `json:"id_ritase"`
+	Status      string  `json:"status"`
+	NamaLokasi  string  `json:"nama_lokasi"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
+	JumlahKoli  int     `json:"jumlah_koli"`
+	JumlahEcer  int     `json:"jumlah_ecer"`
+	DurasiDetik int     `json:"durasi_detik"`
+}
+
+func (h *APIHandler) PostTripStatus(c echo.Context) error {
+	var req TripStatusRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
+	}
+	if req.Status == "" {
+		return response.Error(c, http.StatusBadRequest, "status wajib diisi")
+	}
+
+	// Terjemahkan status key dari mobile ke teks yang disimpan di DB
+	switch req.Status {
+	case "mulai_loading":
+		req.Status = "Bongkar Muat Barang"
+	case "menuju_seller":
+		req.Status = "Sedang Menuju"
+	case "tiba":
+		req.Status = "Tiba"
+	case "selesai":
+		req.Status = "Selesai"
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel()
+
+	var idRitase int64 = req.IDRitase
+	if idRitase == 0 {
+		if driverID, ok := c.Get(middleware.CtxDriverID).(int64); ok && driverID > 0 {
+			_ = h.DB.QueryRow(ctx, `
+				SELECT id_ritase FROM ritase
+				WHERE id_driver = $1 AND status != 'selesai' AND tanggal = CURRENT_DATE
+				ORDER BY id_ritase DESC LIMIT 1
+			`, driverID).Scan(&idRitase)
+		}
+	}
+	if idRitase == 0 {
+		return response.Error(c, http.StatusBadRequest, "id_ritase tidak ditemukan")
+	}
+
+	// Nama lokasi (nullable)
+	var namaLokasi interface{}
+	if req.NamaLokasi != "" {
+		namaLokasi = req.NamaLokasi
+	}
+
+	// 1. Insert ke ritase_event
+	_, err := h.DB.Exec(ctx, `
+		INSERT INTO ritase_event (id_ritase, status, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, idRitase, req.Status, req.Latitude, req.Longitude, namaLokasi, req.DurasiDetik, req.JumlahKoli, req.JumlahEcer)
+	if err != nil {
+		log.Printf("[PostTripStatus] Gagal insert ritase_event: %v", err)
+		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan event: "+err.Error())
+	}
+
+	// 2. Update armada_tracking status & nama_lokasi
+	_, _ = h.DB.Exec(ctx, `
+		UPDATE armada_tracking
+		SET status = $1, nama_lokasi = $2
+		WHERE id_ritase = $3
+	`, req.Status, namaLokasi, idRitase)
+
+	return response.Created(c, map[string]interface{}{
+		"id_ritase":   idRitase,
+		"status":      req.Status,
+		"nama_lokasi": req.NamaLokasi,
+	})
 }

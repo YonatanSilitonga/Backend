@@ -3,8 +3,10 @@ package database
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -14,16 +16,22 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("DATABASE_URL kosong, cek file .env")
 	}
 
+	// Pakai port 6543 (transaction pooler) untuk Supabase pooler jika masih 5432
+	databaseURL = strings.Replace(databaseURL, "pooler.supabase.com:5432", "pooler.supabase.com:6543", 1)
+
 	poolCfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("gagal parse DATABASE_URL: %w", err)
 	}
 
+	// Wajib SimpleProtocol mode untuk PgBouncer transaction pooler (mencegah error SQLSTATE 42P05: prepared statement already exists)
+	poolCfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+
 	// setelan dasar pool
-	poolCfg.MaxConns = 10
+	poolCfg.MaxConns = 3
 	poolCfg.MinConns = 1
-	poolCfg.MaxConnLifetime = time.Hour
-	poolCfg.MaxConnIdleTime = 30 * time.Minute
+	poolCfg.MaxConnLifetime = 5 * time.Minute
+	poolCfg.MaxConnIdleTime = 1 * time.Minute
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {

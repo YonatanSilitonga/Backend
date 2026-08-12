@@ -103,6 +103,7 @@ type TrackingLive struct {
 	Kecepatan   *int      `json:"kecepatan,omitempty"`
 	Arah        *int      `json:"arah,omitempty"`
 	Status      *string   `json:"status,omitempty"`
+	NamaLokasi  *string   `json:"nama_lokasi,omitempty"`
 	LastUpdate  time.Time `json:"last_update"`
 	// Offline = last_update lebih lama dari ambang (default 15 menit) — tidak ada GPS terbaru.
 	Offline bool `json:"offline"`

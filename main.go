@@ -34,6 +34,12 @@ func main() {
 	defer db.Close()
 	log.Println("berhasil konek ke database")
 
+	// Ensure database schema columns exist
+	_, _ = db.Exec(ctx, `
+		ALTER TABLE ritase_event ADD COLUMN IF NOT EXISTS nama_lokasi VARCHAR(255);
+		ALTER TABLE armada_tracking ADD COLUMN IF NOT EXISTS nama_lokasi VARCHAR(255);
+	`)
+
 	// JWT manager (secret dari env, TTL 24 jam)
 	jwtManager := appJWT.NewManager(cfg.JWTSecret, 24*time.Hour)
 
@@ -99,6 +105,7 @@ func main() {
 	v1.POST("/driver/start-free-trip", handler.StartFreeTrip, authMW)
 	v1.POST("/driver/add-stop", handler.AddRitaseStop, authMW)
 	v1.POST("/driver/finish-ritase", handler.FinishRitase, authMW)
+	v1.POST("/driver/trip-status", handler.PostTripStatus, authMW)
 	v1.POST("/driver/reset-test-ritase", handler.ResetTestRitase, authMW)
 
 	// Admin Ritase Endpoints (Tower Control Web)
