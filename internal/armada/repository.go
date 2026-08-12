@@ -273,24 +273,22 @@ func (r *Repository) AddEvent(ctx context.Context, idRitase int64, req UpdateSta
 
 	var ev RitaseEvent
 	err = tx.QueryRow(ctx, `
-		INSERT INTO ritase_event (id_ritase, status, catatan, latitude, longitude, durasi_detik, jumlah_koli, jumlah_ecer)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-		RETURNING id_event, id_ritase, status, catatan, latitude, longitude, durasi_detik, jumlah_koli, jumlah_ecer, created_at
-	`, idRitase, req.Status, req.Catatan, req.Latitude, req.Longitude, req.DurasiDetik, req.JumlahKoli, req.JumlahEcer).Scan(
-		&ev.ID, &ev.IDRitase, &ev.Status, &ev.Catatan, &ev.Latitude, &ev.Longitude, &ev.DurasiDetik, &ev.JumlahKoli, &ev.JumlahEcer, &ev.CreatedAt)
+		INSERT INTO ritase_event (id_ritase, status, catatan, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		RETURNING id_event, id_ritase, status, catatan, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer, created_at
+	`, idRitase, req.Status, req.Catatan, req.Latitude, req.Longitude, req.NamaLokasi, req.DurasiDetik, req.JumlahKoli, req.JumlahEcer).Scan(
+		&ev.ID, &ev.IDRitase, &ev.Status, &ev.Catatan, &ev.Latitude, &ev.Longitude, &ev.NamaLokasi, &ev.DurasiDetik, &ev.JumlahKoli, &ev.JumlahEcer, &ev.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 
 	if req.JumlahKoli != nil || req.JumlahEcer != nil {
-		if _, err := tx.Exec(ctx, `
+		_, _ = tx.Exec(ctx, `
 			UPDATE armada_tracking 
 			SET jumlah_koli = COALESCE($1, jumlah_koli), 
 			    jumlah_ecer = COALESCE($2, jumlah_ecer) 
 			WHERE id_ritase = $3`, 
-			req.JumlahKoli, req.JumlahEcer, idRitase); err != nil {
-			return nil, err
-		}
+			req.JumlahKoli, req.JumlahEcer, idRitase)
 	}
 
 	if _, err := tx.Exec(ctx, "UPDATE ritase SET status = $1 WHERE id_ritase = $2", req.Status, idRitase); err != nil {
@@ -325,7 +323,7 @@ func (r *Repository) UpdateMuatan(ctx context.Context, idRitase int64, req Updat
 // ListEvents mengambil timeline status sebuah ritase.
 func (r *Repository) ListEvents(ctx context.Context, idRitase int64) ([]RitaseEvent, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_event, id_ritase, status, catatan, latitude, longitude, durasi_detik, created_at
+		SELECT id_event, id_ritase, status, catatan, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer, created_at
 		FROM ritase_event
 		WHERE id_ritase = $1
 		ORDER BY created_at, id_event
@@ -338,7 +336,7 @@ func (r *Repository) ListEvents(ctx context.Context, idRitase int64) ([]RitaseEv
 	var items []RitaseEvent
 	for rows.Next() {
 		var e RitaseEvent
-		if err := rows.Scan(&e.ID, &e.IDRitase, &e.Status, &e.Catatan, &e.Latitude, &e.Longitude, &e.DurasiDetik, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.IDRitase, &e.Status, &e.Catatan, &e.Latitude, &e.Longitude, &e.NamaLokasi, &e.DurasiDetik, &e.JumlahKoli, &e.JumlahEcer, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, e)

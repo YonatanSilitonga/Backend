@@ -114,15 +114,15 @@ func (h *Handler) UpdateStatus(c echo.Context) error {
 		req.Status = "Keluar Gudang"
 	case "menuju_seller":
 		req.Status = "Sedang Menuju"
-	case "sampai_gudang":
-		req.Status = "Tiba di Seller"
+	case "sampai_gudang", "tiba":
+		req.Status = "tiba"
 	case "selesai":
 		req.Status = "Selesai"
 	default:
 		if strings.HasPrefix(req.Status, "Sedang Menuju") || strings.HasPrefix(req.Status, "Menuju ") {
 			req.Status = "Sedang Menuju"
-		} else if strings.HasPrefix(req.Status, "Tiba di ") {
-			req.Status = "Tiba di Seller"
+		} else if strings.HasPrefix(req.Status, "Tiba di ") || req.Status == "tiba" {
+			req.Status = "tiba"
 		}
 	}
 

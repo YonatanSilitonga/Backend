@@ -240,8 +240,8 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		case "menuju_seller":
 			s := "Sedang Menuju"
 			req.Status = &s
-		case "sampai_gudang":
-			s := "Tiba di Seller"
+		case "sampai_gudang", "tiba":
+			s := "tiba"
 			req.Status = &s
 		case "selesai":
 			s := "Selesai"
@@ -250,8 +250,8 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 			if strings.HasPrefix(*req.Status, "Sedang Menuju") || strings.HasPrefix(*req.Status, "Menuju ") {
 				s := "Sedang Menuju"
 				req.Status = &s
-			} else if strings.HasPrefix(*req.Status, "Tiba di ") {
-				s := "Tiba di Seller"
+			} else if strings.HasPrefix(*req.Status, "Tiba di ") || *req.Status == "tiba" {
+				s := "tiba"
 				req.Status = &s
 			}
 		}

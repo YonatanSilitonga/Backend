@@ -61,6 +61,7 @@ type RitaseEvent struct {
 	Catatan     *string   `json:"catatan,omitempty"`
 	Latitude    *float64  `json:"latitude,omitempty"`
 	Longitude   *float64  `json:"longitude,omitempty"`
+	NamaLokasi  *string   `json:"nama_lokasi,omitempty"`
 	DurasiDetik *int      `json:"durasi_detik,omitempty"`
 	JumlahKoli  *int      `json:"jumlah_koli,omitempty"`
 	JumlahEcer  *int      `json:"jumlah_ecer,omitempty"`
@@ -157,6 +158,7 @@ type UpdateStatusRequest struct {
 	Catatan     *string  `json:"catatan"`
 	Latitude    *float64 `json:"latitude"`
 	Longitude   *float64 `json:"longitude"`
+	NamaLokasi  *string  `json:"nama_lokasi"`
 	DurasiDetik *int     `json:"durasi_detik"`
 	JumlahKoli  *int     `json:"jumlah_koli"`
 	JumlahEcer  *int     `json:"jumlah_ecer"`
