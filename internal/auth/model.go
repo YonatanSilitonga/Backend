@@ -26,3 +26,17 @@ type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
+
+// ChangePasswordRequest adalah body untuk ganti password (user yang login).
+type ChangePasswordRequest struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
+// ResetPasswordRequest adalah body untuk lupa password (tanpa OTP).
+// Verifikasi identitas: username + no_hp driver yang terhubung ke akun.
+type ResetPasswordRequest struct {
+	Username    string `json:"username"`
+	NoHP        string `json:"no_hp"`
+	NewPassword string `json:"new_password"`
+}

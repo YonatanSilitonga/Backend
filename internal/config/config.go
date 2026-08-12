@@ -18,6 +18,11 @@ type Config struct {
 	// Ambang session online (jam sejak login tanpa aktivitas). Default 12 jam —
 	// anti "hantu online" kalau driver force-stop/off tanpa logout.
 	SessionOfflineHours int
+	// Wajib session login aktif buat status LIVE/online (offline = GPS basi ATAU
+	// gak login). Default false — nyalain (SESSION_REQUIRED=true) SETELAH app
+	// mobile dipastikan sudah pakai alur login (/auth/login), biar tidak semua
+	// armada jadi offline mendadak saat rollout.
+	SessionRequired bool
 }
 
 // Load membaca file .env (jika ada) lalu mengumpulkan konfigurasi dari environment.
@@ -28,8 +33,9 @@ func Load() *Config {
 		Port:               getEnv("PORT", "8080"),
 		DatabaseURL:        getEnv("DATABASE_URL", ""),
 		JWTSecret:          getEnv("JWT_SECRET", "change-me-in-production"),
-		TrackingOfflineMin:  getEnvInt("TRACKING_OFFLINE_MIN", 15),
+		TrackingOfflineMin:  getEnvInt("TRACKING_OFFLINE_MIN", 3),
 		SessionOfflineHours: getEnvInt("SESSION_OFFLINE_HOURS", 12),
+		SessionRequired:     getEnvBool("SESSION_REQUIRED", false),
 	}
 }
 
@@ -44,6 +50,15 @@ func getEnvInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return fallback
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return fallback

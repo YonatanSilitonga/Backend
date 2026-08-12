@@ -45,10 +45,10 @@ func main() {
 
 	// modul web: armada + dashboard
 	armadaRepo := armada.NewRepository(db)
-	armadaSvc := armada.NewService(armadaRepo, cfg.TrackingOfflineMin, cfg.SessionOfflineHours)
+	armadaSvc := armada.NewService(armadaRepo, cfg.TrackingOfflineMin, cfg.SessionOfflineHours, cfg.SessionRequired)
 	armadaH := armada.NewHandler(armadaSvc)
 
-	dashRepo := dashboard.NewRepository(db, cfg.TrackingOfflineMin)
+	dashRepo := dashboard.NewRepository(db, cfg.TrackingOfflineMin, cfg.SessionOfflineHours, cfg.SessionRequired)
 	dashSvc := dashboard.NewService(dashRepo)
 	dashH := dashboard.NewHandler(dashSvc)
 
@@ -90,12 +90,16 @@ func main() {
 	v1.GET("/sellers", handler.GetSellers)
 	v1.GET("/drivers", handler.GetDrivers)
 	v1.GET("/vehicles", handler.GetVehicles)
-	v1.GET("/driver/active-ritase", handler.GetActiveRitase)
-	v1.POST("/driver/tracking", handler.PostTracking)
-	v1.POST("/driver/start-free-trip", handler.StartFreeTrip)
-	v1.POST("/driver/add-stop", handler.AddRitaseStop)
-	v1.POST("/driver/finish-ritase", handler.FinishRitase)
-	v1.POST("/driver/reset-test-ritase", handler.ResetTestRitase)
+
+	// Endpoint driver mobile — WAJIB JWT (Authorization: Bearer). Tanpa token → 401.
+	// Ini menutup celah "ghost GPS": siapa pun tidak bisa mengirim posisi palsu.
+	// Catatan: app mobile harus login via /auth/login dulu untuk dapat JWT.
+	v1.GET("/driver/active-ritase", handler.GetActiveRitase, authMW)
+	v1.POST("/driver/tracking", handler.PostTracking, authMW)
+	v1.POST("/driver/start-free-trip", handler.StartFreeTrip, authMW)
+	v1.POST("/driver/add-stop", handler.AddRitaseStop, authMW)
+	v1.POST("/driver/finish-ritase", handler.FinishRitase, authMW)
+	v1.POST("/driver/reset-test-ritase", handler.ResetTestRitase, authMW)
 
 	// Admin Ritase Endpoints (Tower Control Web)
 	v1.GET("/admin/master-options", handler.AdminGetMasterOptions)

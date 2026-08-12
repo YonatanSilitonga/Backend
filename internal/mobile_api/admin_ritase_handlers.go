@@ -129,9 +129,19 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
 	defer cancel()
 
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "Gagal memulai transaksi: "+err.Error())
+	}
+	defer tx.Rollback(ctx)
+
 	// 1. Clear current date's uncompleted ritase and stops to cleanly overwrite/replace
-	_, _ = h.DB.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = CURRENT_DATE AND status != 'selesai')")
-	_, _ = h.DB.Exec(ctx, "DELETE FROM ritase WHERE tanggal = CURRENT_DATE AND status != 'selesai'")
+	if _, err := tx.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = CURRENT_DATE AND status != 'selesai')"); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan ritase lama: "+err.Error())
+	}
+	if _, err := tx.Exec(ctx, "DELETE FROM ritase WHERE tanggal = CURRENT_DATE AND status != 'selesai'"); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan ritase lama: "+err.Error())
+	}
 
 	countGenerated := 0
 	todayStr := time.Now().Format("20060102")
@@ -140,7 +150,7 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 		kodeRitase := fmt.Sprintf("TR-%s-D%d-R%d", todayStr, route.IDDriver, route.RitaseKe)
 
 		var idRitase int64
-		err := h.DB.QueryRow(ctx, `
+		err := tx.QueryRow(ctx, `
 			INSERT INTO ritase (
 				kode_ritase, tanggal, id_driver, id_kendaraan, id_drop_point, ritase_ke, status
 			) VALUES (
@@ -149,19 +159,31 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 		`, kodeRitase, route.IDDriver, route.IDKendaraan, route.IDDropPoint, route.RitaseKe).Scan(&idRitase)
 
 		if err != nil {
-			log.Printf("Err generate ritase D%d: %v", route.IDDriver, err)
-			continue
+			return response.Error(c, http.StatusInternalServerError, fmt.Sprintf("Gagal generate ritase D%d: %v", route.IDDriver, err))
 		}
 
 		for _, stop := range route.Stops {
+			if !validKolom(stop.KolomLokasi) {
+				return response.Error(c, http.StatusBadRequest, fmt.Sprintf("Kolom lokasi stop tidak valid: %q", stop.KolomLokasi))
+			}
+			if stop.IDLokasi <= 0 {
+				return response.Error(c, http.StatusBadRequest, "ID lokasi stop wajib diisi")
+			}
+
 			query := fmt.Sprintf(`
 				INSERT INTO ritase_stop (id_ritase, urutan, jenis_stop, %s, keterangan)
 				VALUES ($1, $2, $3, $4, $5)
 			`, stop.KolomLokasi)
 
-			_, _ = h.DB.Exec(ctx, query, idRitase, stop.Urutan, stop.Jenis, stop.IDLokasi, stop.Keterangan)
+			if _, err := tx.Exec(ctx, query, idRitase, stop.Urutan, stop.Jenis, stop.IDLokasi, stop.Keterangan); err != nil {
+				return response.Error(c, http.StatusInternalServerError, fmt.Sprintf("Gagal menyimpan stop D%d: %v", route.IDDriver, err))
+			}
 		}
 		countGenerated++
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "Gagal commit generate: "+err.Error())
 	}
 
 	return response.OK(c, map[string]interface{}{
@@ -318,8 +340,14 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
 	defer cancel()
 
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "Gagal memulai transaksi: "+err.Error())
+	}
+	defer tx.Rollback(ctx)
+
 	// Update Header Ritase
-	_, err = h.DB.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		UPDATE ritase
 		SET id_driver = COALESCE(NULLIF($1, 0), id_driver),
 		    id_kendaraan = COALESCE(NULLIF($2, 0), id_kendaraan),
@@ -328,21 +356,26 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 		    status = COALESCE(NULLIF($5, ''), status)
 		WHERE id_ritase = $6
 	`, req.IDDriver, req.IDKendaraan, req.IDDropPoint, req.RitaseKe, req.Status, idRitase)
-
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal mengupdate ritase: "+err.Error())
 	}
+	if tag.RowsAffected() == 0 {
+		return response.Error(c, http.StatusNotFound, "Ritase tidak ditemukan")
+	}
 
-	// Jika ada stops baru, perbarui ritase_stop
+	// Jika ada stops baru, perbarui ritase_stop (replace semua stop lama)
 	if len(req.Stops) > 0 {
-		_, _ = h.DB.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase = $1", idRitase)
+		if _, err := tx.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase = $1", idRitase); err != nil {
+			return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan stop lama: "+err.Error())
+		}
 
 		for _, stop := range req.Stops {
-			kolom := "id_seller"
-			if stop.Jenis == "gudang" {
-				kolom = "id_gudang"
-			} else if stop.Jenis == "drop_point" {
-				kolom = "id_drop_point"
+			kolom, err := lokasiKolom(stop.Jenis)
+			if err != nil {
+				return response.Error(c, http.StatusBadRequest, err.Error())
+			}
+			if stop.IDLokasi <= 0 {
+				return response.Error(c, http.StatusBadRequest, "ID lokasi stop wajib diisi")
 			}
 
 			query := fmt.Sprintf(`
@@ -350,8 +383,14 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 				VALUES ($1, $2, $3, $4, $5)
 			`, kolom)
 
-			_, _ = h.DB.Exec(ctx, query, idRitase, stop.Urutan, stop.Jenis, stop.IDLokasi, stop.Keterangan)
+			if _, err := tx.Exec(ctx, query, idRitase, stop.Urutan, stop.Jenis, stop.IDLokasi, stop.Keterangan); err != nil {
+				return response.Error(c, http.StatusInternalServerError, "Gagal menyimpan stop: "+err.Error())
+			}
 		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "Gagal commit update: "+err.Error())
 	}
 
 	return response.OK(c, map[string]interface{}{
@@ -389,11 +428,17 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
 	defer cancel()
 
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "Gagal memulai transaksi: "+err.Error())
+	}
+	defer tx.Rollback(ctx)
+
 	todayClean := strings.ReplaceAll(req.Tanggal, "-", "")
 	kodeRitase := fmt.Sprintf("TR-%s-D%d-R%d", todayClean, req.IDDriver, req.RitaseKe)
 
 	var idRitase int64
-	err := h.DB.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO ritase (
 			kode_ritase, tanggal, id_driver, id_kendaraan, id_drop_point, ritase_ke, status
 		) VALUES (
@@ -406,11 +451,12 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 	}
 
 	for _, stop := range req.Stops {
-		kolom := "id_seller"
-		if stop.Jenis == "gudang" {
-			kolom = "id_gudang"
-		} else if stop.Jenis == "drop_point" {
-			kolom = "id_drop_point"
+		kolom, err := lokasiKolom(stop.Jenis)
+		if err != nil {
+			return response.Error(c, http.StatusBadRequest, err.Error())
+		}
+		if stop.IDLokasi <= 0 {
+			return response.Error(c, http.StatusBadRequest, "ID lokasi stop wajib diisi")
 		}
 
 		query := fmt.Sprintf(`
@@ -418,13 +464,41 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 			VALUES ($1, $2, $3, $4, $5)
 		`, kolom)
 
-		_, _ = h.DB.Exec(ctx, query, idRitase, stop.Urutan, stop.Jenis, stop.IDLokasi, stop.Keterangan)
+		if _, err := tx.Exec(ctx, query, idRitase, stop.Urutan, stop.Jenis, stop.IDLokasi, stop.Keterangan); err != nil {
+			return response.Error(c, http.StatusInternalServerError, "Gagal menyimpan stop: "+err.Error())
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "Gagal commit create: "+err.Error())
 	}
 
 	return response.Created(c, map[string]interface{}{
 		"id_ritase": idRitase,
 		"message":   "Jadwal ritase baru berhasil dibuat!",
 	})
+}
+
+// validKolom cek nama kolom lokasi di ritase_stop (whitelist — hindari SQL injection).
+func validKolom(k string) bool {
+	switch k {
+	case "id_seller", "id_drop_point", "id_gudang":
+		return true
+	}
+	return false
+}
+
+// lokasiKolom memetakan jenis_stop → kolom id lokasi di tabel ritase_stop.
+func lokasiKolom(jenis string) (string, error) {
+	switch jenis {
+	case "gudang":
+		return "id_gudang", nil
+	case "drop_point":
+		return "id_drop_point", nil
+	case "seller":
+		return "id_seller", nil
+	}
+	return "", fmt.Errorf("jenis_stop tidak dikenal: %q", jenis)
 }
 
 // AdminGetMasterOptions Ambil opsi master data (drivers, kendaraan, drop_points, sellers, gudangs)

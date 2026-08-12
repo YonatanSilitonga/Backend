@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
 
+	"backend/internal/pkg/middleware"
 	"backend/internal/pkg/response"
 )
 
@@ -189,12 +190,43 @@ type CreateTrackingRequest struct {
 	JumlahKoli  int     `json:"jumlah_koli"`
 	JumlahEcer  int     `json:"jumlah_ecer"`
 	DurasiDetik *int    `json:"durasi_detik"`
+	// Offline = sinyal "app berhenti" (onDestroy). Backend langsung cap kendaraan
+	// offline (last_update di-stamp basi) TANPA mengubah posisi terakhir.
+	Offline *bool `json:"offline"`
 }
 
 func (h *APIHandler) PostTracking(c echo.Context) error {
 	var req CreateTrackingRequest
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, http.StatusBadRequest, "format request tidak valid: "+err.Error())
+	}
+
+	// id_driver WAJIB dari token JWT (authMW) — body tidak bisa memalsukan identitas.
+	if driverID, ok := c.Get(middleware.CtxDriverID).(int64); ok && driverID > 0 {
+		req.IDDriver = driverID
+	} else {
+		return response.Error(c, http.StatusUnauthorized, "token tidak memuat id_driver yang valid")
+	}
+
+	if req.IDKendaraan == 0 {
+		return response.Error(c, http.StatusBadRequest, "id_kendaraan wajib diisi")
+	}
+
+	// Sinyal "app berhenti" (onDestroy service) → cap kendaraan langsung OFFLINE
+	// tanpa mengubah posisi terakhir. last_update di-stamp basi (1 jam lalu)
+	// biar query offline langsung membaca true, tanpa nunggu ambang menit.
+	if req.Offline != nil && *req.Offline {
+		ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+		defer cancel()
+		_, err := h.DB.Exec(ctx, `
+			UPDATE armada_tracking
+			SET last_update = now() - interval '1 hour'
+			WHERE id_kendaraan = $1 AND id_driver = $2
+		`, req.IDKendaraan, req.IDDriver)
+		if err != nil {
+			return response.Error(c, http.StatusInternalServerError, "gagal menandai offline: "+err.Error())
+		}
+		return response.OK(c, "ok")
 	}
 
 	if req.Status != nil {
@@ -306,14 +338,16 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		})
 	}
 
-	// 2. Ambil Urutan Stop
+	// 2. Ambil Urutan Stop (termasuk latitude/longitude per stop untuk ETA)
 	rows, err := h.DB.Query(ctx, `
 		SELECT 
 			rs.id_stop, rs.urutan, rs.jenis_stop, 
 			rs.id_seller, rs.id_drop_point, rs.id_gudang, rs.keterangan,
 			COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, 'Gudang OG') AS nama_lokasi,
 			COALESCE(s.alamat, dp.alamat, g.alamat, 'Gudang Outgoing Utama') AS alamat,
-			COALESCE(s.no_hp, '-') AS no_hp
+			COALESCE(s.no_hp, '-') AS no_hp,
+			COALESCE(s.latitude, g.latitude) AS latitude,
+			COALESCE(s.longitude, g.longitude) AS longitude
 		FROM ritase_stop rs
 		LEFT JOIN seller s ON s.id_seller = rs.id_seller
 		LEFT JOIN drop_point dp ON dp.id_drop_point = rs.id_drop_point
@@ -335,9 +369,10 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		var jenisStop, namaLokasi, alamat, noHp string
 		var idSeller, idDropPoint, idGudang *int64
 		var keterangan *string
+		var latitude, longitude *float64
 
-		if err := rows.Scan(&idStop, &urutan, &jenisStop, &idSeller, &idDropPoint, &idGudang, &keterangan, &namaLokasi, &alamat, &noHp); err == nil {
-			stops = append(stops, map[string]interface{}{
+		if err := rows.Scan(&idStop, &urutan, &jenisStop, &idSeller, &idDropPoint, &idGudang, &keterangan, &namaLokasi, &alamat, &noHp, &latitude, &longitude); err == nil {
+			stop := map[string]interface{}{
 				"id_stop":       idStop,
 				"urutan":        urutan,
 				"jenis_stop":    jenisStop,
@@ -348,7 +383,14 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 				"nama_lokasi":   namaLokasi,
 				"alamat":        alamat,
 				"no_hp":         noHp,
-			})
+			}
+			if latitude != nil {
+				stop["latitude"] = *latitude
+			}
+			if longitude != nil {
+				stop["longitude"] = *longitude
+			}
+			stops = append(stops, stop)
 		} else {
 			log.Printf("Scan error: %v", err)
 		}

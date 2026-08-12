@@ -9,16 +9,18 @@ type Service struct {
 	offlineMin int
 	// Ambang session (jam sejak login) — default 12.
 	sessionHours int
+	// Wajib session aktif buat LIVE (offline = GPS basi ATAU gak login).
+	sessionRequired bool
 }
 
-func NewService(repo *Repository, offlineMin int, sessionHours int) *Service {
+func NewService(repo *Repository, offlineMin int, sessionHours int, sessionRequired bool) *Service {
 	if offlineMin <= 0 {
 		offlineMin = 15
 	}
 	if sessionHours <= 0 {
 		sessionHours = 12
 	}
-	return &Service{repo: repo, offlineMin: offlineMin, sessionHours: sessionHours}
+	return &Service{repo: repo, offlineMin: offlineMin, sessionHours: sessionHours, sessionRequired: sessionRequired}
 }
 
 func (s *Service) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
@@ -61,7 +63,7 @@ func (s *Service) CreateTracking(ctx context.Context, req CreateTrackingRequest)
 }
 
 func (s *Service) GetTrackingMap(ctx context.Context) (*MapTracking, error) {
-	vehicles, err := s.repo.ListLatestTracking(ctx, s.offlineMin, s.sessionHours)
+	vehicles, err := s.repo.ListLatestTracking(ctx, s.offlineMin, s.sessionHours, s.sessionRequired)
 	if err != nil {
 		return nil, err
 	}

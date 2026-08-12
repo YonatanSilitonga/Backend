@@ -92,6 +92,7 @@ type Tracking struct {
 // TrackingLive adalah posisi TERBARU satu kendaraan (1 baris per kendaraan) — untuk map.
 type TrackingLive struct {
 	ID          int64     `json:"id_tracking"`
+	IDRitase    *int64    `json:"id_ritase,omitempty"`
 	IDKendaraan int64     `json:"id_kendaraan"`
 	PlatNomor   string    `json:"plat_nomor"`
 	IDDriver    int64     `json:"id_driver"`
@@ -107,6 +108,8 @@ type TrackingLive struct {
 	// SessionOnline = driver belum logout (users.last_login terisi & belum lewat ambang
 	// session). Background/screen-off tetap "online" selama session aktif, walau GPS stale.
 	SessionOnline bool `json:"session_online"`
+	// LastLogin = kapan terakhir driver login ke app mobile (users.last_login).
+	LastLogin *time.Time `json:"last_login,omitempty"`
 	// LastOpen = kapan terakhir app mobile dibuka (users.last_open).
 	LastOpen *time.Time `json:"last_open,omitempty"`
 }

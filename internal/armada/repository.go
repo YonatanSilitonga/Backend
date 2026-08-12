@@ -405,20 +405,30 @@ func (r *Repository) CreateTracking(ctx context.Context, req CreateTrackingReque
 // ListLatestTracking mengambil 1 posisi terbaru per kendaraan (data live untuk peta).
 // offlineMin = ambang (menit) tanpa GPS terbaru → offline.
 // sessionHours = ambang (jam) sejak login tanpa aktivitas → session dianggap mati.
-func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, sessionHours int) ([]TrackingLive, error) {
+// sessionRequired = kalau true, LIVE butuh GPS fresh DAN session login aktif
+// (offline = GPS basi ATAU gak login) — anti data ghost. Default false.
+func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, sessionHours int, sessionRequired bool) ([]TrackingLive, error) {
+	offlineExpr := fmt.Sprintf("(t.last_update < now() - make_interval(mins => %d))", offlineMin)
+	if sessionRequired {
+		offlineExpr = fmt.Sprintf(
+			"((t.last_update < now() - make_interval(mins => %d)) OR (u.last_login IS NULL OR u.last_login < now() - make_interval(hours => %d)))",
+			offlineMin, sessionHours,
+		)
+	}
+
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
-		SELECT t.id_tracking, t.id_kendaraan, COALESCE(k.plat_nomor,''),
+		SELECT t.id_tracking, t.id_ritase, t.id_kendaraan, COALESCE(k.plat_nomor,''),
 		       t.id_driver, COALESCE(d.nama_driver,''),
 		       t.latitude, t.longitude, t.kecepatan, t.arah, t.status, t.last_update,
-		       (t.last_update < now() - make_interval(mins => %d)) AS offline,
+		       %s AS offline,
 		       (u.last_login IS NOT NULL AND u.last_login > now() - make_interval(hours => %d)) AS session_online,
-		       u.last_open
+		       u.last_login, u.last_open
 		FROM armada_tracking t
 		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
 		LEFT JOIN driver d ON d.id_driver = t.id_driver
 		LEFT JOIN users u ON u.id_driver = d.id_driver
 		ORDER BY t.last_update DESC
-	`, offlineMin, sessionHours))
+	`, offlineExpr, sessionHours))
 	if err != nil {
 		return nil, err
 	}
@@ -427,10 +437,10 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 	var items []TrackingLive
 	for rows.Next() {
 		var t TrackingLive
-		if err := rows.Scan(&t.ID, &t.IDKendaraan, &t.PlatNomor,
+		if err := rows.Scan(&t.ID, &t.IDRitase, &t.IDKendaraan, &t.PlatNomor,
 			&t.IDDriver, &t.NamaDriver,
 			&t.Latitude, &t.Longitude, &t.Kecepatan, &t.Arah, &t.Status, &t.LastUpdate,
-			&t.Offline, &t.SessionOnline, &t.LastOpen); err != nil {
+			&t.Offline, &t.SessionOnline, &t.LastLogin, &t.LastOpen); err != nil {
 			return nil, err
 		}
 		items = append(items, t)

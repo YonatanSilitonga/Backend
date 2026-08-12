@@ -85,3 +85,48 @@ func (r *Repository) SetLastOpen(ctx context.Context, id int64) error {
 	_, err := r.db.Exec(ctx, `UPDATE users SET last_open = now() WHERE id_user = $1`, id)
 	return err
 }
+
+// UpdatePassword mengganti password hash user (bcrypt sudah di-hash oleh service).
+func (r *Repository) UpdatePassword(ctx context.Context, id int64, passwordHash string) error {
+	_, err := r.db.Exec(ctx, `UPDATE users SET password = $1 WHERE id_user = $2`, passwordHash, id)
+	return err
+}
+
+// GetPasswordHash mengambil hash password user (untuk verifikasi password lama).
+func (r *Repository) GetPasswordHash(ctx context.Context, id int64) (string, error) {
+	var h string
+	err := r.db.QueryRow(ctx, `SELECT password FROM users WHERE id_user = $1`, id).Scan(&h)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return h, err
+}
+
+// FindUserByUsernameWithPhone mengambil id_user + no_hp driver yang terhubung
+// ke akun (users.id_driver → driver.no_hp). Dipakai verifikasi "lupa password".
+// Gagal (ErrNotFound) kalau username tidak ada / bukan akun driver (id_driver NULL).
+func (r *Repository) FindUserByUsernameWithPhone(ctx context.Context, username string) (*User, string, error) {
+	query := `
+		SELECT u.id_user, u.username, COALESCE(k.nama, u.username) AS name,
+		       u.role, u.karyawan_id, u.id_driver,
+		       COALESCE(d.no_hp, '')
+		FROM users u
+		LEFT JOIN karyawan k ON k.id_karyawan = u.karyawan_id
+		LEFT JOIN driver d ON d.id_driver = u.id_driver
+		WHERE LOWER(u.username) = LOWER($1)
+	`
+	var u User
+	var noHP string
+	err := r.db.QueryRow(ctx, query, username).
+		Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.KaryawanID, &u.IDDriver, &noHP)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, "", ErrNotFound
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	if u.IDDriver == nil || noHP == "" {
+		return nil, "", ErrNotFound
+	}
+	return &u, noHP, nil
+}

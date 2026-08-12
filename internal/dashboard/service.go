@@ -30,3 +30,18 @@ func (s *Service) GetAnalisis(ctx context.Context) (*Analisis, error) {
 	}
 	return &Analisis{Durasi: durasi, Bottleneck: bottleneck, Alerts: alerts}, nil
 }
+
+// GetAnalyticsTrend delegasi ke repository (trend harian ritase).
+func (s *Service) GetAnalyticsTrend(ctx context.Context, from, to string) ([]TrendPoint, error) {
+	return s.repo.GetAnalyticsTrend(ctx, from, to)
+}
+
+// GetAnalyticsDrivers delegasi ke repository (performa per driver).
+func (s *Service) GetAnalyticsDrivers(ctx context.Context, from, to string) ([]DriverPerf, error) {
+	return s.repo.GetAnalyticsDrivers(ctx, from, to)
+}
+
+// GetAnalyticsSellers delegasi ke repository (analitik per seller).
+func (s *Service) GetAnalyticsSellers(ctx context.Context, from, to string) ([]SellerAnalytics, error) {
+	return s.repo.GetAnalyticsSellers(ctx, from, to)
+}
