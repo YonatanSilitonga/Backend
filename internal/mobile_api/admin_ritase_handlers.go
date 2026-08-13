@@ -124,6 +124,143 @@ var defaultFixedRoutes = []FixedRoute{
 	},
 }
 
+type PreviewRoute struct {
+	IDDriver    int64         `json:"id_driver"`
+	NamaDriver  string        `json:"nama_driver"`
+	IDKendaraan int64         `json:"id_kendaraan"`
+	PlatNomor   string        `json:"plat_nomor"`
+	RitaseKe    int           `json:"ritase_ke"`
+	Stops       []PreviewStop `json:"stops"`
+}
+
+type PreviewStop struct {
+	Urutan     int    `json:"urutan"`
+	JenisStop  string `json:"jenis_stop"`
+	NamaLokasi string `json:"nama_lokasi"`
+	Keterangan string `json:"keterangan"`
+}
+
+// AdminPreviewGenerateDailyRitase mengembalikan data rute yang akan digenerate beserta nama lokasinya
+func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
+	defer cancel()
+
+	// 1. Fetch Master Data to Maps
+	drivers := make(map[int64]string)
+	vehicles := make(map[int64]string)
+	gudangs := make(map[int64]string)
+	sellers := make(map[int64]string)
+	dropPoints := make(map[int64]string)
+
+	// Fetch Drivers
+	rowsD, _ := h.DB.Query(ctx, "SELECT id_driver, nama_driver FROM driver")
+	for rowsD.Next() {
+		var id int64
+		var name string
+		if err := rowsD.Scan(&id, &name); err == nil {
+			drivers[id] = name
+		}
+	}
+	rowsD.Close()
+
+	// Fetch Vehicles
+	rowsV, _ := h.DB.Query(ctx, "SELECT id_kendaraan, plat_nomor FROM kendaraan")
+	for rowsV.Next() {
+		var id int64
+		var plat string
+		if err := rowsV.Scan(&id, &plat); err == nil {
+			vehicles[id] = plat
+		}
+	}
+	rowsV.Close()
+
+	// Fetch Gudang
+	rowsG, _ := h.DB.Query(ctx, "SELECT id_gudang, nama_gudang FROM gudang")
+	for rowsG.Next() {
+		var id int64
+		var name string
+		if err := rowsG.Scan(&id, &name); err == nil {
+			gudangs[id] = name
+		}
+	}
+	rowsG.Close()
+
+	// Fetch Seller
+	rowsS, _ := h.DB.Query(ctx, "SELECT id_seller, nama_seller FROM seller")
+	for rowsS.Next() {
+		var id int64
+		var name string
+		if err := rowsS.Scan(&id, &name); err == nil {
+			sellers[id] = name
+		}
+	}
+	rowsS.Close()
+
+	// Fetch Drop Point
+	rowsDP, _ := h.DB.Query(ctx, "SELECT id_drop_point, nama_drop_point FROM drop_point")
+	for rowsDP.Next() {
+		var id int64
+		var name string
+		if err := rowsDP.Scan(&id, &name); err == nil {
+			dropPoints[id] = name
+		}
+	}
+	rowsDP.Close()
+
+	// 2. Map Fixed Routes to Preview
+	var previewRoutes []PreviewRoute
+	for _, fr := range defaultFixedRoutes {
+		driverName := fmt.Sprintf("Driver #%d", fr.IDDriver)
+		if name, ok := drivers[fr.IDDriver]; ok {
+			driverName = name
+		}
+
+		plat := fmt.Sprintf("Kendaraan #%d", fr.IDKendaraan)
+		if p, ok := vehicles[fr.IDKendaraan]; ok {
+			plat = p
+		}
+
+		var previewStops []PreviewStop
+		for _, fs := range fr.Stops {
+			locName := fmt.Sprintf("Target #%d", fs.IDLokasi)
+			if fs.Jenis == "gudang" {
+				if n, ok := gudangs[fs.IDLokasi]; ok {
+					locName = n
+				}
+			} else if fs.Jenis == "seller" {
+				if n, ok := sellers[fs.IDLokasi]; ok {
+					locName = n
+				}
+			} else if fs.Jenis == "drop_point" || fs.Jenis == "gateway" {
+				if n, ok := dropPoints[fs.IDLokasi]; ok {
+					locName = n
+				}
+			}
+
+			previewStops = append(previewStops, PreviewStop{
+				Urutan:     fs.Urutan,
+				JenisStop:  fs.Jenis,
+				NamaLokasi: locName,
+				Keterangan: fs.Keterangan,
+			})
+		}
+
+		previewRoutes = append(previewRoutes, PreviewRoute{
+			IDDriver:    fr.IDDriver,
+			NamaDriver:  driverName,
+			IDKendaraan: fr.IDKendaraan,
+			PlatNomor:   plat,
+			RitaseKe:    fr.RitaseKe,
+			Stops:       previewStops,
+		})
+	}
+
+	return response.OK(c, map[string]interface{}{
+		"total_preview": len(previewRoutes),
+		"routes":        previewRoutes,
+	})
+}
+
 // AdminGenerateDailyRitase Handler 1-Klik Generate Rute Harian
 func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
