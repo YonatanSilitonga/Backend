@@ -37,7 +37,7 @@ var defaultFixedRoutes = []FixedRoute{
 			{1, "gudang", 1, "id_gudang", "Mulai dari gudang origin"},
 			{2, "seller", 3, "id_seller", "Ambil paket di Seller 3"},
 			{3, "seller", 1, "id_seller", "Ambil paket di Seller 1"},
-			{4, "drop_point", 2, "id_drop_point", "Tujuan akhir Drop Point 2"},
+			{4, "gateway", 2, "id_drop_point", "Tujuan akhir Gateway 2"},
 		},
 	},
 	{
@@ -46,7 +46,7 @@ var defaultFixedRoutes = []FixedRoute{
 			{1, "gudang", 1, "id_gudang", "Gudang 1"},
 			{2, "seller", 3, "id_seller", "Seller 3"},
 			{3, "gudang", 1, "id_gudang", "Gudang 1"},
-			{4, "drop_point", 2, "id_drop_point", "Drop Point 2"},
+			{4, "gateway", 2, "id_drop_point", "Gateway 2"},
 		},
 	},
 	{
@@ -55,26 +55,26 @@ var defaultFixedRoutes = []FixedRoute{
 			{1, "gudang", 1, "id_gudang", "Gudang 1"},
 			{2, "seller", 2, "id_seller", "Seller 2"},
 			{3, "gudang", 2, "id_gudang", "Gudang 2"},
-			{4, "drop_point", 2, "id_drop_point", "Drop Point 2"},
+			{4, "gateway", 2, "id_drop_point", "Gateway 2"},
 		},
 	},
 	{
 		IDDriver: 2, IDKendaraan: 6, IDDropPoint: 2, RitaseKe: 2,
 		Stops: []FixedStop{
-			{1, "drop_point", 2, "id_drop_point", "Drop Point 2"},
+			{1, "gateway", 2, "id_drop_point", "Gateway 2"},
 			{2, "seller", 2, "id_seller", "Seller 2"},
 			{3, "gudang", 2, "id_gudang", "Gudang 2"},
-			{4, "drop_point", 2, "id_drop_point", "Drop Point 2"},
+			{4, "gateway", 2, "id_drop_point", "Gateway 2"},
 		},
 	},
 	{
 		IDDriver: 1, IDKendaraan: 11, IDDropPoint: 2, RitaseKe: 2,
 		Stops: []FixedStop{
-			{1, "drop_point", 2, "id_drop_point", "Drop Point 2"},
+			{1, "gateway", 2, "id_drop_point", "Gateway 2"},
 			{2, "seller", 4, "id_seller", "Seller 4"},
 			{3, "seller", 1, "id_seller", "Seller 1"},
 			{4, "gudang", 1, "id_gudang", "Gudang 1"},
-			{5, "drop_point", 2, "id_drop_point", "Drop Point 2"},
+			{5, "gateway", 2, "id_drop_point", "Gateway 2"},
 		},
 	},
 	{
@@ -82,22 +82,22 @@ var defaultFixedRoutes = []FixedRoute{
 		Stops: []FixedStop{
 			{1, "gudang", 1, "id_gudang", "Gudang 1"},
 			{2, "seller", 7, "id_seller", "PGA2 Seller 7"},
-			{3, "drop_point", 2, "id_drop_point", "Drop Point 2"},
+			{3, "gateway", 2, "id_drop_point", "Gateway 2"},
 		},
 	},
 	{
 		IDDriver: 15, IDKendaraan: 3, IDDropPoint: 2, RitaseKe: 3,
 		Stops: []FixedStop{
 			{1, "gudang", 1, "id_gudang", "Gudang 1"},
-			{2, "drop_point", 2, "id_drop_point", "Drop Point 2"},
-			{3, "drop_point", 2, "id_drop_point", "Drop Point 2"},
+			{2, "gateway", 2, "id_drop_point", "Gateway 2"},
+			{3, "gateway", 2, "id_drop_point", "Gateway 2"},
 		},
 	},
 	{
 		IDDriver: 11, IDKendaraan: 9, IDDropPoint: 3, RitaseKe: 2,
 		Stops: []FixedStop{
 			{1, "gudang", 2, "id_gudang", "Gudang 2"},
-			{2, "drop_point", 3, "id_drop_point", "Drop Point 3"},
+			{2, "gateway", 3, "id_drop_point", "Gateway 3"},
 		},
 	},
 	{
@@ -105,21 +105,21 @@ var defaultFixedRoutes = []FixedRoute{
 		Stops: []FixedStop{
 			{1, "gudang", 3, "id_gudang", "Gudang 3"},
 			{2, "gudang", 2, "id_gudang", "Gudang 2"},
-			{3, "drop_point", 3, "id_drop_point", "Drop Point 3"},
+			{3, "gateway", 3, "id_drop_point", "Gateway 3"},
 		},
 	},
 	{
 		IDDriver: 10, IDKendaraan: 9, IDDropPoint: 3, RitaseKe: 1,
 		Stops: []FixedStop{
 			{1, "gudang", 2, "id_gudang", "Gudang 2"},
-			{2, "drop_point", 3, "id_drop_point", "Drop Point 3"},
+			{2, "gateway", 3, "id_drop_point", "Gateway 3"},
 		},
 	},
 	{
 		IDDriver: 10, IDKendaraan: 9, IDDropPoint: 3, RitaseKe: 4,
 		Stops: []FixedStop{
 			{1, "gudang", 2, "id_gudang", "Gudang 2"},
-			{2, "drop_point", 3, "id_drop_point", "Drop Point 3"},
+			{2, "gateway", 3, "id_drop_point", "Gateway 3"},
 		},
 	},
 }
@@ -494,6 +494,8 @@ func lokasiKolom(jenis string) (string, error) {
 	case "gudang":
 		return "id_gudang", nil
 	case "drop_point":
+		return "id_drop_point", nil
+	case "gateway":
 		return "id_drop_point", nil
 	case "seller":
 		return "id_seller", nil
