@@ -136,6 +136,7 @@ type PreviewRoute struct {
 type PreviewStop struct {
 	Urutan     int    `json:"urutan"`
 	JenisStop  string `json:"jenis_stop"`
+	IDLokasi   int64  `json:"id_lokasi"`
 	NamaLokasi string `json:"nama_lokasi"`
 	Keterangan string `json:"keterangan"`
 }
@@ -207,9 +208,79 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 	}
 	rowsDP.Close()
 
-	// 2. Map Fixed Routes to Preview
+	// 2. Determine Routes to Use (Latest generated or fallback to default)
+	var routesToUse []FixedRoute
+	var latestDate *time.Time
+	_ = h.DB.QueryRow(ctx, "SELECT MAX(tanggal) FROM ritase").Scan(&latestDate)
+
+	if latestDate != nil {
+		rowsR, errR := h.DB.Query(ctx, "SELECT id_ritase, id_driver, id_kendaraan, ritase_ke FROM ritase WHERE tanggal = $1 ORDER BY id_driver, ritase_ke", *latestDate)
+		if errR == nil {
+			var ritaseMap = make(map[int64]*FixedRoute)
+			var orderedRitaseIDs []int64
+
+			for rowsR.Next() {
+				var idRitase, idDriver, idKendaraan int64
+				var ritaseKe int
+				if err := rowsR.Scan(&idRitase, &idDriver, &idKendaraan, &ritaseKe); err == nil {
+					ritaseMap[idRitase] = &FixedRoute{
+						IDDriver:    idDriver,
+						IDKendaraan: idKendaraan,
+						RitaseKe:    ritaseKe,
+						Stops:       []FixedStop{},
+					}
+					orderedRitaseIDs = append(orderedRitaseIDs, idRitase)
+				}
+			}
+			rowsR.Close()
+
+			if len(orderedRitaseIDs) > 0 {
+				rowsS, errS := h.DB.Query(ctx, `
+					SELECT rs.id_ritase, rs.urutan, rs.jenis_stop,
+						COALESCE(rs.id_gudang, rs.id_seller, rs.id_drop_point) as id_lokasi,
+						rs.keterangan
+					FROM ritase_stop rs
+					JOIN ritase r ON r.id_ritase = rs.id_ritase
+					WHERE r.tanggal = $1
+					ORDER BY rs.id_ritase, rs.urutan
+				`, *latestDate)
+
+				if errS == nil {
+					for rowsS.Next() {
+						var idRitase int64
+						var stop FixedStop
+						var idLokasi *int64
+						var ket *string
+
+						if err := rowsS.Scan(&idRitase, &stop.Urutan, &stop.Jenis, &idLokasi, &ket); err == nil {
+							if idLokasi != nil {
+								stop.IDLokasi = *idLokasi
+							}
+							if ket != nil {
+								stop.Keterangan = *ket
+							}
+							if r, ok := ritaseMap[idRitase]; ok {
+								r.Stops = append(r.Stops, stop)
+							}
+						}
+					}
+					rowsS.Close()
+				}
+
+				for _, idRitase := range orderedRitaseIDs {
+					routesToUse = append(routesToUse, *ritaseMap[idRitase])
+				}
+			}
+		}
+	}
+
+	if len(routesToUse) == 0 {
+		routesToUse = defaultFixedRoutes
+	}
+
+	// 3. Map Routes to Preview Format
 	var previewRoutes []PreviewRoute
-	for _, fr := range defaultFixedRoutes {
+	for _, fr := range routesToUse {
 		driverName := fmt.Sprintf("Driver #%d", fr.IDDriver)
 		if name, ok := drivers[fr.IDDriver]; ok {
 			driverName = name
@@ -240,6 +311,7 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 			previewStops = append(previewStops, PreviewStop{
 				Urutan:     fs.Urutan,
 				JenisStop:  fs.Jenis,
+				IDLokasi:   fs.IDLokasi,
 				NamaLokasi: locName,
 				Keterangan: fs.Keterangan,
 			})
@@ -266,6 +338,17 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
 	defer cancel()
 
+	var req struct {
+		Routes []FixedRoute `json:"routes"`
+	}
+	// Try parsing body if provided
+	_ = c.Bind(&req)
+
+	targetRoutes := defaultFixedRoutes
+	if len(req.Routes) > 0 {
+		targetRoutes = req.Routes
+	}
+
 	tx, err := h.DB.Begin(ctx)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal memulai transaksi: "+err.Error())
@@ -276,6 +359,10 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 	if _, err := tx.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = CURRENT_DATE AND status != 'selesai')"); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan ritase lama: "+err.Error())
 	}
+	// Hapus armada_tracking yang merujuk ke ritase yang akan dihapus (FK constraint)
+	if _, err := tx.Exec(ctx, "DELETE FROM armada_tracking WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = CURRENT_DATE AND status != 'selesai')"); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan tracking lama: "+err.Error())
+	}
 	if _, err := tx.Exec(ctx, "DELETE FROM ritase WHERE tanggal = CURRENT_DATE AND status != 'selesai'"); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan ritase lama: "+err.Error())
 	}
@@ -283,7 +370,10 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 	countGenerated := 0
 	todayStr := time.Now().Format("20060102")
 
-	for _, route := range defaultFixedRoutes {
+	for _, route := range targetRoutes {
+		if route.IDDropPoint <= 0 {
+			route.IDDropPoint = 1
+		}
 		kodeRitase := fmt.Sprintf("TR-%s-D%d-R%d", todayStr, route.IDDriver, route.RitaseKe)
 
 		var idRitase int64
@@ -300,6 +390,15 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 		}
 
 		for _, stop := range route.Stops {
+			if stop.KolomLokasi == "" {
+				if stop.Jenis == "gudang" {
+					stop.KolomLokasi = "id_gudang"
+				} else if stop.Jenis == "seller" {
+					stop.KolomLokasi = "id_seller"
+				} else {
+					stop.KolomLokasi = "id_drop_point"
+				}
+			}
 			if !validKolom(stop.KolomLokasi) {
 				return response.Error(c, http.StatusBadRequest, fmt.Sprintf("Kolom lokasi stop tidak valid: %q", stop.KolomLokasi))
 			}
