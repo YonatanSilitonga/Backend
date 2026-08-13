@@ -13,16 +13,19 @@ import (
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
 
+	"backend/internal/eventbus"
 	"backend/internal/pkg/middleware"
 	"backend/internal/pkg/response"
 )
 
 type APIHandler struct {
-	DB *pgxpool.Pool
+	DB         *pgxpool.Pool
+	bus        *eventbus.Bus
+	trackerKey string
 }
 
-func NewAPIHandler(db *pgxpool.Pool) *APIHandler {
-	return &APIHandler{DB: db}
+func NewAPIHandler(db *pgxpool.Pool, bus *eventbus.Bus, trackerKey string) *APIHandler {
+	return &APIHandler{DB: db, bus: bus, trackerKey: trackerKey}
 }
 
 type LoginRequest struct {
@@ -298,6 +301,7 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking: "+err.Error())
 	}
 
+	h.bus.Publish("force_refresh", "mobile_tracking_update")
 	return response.OK(c, "success")
 }
 
@@ -439,6 +443,7 @@ func (h *APIHandler) StartFreeTrip(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "Gagal memulai perjalanan bebas")
 	}
 
+	h.bus.Publish("force_refresh", "mobile_start_free_trip")
 	return response.OK(c, map[string]interface{}{
 		"id_ritase":   idRitase,
 		"kode_ritase": kodeRitase,
@@ -477,6 +482,7 @@ func (h *APIHandler) AddRitaseStop(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "Gagal menambahkan lokasi")
 	}
 
+	h.bus.Publish("force_refresh", "mobile_add_ritase_stop")
 	return response.OK(c, map[string]interface{}{
 		"id_stop": newIdStop,
 		"urutan":  newUrutan,
@@ -506,6 +512,7 @@ func (h *APIHandler) FinishRitase(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "Gagal menyelesaikan ritase")
 	}
 
+	h.bus.Publish("force_refresh", "mobile_finish_ritase")
 	return response.OK(c, "success")
 }
 
@@ -529,6 +536,7 @@ func (h *APIHandler) ResetTestRitase(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "Gagal mereset ritase test")
 	}
 
+	h.bus.Publish("force_refresh", "mobile_reset_test_ritase")
 	return response.OK(c, "success")
 }
 

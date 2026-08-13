@@ -5,6 +5,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"backend/internal/eventbus"
 	appMiddleware "backend/internal/pkg/middleware"
 	"backend/internal/pkg/response"
 )
@@ -12,10 +13,11 @@ import (
 // Handler menyediakan endpoint HTTP untuk auth.
 type Handler struct {
 	svc *Service
+	bus *eventbus.Bus
 }
 
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *Service, bus *eventbus.Bus) *Handler {
+	return &Handler{svc: svc, bus: bus}
 }
 
 // Login menangani POST /auth/login.
@@ -30,6 +32,7 @@ func (h *Handler) Login(c echo.Context) error {
 		return response.Error(c, http.StatusUnauthorized, err.Error())
 	}
 
+	h.bus.Publish("force_refresh", "user_login")
 	return response.OK(c, res)
 }
 
@@ -49,6 +52,7 @@ func (h *Handler) Me(c echo.Context) error {
 func (h *Handler) Logout(c echo.Context) error {
 	userID := c.Get(appMiddleware.CtxUserID).(int64)
 	_ = h.svc.Logout(c.Request().Context(), userID)
+	h.bus.Publish("force_refresh", "user_logout")
 	return response.OK(c, map[string]string{"status": "logged_out"})
 }
 
@@ -58,6 +62,7 @@ func (h *Handler) OpenApp(c echo.Context) error {
 	if err := h.svc.OpenApp(c.Request().Context(), userID); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal mencatat aktivitas app")
 	}
+	h.bus.Publish("force_refresh", "user_open_app")
 	return response.OK(c, map[string]string{"status": "ok"})
 }
 

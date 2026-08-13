@@ -23,6 +23,13 @@ type Config struct {
 	// mobile dipastikan sudah pakai alur login (/auth/login), biar tidak semua
 	// armada jadi offline mendadak saat rollout.
 	SessionRequired bool
+	// Interval broadcast SSE realtime (ms). Default 3000 — push ke web dashboard
+	// tiap N detik (summary + analisis + posisi armada).
+	RealtimeIntervalMs int
+	// TrackerAPIKey adalah secret bersama untuk endpoint GPS tracker
+	// (POST /api/v1/tracker/gps). Tracker tidak login JWT, jadi wajib
+	// kirim header X-Tracker-Key yang sama dengan nilai ini.
+	TrackerAPIKey string
 }
 
 // Load membaca file .env (jika ada) lalu mengumpulkan konfigurasi dari environment.
@@ -36,6 +43,8 @@ func Load() *Config {
 		TrackingOfflineMin:  getEnvInt("TRACKING_OFFLINE_MIN", 3),
 		SessionOfflineHours: getEnvInt("SESSION_OFFLINE_HOURS", 12),
 		SessionRequired:     getEnvBool("SESSION_REQUIRED", false),
+		RealtimeIntervalMs:  getEnvInt("REALTIME_INTERVAL_MS", 3000),
+		TrackerAPIKey:       getEnv("TRACKER_API_KEY", ""),
 	}
 }
 

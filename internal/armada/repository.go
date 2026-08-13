@@ -185,7 +185,9 @@ func (r *Repository) ListStops(ctx context.Context, idRitase int64) ([]RitaseSto
 		       s.id_gudang, COALESCE(g.nama_gudang,''), COALESCE(g.tipe,''),
 		       s.id_seller, s.id_drop_point,
 		       COALESCE(seller.nama_seller,''), COALESCE(dp.nama_drop_point,''),
-		       s.keterangan
+		       s.keterangan,
+		       COALESCE(g.latitude, seller.latitude, dp.latitude) AS latitude,
+		       COALESCE(g.longitude, seller.longitude, dp.longitude) AS longitude
 		FROM ritase_stop s
 		LEFT JOIN gudang g ON g.id_gudang = s.id_gudang
 		LEFT JOIN seller seller ON seller.id_seller = s.id_seller
@@ -204,7 +206,8 @@ func (r *Repository) ListStops(ctx context.Context, idRitase int64) ([]RitaseSto
 		var namaGudang, tipeGudang, namaSeller, namaDP string
 		if err := rows.Scan(&st.IDStop, &st.IDRitase, &st.Urutan, &st.JenisStop,
 			&st.IDGudang, &namaGudang, &tipeGudang,
-			&st.IDSeller, &st.IDDropPoint, &namaSeller, &namaDP, &st.Keterangan); err != nil {
+			&st.IDSeller, &st.IDDropPoint, &namaSeller, &namaDP, &st.Keterangan,
+			&st.Latitude, &st.Longitude); err != nil {
 			return nil, err
 		}
 		if namaGudang != "" {

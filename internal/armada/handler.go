@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"backend/internal/eventbus"
 	appMiddleware "backend/internal/pkg/middleware"
 	"backend/internal/pkg/response"
 )
@@ -14,10 +15,11 @@ import (
 // Handler menyediakan endpoint HTTP untuk modul armada.
 type Handler struct {
 	svc *Service
+	bus *eventbus.Bus
 }
 
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *Service, bus *eventbus.Bus) *Handler {
+	return &Handler{svc: svc, bus: bus}
 }
 
 /* ---------- Master data ---------- */
@@ -130,6 +132,7 @@ func (h *Handler) UpdateStatus(c echo.Context) error {
 	if err != nil {
 		return response.Error(c, http.StatusNotFound, "ritase tidak ditemukan")
 	}
+	h.bus.Publish("force_refresh", "ritase_status_update")
 	return response.Created(c, data)
 }
 
@@ -149,6 +152,7 @@ func (h *Handler) UpdateMuatan(c echo.Context) error {
 	if err != nil {
 		return response.Error(c, http.StatusNotFound, "ritase tidak ditemukan")
 	}
+	h.bus.Publish("force_refresh", "ritase_muatan_update")
 	return response.OK(c, data)
 }
 
@@ -177,6 +181,7 @@ func (h *Handler) CreateTracking(c echo.Context) error {
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan posisi")
 	}
+	h.bus.Publish("force_refresh", "tracking_update")
 	return response.Created(c, data)
 }
 

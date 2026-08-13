@@ -18,6 +18,8 @@ type RitaseStop struct {
 	NamaSeller     *string `json:"nama_seller,omitempty"`
 	NamaDropPoint  *string `json:"nama_drop_point,omitempty"`
 	Keterangan     *string `json:"keterangan,omitempty"`
+	Latitude       *float64 `json:"latitude,omitempty"`
+	Longitude      *float64 `json:"longitude,omitempty"`
 }
 
 // RitaseStopRequest adalah satu titik rute saat membuat ritase.

@@ -208,7 +208,7 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			r.id_driver, COALESCE(d.nama_driver, 'Driver #' || r.id_driver) AS nama_driver,
 			COALESCE(d.jabatan, 'TRANSPORTER') AS jabatan_driver,
 			r.id_kendaraan, COALESCE(k.plat_nomor, 'KD-' || r.id_kendaraan) AS nopol,
-			r.id_drop_point, COALESCE(dp.nama_drop_point, 'Drop Point #' || r.id_drop_point) AS nama_drop_point,
+			r.id_drop_point, COALESCE(dp.nama_drop_point, 'Gateway #' || r.id_drop_point) AS nama_drop_point,
 			r.ritase_ke, r.status
 		FROM ritase r
 		LEFT JOIN driver d ON d.id_driver = r.id_driver
@@ -415,7 +415,7 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 	}
 
 	if req.IDDriver == 0 || req.IDKendaraan == 0 || req.IDDropPoint == 0 {
-		return response.Error(c, http.StatusBadRequest, "Driver, Kendaraan, dan Drop Point wajib dipilih")
+		return response.Error(c, http.StatusBadRequest, "Driver, Kendaraan, dan Gateway wajib dipilih")
 	}
 
 	if req.Tanggal == "" {
