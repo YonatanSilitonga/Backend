@@ -374,7 +374,18 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 		if route.IDDropPoint <= 0 {
 			route.IDDropPoint = 1
 		}
-		kodeRitase := fmt.Sprintf("TR-%s-D%d-R%d", todayStr, route.IDDriver, route.RitaseKe)
+		baseKode := fmt.Sprintf("TR-%s-D%d-R%d", todayStr, route.IDDriver, route.RitaseKe)
+		kodeRitase := baseKode
+		counter := 1
+		for {
+			var count int
+			_ = tx.QueryRow(ctx, "SELECT COUNT(*) FROM ritase WHERE kode_ritase = $1", kodeRitase).Scan(&count)
+			if count == 0 {
+				break
+			}
+			counter++
+			kodeRitase = fmt.Sprintf("%s-%d", baseKode, counter)
+		}
 
 		var idRitase int64
 		err := tx.QueryRow(ctx, `
@@ -671,7 +682,18 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 	defer tx.Rollback(ctx)
 
 	todayClean := strings.ReplaceAll(req.Tanggal, "-", "")
-	kodeRitase := fmt.Sprintf("TR-%s-D%d-R%d", todayClean, req.IDDriver, req.RitaseKe)
+	baseKode := fmt.Sprintf("TR-%s-D%d-R%d", todayClean, req.IDDriver, req.RitaseKe)
+	kodeRitase := baseKode
+	counter := 1
+	for {
+		var count int
+		_ = tx.QueryRow(ctx, "SELECT COUNT(*) FROM ritase WHERE kode_ritase = $1", kodeRitase).Scan(&count)
+		if count == 0 {
+			break
+		}
+		counter++
+		kodeRitase = fmt.Sprintf("%s-%d", baseKode, counter)
+	}
 
 	var idRitase int64
 	err = tx.QueryRow(ctx, `
