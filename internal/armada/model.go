@@ -7,152 +7,106 @@ type Kendaraan struct {
 	ID              int64   `json:"id_kendaraan"`
 	PlatNomor       string  `json:"plat_nomor"`
 	JenisKendaraan  *string `json:"jenis_kendaraan,omitempty"`
-	KapasitasKg     *int    `json:"kapasitas_kg,omitempty"`
+	KapasitasKoli   *int    `json:"kapasitas_koli,omitempty"`
 	StatusKendaraan string  `json:"status_kendaraan"`
 }
 
 // Driver merepresentasikan tabel driver.
 type Driver struct {
-	ID           int64    `json:"id_driver"`
-	NamaDriver   string   `json:"nama_driver"`
-	NoHP         *string  `json:"no_hp,omitempty"`
-	NoSIM        *string  `json:"no_sim,omitempty"`
-	JenisSIM     *string  `json:"jenis_sim,omitempty"`
-	StatusDriver string   `json:"status_driver"`
-	// Kendaraan terakhir yang dia track (armada_tracking) — "lagi nyetir apa".
-	PlatNomor    *string `json:"plat_nomor,omitempty"`
-	IDKendaraan  *int64  `json:"id_kendaraan,omitempty"`
-	// TrackingFresh = posisi terakhir masih ≤ ambang offline (sedang aktif di armada).
-	TrackingFresh bool   `json:"tracking_fresh"`
+	ID           int64   `json:"id_driver"`
+	NamaDriver   string  `json:"nama_driver"`
+	NoHP         *string `json:"no_hp,omitempty"`
+	NoSIM        *string `json:"no_sim,omitempty"`
+	JenisSIM     *string `json:"jenis_sim,omitempty"`
+	StatusDriver string  `json:"status_driver"`
 }
 
 // Ritase merepresentasikan tabel ritase (penugasan perjalanan angkut).
 type Ritase struct {
-	ID            int64     `json:"id_ritase"`
-	KodeRitase    string    `json:"kode_ritase"`
-	Tanggal       string    `json:"tanggal"`
-	IDDriver      int64     `json:"id_driver"`
-	NamaDriver    string    `json:"nama_driver,omitempty"`
-	IDKendaraan   int64     `json:"id_kendaraan"`
-	PlatNomor     string    `json:"plat_nomor,omitempty"`
-	// IDSeller dihapus: kolom id_seller di tabel ritase sudah hilang.
-	// Relasi seller sekarang via ritase_stop (satu ritase bisa banyak seller).
-	NamaSeller    string    `json:"nama_seller,omitempty"`
-	IDDropPoint   int64     `json:"id_drop_point"`
-	NamaDropPoint string    `json:"nama_drop_point,omitempty"`
-	RitaseKe      *int      `json:"ritase_ke,omitempty"`
-	TotalAWB      *int      `json:"total_awb,omitempty"`
-	TotalKoli     *int      `json:"total_koli,omitempty"`
-	PaketTertinggal *int    `json:"paket_tertinggal,omitempty"`
-	AlasanTertinggal *string `json:"alasan_tertinggal,omitempty"`
-	JamBerangkat  *string   `json:"jam_berangkat,omitempty"`
-	JamTiba       *string   `json:"jam_tiba,omitempty"`
-	JamMulai      *string   `json:"jam_mulai,omitempty"`
-	JamSelesai    *string   `json:"jam_selesai,omitempty"`
-	Status        string    `json:"status"`
-	CreatedAt     time.Time `json:"created_at,omitempty"`
+	ID               int64     `json:"id_ritase"`
+	KodeRitase       string    `json:"kode_ritase"`
+	Tanggal          string    `json:"tanggal"`
+	IDDriver         int64     `json:"id_driver"`
+	NamaDriver       string    `json:"nama_driver,omitempty"`
+	IDKendaraan      int64     `json:"id_kendaraan"`
+	PlatNomor        string    `json:"plat_nomor,omitempty"`
+	IDSeller         int64     `json:"id_seller"`
+	NamaSeller       string    `json:"nama_seller,omitempty"`
+	IDDropPoint      int64     `json:"id_drop_point"`
+	NamaDropPoint    string    `json:"nama_drop_point,omitempty"`
+	RitaseKe         *int      `json:"ritase_ke,omitempty"`
+	TotalAWB         *int      `json:"total_awb,omitempty"`
+	TotalKoli        *int      `json:"total_koli,omitempty"`
+	PaketTertinggal  *int      `json:"paket_tertinggal,omitempty"`
+	AlasanTertinggal *string   `json:"alasan_tertinggal,omitempty"`
+	JamBerangkat     *string   `json:"jam_berangkat,omitempty"`
+	JamTiba          *string   `json:"jam_tiba,omitempty"`
+	Status           string    `json:"status"`
+	CreatedAt        time.Time `json:"created_at,omitempty"`
 }
 
 // RitaseEvent adalah satu baris timeline status perjalanan (10 status tombol driver).
 type RitaseEvent struct {
-	ID          int64     `json:"id_event"`
-	IDRitase    int64     `json:"id_ritase"`
-	Status      string    `json:"status"`
-	Catatan     *string   `json:"catatan,omitempty"`
-	Latitude    *float64  `json:"latitude,omitempty"`
-	Longitude   *float64  `json:"longitude,omitempty"`
-	NamaLokasi  *string   `json:"nama_lokasi,omitempty"`
-	DurasiDetik *int      `json:"durasi_detik,omitempty"`
-	JumlahKoli      *int      `json:"jumlah_koli,omitempty"`
-	JumlahEcer      *int      `json:"jumlah_ecer,omitempty"`
-	JumlahHighValue *int      `json:"jumlah_high_value,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-}
-
-// RitaseDetail adalah ritase + seluruh timeline event + rute (stops)-nya.
-// Rute/stops pakai tipe RitaseStop di model_route.go (rich, milik web).
-type RitaseDetail struct {
-	Ritase
-	Events []RitaseEvent `json:"events"`
-	Stops  []RitaseStop  `json:"stops"`
-}
-
-// Tracking merepresentasikan tabel armada_tracking (posisi realtime).
-type Tracking struct {
-	ID          int64     `json:"id_tracking"`
-	IDRitase    *int64    `json:"id_ritase,omitempty"` // nullable — GPS bisa tanpa ritase
-	IDKendaraan int64     `json:"id_kendaraan"`
-	IDDriver    int64     `json:"id_driver"`
-	Latitude    float64   `json:"latitude"`
-	Longitude   float64   `json:"longitude"`
-	Kecepatan   *int      `json:"kecepatan,omitempty"`
-	Arah        *int      `json:"arah,omitempty"`
-	Status      *string   `json:"status,omitempty"`
-	LastUpdate  time.Time `json:"last_update"`
-}
-
-// TrackingLive adalah posisi TERBARU satu kendaraan (1 baris per kendaraan) — untuk map.
-type TrackingLive struct {
-	ID          int64     `json:"id_tracking"`
-	IDRitase    *int64    `json:"id_ritase,omitempty"`
-	IDKendaraan int64     `json:"id_kendaraan"`
-	PlatNomor   string    `json:"plat_nomor"`
-	IDDriver    int64     `json:"id_driver"`
-	NamaDriver  string    `json:"nama_driver"`
-	Latitude    float64   `json:"latitude"`
-	Longitude   float64   `json:"longitude"`
-	Kecepatan   *int      `json:"kecepatan,omitempty"`
-	Arah        *int      `json:"arah,omitempty"`
-	Status      *string   `json:"status,omitempty"`
-	NamaLokasi  *string   `json:"nama_lokasi,omitempty"`
-	LastUpdate  time.Time `json:"last_update"`
-	// Offline = last_update lebih lama dari ambang (default 15 menit) — tidak ada GPS terbaru.
-	Offline bool `json:"offline"`
-	// SessionOnline = driver belum logout (users.last_login terisi & belum lewat ambang
-	// session). Background/screen-off tetap "online" selama session aktif, walau GPS stale.
-	SessionOnline bool `json:"session_online"`
-	// LastLogin = kapan terakhir driver login ke app mobile (users.last_login).
-	LastLogin *time.Time `json:"last_login,omitempty"`
-	// LastOpen = kapan terakhir app mobile dibuka (users.last_open).
-	LastOpen *time.Time `json:"last_open,omitempty"`
-}
-
-// MapTracking gabungan posisi live kendaraan + titik seller + gudang + drop_point (data peta).
-type MapTracking struct {
-	Vehicles   []TrackingLive   `json:"vehicles"`
-	Sellers    []SellerLocation `json:"sellers"`   // SellerLocation di model_route.go
-	Gudang     []GudangPoint    `json:"gudang"`    // GudangPoint di model_route.go
-	DropPoints []DropPointPoi   `json:"drop_points"` // DropPointPoi di model_route.go
-}
-
-// TrackingCheckpoint satu baris riwayat status dari ritase_event.
-type TrackingCheckpoint struct {
-	IDEvent     int64     `json:"id_event"`
-	IDRitase    int64     `json:"id_ritase"`
-	KodeRitase  string    `json:"kode_ritase"`
-	Status      string    `json:"status"`
-	Catatan     *string   `json:"catatan,omitempty"`
+	ID        int64     `json:"id_event"`
+	IDRitase  int64     `json:"id_ritase"`
+	Status    string    `json:"status"`
+	Catatan   *string   `json:"catatan,omitempty"`
 	Latitude    *float64  `json:"latitude,omitempty"`
 	Longitude   *float64  `json:"longitude,omitempty"`
 	DurasiDetik *int      `json:"durasi_detik,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// SellerLocation terletak di model_route.go (milik web: kode_seller/pic/no_hp).
-// TrackingLive, MapTracking, TrackingCheckpoint dipakai map & riwayat (web + shared).
+// RitaseStop merepresentasikan satu titik perhentian dalam rute penugasan ritase.
+type RitaseStop struct {
+	ID            int64    `json:"id_stop"`
+	IDRitase      int64    `json:"id_ritase"`
+	Urutan        int      `json:"urutan"`
+	JenisStop     string   `json:"jenis_stop"`
+	IDGudang      *int64   `json:"id_gudang,omitempty"`
+	NamaGudang    *string  `json:"nama_gudang,omitempty"`
+	TipeGudang    *string  `json:"tipe_gudang,omitempty"`
+	IDSeller      *int64   `json:"id_seller,omitempty"`
+	NamaSeller    *string  `json:"nama_seller,omitempty"`
+	IDDropPoint   *int64   `json:"id_drop_point,omitempty"`
+	NamaDropPoint *string  `json:"nama_drop_point,omitempty"`
+	Keterangan    *string  `json:"keterangan,omitempty"`
+	Latitude      *float64 `json:"latitude,omitempty"`
+	Longitude     *float64 `json:"longitude,omitempty"`
+}
 
-/* ---------- Request bodies ---------- */
+// RitaseDetail adalah ritase + seluruh rute stops + timeline event-nya.
+type RitaseDetail struct {
+	Ritase
+	Stops  []RitaseStop  `json:"stops"`
+	Events []RitaseEvent `json:"events"`
+}
 
+// Tracking merepresentasikan tabel armada_tracking (posisi realtime).
+type Tracking struct {
+	ID          int64     `json:"id_tracking"`
+	IDRitase    int64     `json:"id_ritase"`
+	IDKendaraan int64     `json:"id_kendaraan"`
+	IDDriver    int64     `json:"id_driver"`
+	Latitude    float64   `json:"latitude"`
+	Longitude   float64   `json:"longitude"`
+	Kecepatan   *int      `json:"kecepatan,omitempty"`
+	Arah        *int      `json:"arah,omitempty"`
+	Status      *string   `json:"status,omitempty"`
+	LastUpdate  time.Time `json:"last_update"`
+}
+
+// Request body
 type CreateRitaseRequest struct {
-	KodeRitase  string            `json:"kode_ritase"`
-	Tanggal     string            `json:"tanggal"`
-	IDDriver    int64             `json:"id_driver"`
-	IDKendaraan int64             `json:"id_kendaraan"`
-	IDDropPoint int64             `json:"id_drop_point"`
-	RitaseKe    *int              `json:"ritase_ke"`
-	TotalAWB    *int              `json:"total_awb"`
-	TotalKoli   *int              `json:"total_koli"`
-	Stops       []RitaseStopRequest `json:"stops"` // RitaseStopRequest di model_route.go
+	KodeRitase  string `json:"kode_ritase"`
+	Tanggal     string `json:"tanggal"`
+	IDDriver    int64  `json:"id_driver"`
+	IDKendaraan int64  `json:"id_kendaraan"`
+	IDSeller    int64  `json:"id_seller"`
+	IDDropPoint int64  `json:"id_drop_point"`
+	RitaseKe    *int   `json:"ritase_ke"`
+	TotalAWB    *int   `json:"total_awb"`
+	TotalKoli   *int   `json:"total_koli"`
 }
 
 type UpdateStatusRequest struct {
@@ -160,11 +114,7 @@ type UpdateStatusRequest struct {
 	Catatan     *string  `json:"catatan"`
 	Latitude    *float64 `json:"latitude"`
 	Longitude   *float64 `json:"longitude"`
-	NamaLokasi  *string  `json:"nama_lokasi"`
 	DurasiDetik *int     `json:"durasi_detik"`
-	JumlahKoli      *int     `json:"jumlah_koli"`
-	JumlahEcer      *int     `json:"jumlah_ecer"`
-	JumlahHighValue *int     `json:"jumlah_high_value"`
 }
 
 type UpdateMuatanRequest struct {
@@ -183,8 +133,4 @@ type CreateTrackingRequest struct {
 	Kecepatan   *int    `json:"kecepatan"`
 	Arah        *int    `json:"arah"`
 	Status      *string `json:"status"`
-	JumlahKoli      int     `json:"jumlah_koli"`
-	JumlahEcer      int     `json:"jumlah_ecer"`
-	JumlahHighValue int     `json:"jumlah_high_value"`
-	DurasiDetik     *int    `json:"durasi_detik"`
 }
