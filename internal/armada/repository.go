@@ -142,19 +142,63 @@ func (r *Repository) ListRitase(ctx context.Context, idDriver int64, tanggal str
 	return items, rows.Err()
 }
 
-// GetRitase mengambil satu ritase + event timeline-nya.
+// ListStops mengambil daftar titik perhentian (stops) rute penugasan ritase.
+func (r *Repository) ListStops(ctx context.Context, idRitase int64) ([]RitaseStop, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT rs.id_stop, rs.id_ritase, rs.urutan, rs.jenis_stop,
+		       rs.id_gudang, g.nama_gudang, g.tipe,
+		       rs.id_seller, s.nama_seller,
+		       rs.id_drop_point, dp.nama_drop_point,
+		       rs.keterangan,
+		       COALESCE(g.latitude, s.latitude, dp.latitude) as latitude,
+		       COALESCE(g.longitude, s.longitude, dp.longitude) as longitude
+		FROM ritase_stop rs
+		LEFT JOIN gudang g ON rs.id_gudang = g.id_gudang
+		LEFT JOIN seller s ON rs.id_seller = s.id_seller
+		LEFT JOIN drop_point dp ON rs.id_drop_point = dp.id_drop_point
+		WHERE rs.id_ritase = $1
+		ORDER BY rs.urutan ASC
+	`, idRitase)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []RitaseStop
+	for rows.Next() {
+		var s RitaseStop
+		if err := rows.Scan(
+			&s.ID, &s.IDRitase, &s.Urutan, &s.JenisStop,
+			&s.IDGudang, &s.NamaGudang, &s.TipeGudang,
+			&s.IDSeller, &s.NamaSeller,
+			&s.IDDropPoint, &s.NamaDropPoint,
+			&s.Keterangan, &s.Latitude, &s.Longitude,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, s)
+	}
+	return items, rows.Err()
+}
+
+// GetRitase mengambil satu ritase + rute stops + event timeline-nya.
 func (r *Repository) GetRitase(ctx context.Context, id int64) (*RitaseDetail, error) {
 	rit, err := scanRitase(r.db.QueryRow(ctx, ritaseSelect+" WHERE r.id_ritase = $1", id))
 	if err != nil {
 		return nil, err
 	}
 
-	events, err := r.ListEvents(ctx, id)
+	stops, err := r.ListStops(ctx, id)
 	if err != nil {
-		return nil, err
+		stops = []RitaseStop{}
 	}
 
-	return &RitaseDetail{Ritase: *rit, Events: events}, nil
+	events, err := r.ListEvents(ctx, id)
+	if err != nil {
+		events = []RitaseEvent{}
+	}
+
+	return &RitaseDetail{Ritase: *rit, Stops: stops, Events: events}, nil
 }
 
 // CreateRitase membuat penugasan baru.

@@ -57,9 +57,28 @@ type RitaseEvent struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// RitaseDetail adalah ritase + seluruh timeline event-nya.
+// RitaseStop merepresentasikan satu titik perhentian dalam rute penugasan ritase.
+type RitaseStop struct {
+	ID            int64    `json:"id_stop"`
+	IDRitase      int64    `json:"id_ritase"`
+	Urutan        int      `json:"urutan"`
+	JenisStop     string   `json:"jenis_stop"`
+	IDGudang      *int64   `json:"id_gudang,omitempty"`
+	NamaGudang    *string  `json:"nama_gudang,omitempty"`
+	TipeGudang    *string  `json:"tipe_gudang,omitempty"`
+	IDSeller      *int64   `json:"id_seller,omitempty"`
+	NamaSeller    *string  `json:"nama_seller,omitempty"`
+	IDDropPoint   *int64   `json:"id_drop_point,omitempty"`
+	NamaDropPoint *string  `json:"nama_drop_point,omitempty"`
+	Keterangan    *string  `json:"keterangan,omitempty"`
+	Latitude      *float64 `json:"latitude,omitempty"`
+	Longitude     *float64 `json:"longitude,omitempty"`
+}
+
+// RitaseDetail adalah ritase + seluruh rute stops + timeline event-nya.
 type RitaseDetail struct {
 	Ritase
+	Stops  []RitaseStop  `json:"stops"`
 	Events []RitaseEvent `json:"events"`
 }
 
