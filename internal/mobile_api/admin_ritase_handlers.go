@@ -433,6 +433,8 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "Gagal commit generate: "+err.Error())
 	}
 
+	h.bus.Publish("force_refresh", "admin_generate_ritase")
+
 	return response.OK(c, map[string]interface{}{
 		"total_generated": countGenerated,
 		"message":         fmt.Sprintf("Berhasil menimpa & meng-generate %d ritase harian!", countGenerated),
@@ -557,6 +559,8 @@ func (h *APIHandler) AdminDeleteRitase(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "Gagal menghapus ritase: "+err.Error())
 	}
 
+	h.bus.Publish("force_refresh", "admin_delete_ritase")
+
 	return response.OK(c, map[string]interface{}{
 		"message": "Ritase berhasil dihapus",
 	})
@@ -639,6 +643,8 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 	if err := tx.Commit(ctx); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal commit update: "+err.Error())
 	}
+
+	h.bus.Publish("force_refresh", "admin_update_ritase")
 
 	return response.OK(c, map[string]interface{}{
 		"message": "Jadwal ritase berhasil diperbarui",
@@ -730,6 +736,8 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 	if err := tx.Commit(ctx); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal commit create: "+err.Error())
 	}
+
+	h.bus.Publish("force_refresh", "admin_create_ritase")
 
 	return response.Created(c, map[string]interface{}{
 		"id_ritase": idRitase,
