@@ -239,7 +239,7 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 
 	// ritase berjalan lama tanpa update (kendaraan berhenti terlalu lama)
 	rows, err := r.db.Query(ctx, `
-		SELECT r.kode_ritase, now() - max(e.created_at)
+		SELECT r.kode_ritase, now() - max(e.created_at), max(e.created_at)
 		FROM ritase r
 		JOIN ritase_event e ON e.id_ritase = r.id_ritase
 		WHERE r.status NOT IN ('selesai','completed','done','batal','cancelled')
@@ -254,7 +254,8 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 	for rows.Next() {
 		var kode string
 		var dur time.Duration
-		if err := rows.Scan(&kode, &dur); err != nil {
+		var lastEvent time.Time
+		if err := rows.Scan(&kode, &dur, &lastEvent); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -262,7 +263,7 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 			Tingkat:     "warning",
 			Kategori:    "kendaraan_berhenti",
 			Pesan:       fmt.Sprintf("Ritase %s berhenti lebih dari %s tanpa update", kode, dur.Round(time.Minute)),
-			Waktu:       time.Now(),
+			Waktu:       lastEvent, // waktu kejadian asli (update GPS terakhir), bukan waktu query
 			Deskripsi:   "Kendaraan tidak mengirim update GPS lebih dari 3 jam padahal ritase belum selesai — berpotensi berhenti di jalan, HP mati, atau kendala armada.",
 			Rekomendasi: "Hubungi driver segera, cek posisi terakhir, dan pastikan kondisi armada serta keselamatan muatan.",
 		})
@@ -271,12 +272,13 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 
 	// ritase yang sudah melewati batas wajar (jeda berangkat->tiba > 8 jam)
 	rows, err = r.db.Query(ctx, `
-		SELECT r.kode_ritase
+		SELECT r.kode_ritase, max(e2.created_at)
 		FROM ritase r
 		JOIN ritase_event e1 ON e1.id_ritase = r.id_ritase AND e1.status = 'berangkat_gudang'
 		JOIN ritase_event e2 ON e2.id_ritase = r.id_ritase AND e2.status = 'sampai_gudang'
 		WHERE r.status NOT IN ('selesai','completed','done','batal','cancelled')
 		  AND EXTRACT(EPOCH FROM (e2.created_at - e1.created_at)) > 8*3600
+		GROUP BY r.kode_ritase
 		LIMIT 5
 	`)
 	if err != nil {
@@ -284,7 +286,8 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 	}
 	for rows.Next() {
 		var kode string
-		if err := rows.Scan(&kode); err != nil {
+		var lastEvent time.Time
+		if err := rows.Scan(&kode, &lastEvent); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -292,7 +295,7 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 			Tingkat:     "critical",
 			Kategori:    "perjalanan_terlalu_lama",
 			Pesan:       fmt.Sprintf("Ritase %s perjalanan melebihi 8 jam", kode),
-			Waktu:       time.Now(),
+			Waktu:       lastEvent, // waktu kejadian asli (tiba gudang yang telat), bukan waktu query
 			Deskripsi:   "Durasi berangkat gudang → tiba melebihi 8 jam — di luar batas wajar rute operasional, bisa menandakan kemacetan parah, menyimpang dari rute, atau kendala di jalan.",
 			Rekomendasi: "Telaah ulang rute/jadwal ritase, konfirmasi ke driver penyebab keterlambatan, dan catat untuk evaluasi performa.",
 		})

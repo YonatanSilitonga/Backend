@@ -408,13 +408,40 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		WHERE id_driver = $1 AND id_kendaraan = $2 AND status != 'selesai' AND tanggal = CURRENT_DATE
 	`, idDriver, idKendaraan).Scan(&countUnfinished)
 
+	// Baseline waktu stage aktif: created_at event status terakhir ritase ini.
+	// Dipakai mobile utk merekonstruksi durasi stage saat app dibuka lagi
+	// (jangan mulai dari 0 tiap kali buka app). Null kalau belum ada event.
+	var stageStartedAt *time.Time
+	_ = h.DB.QueryRow(ctx, `
+		SELECT MAX(created_at) FROM ritase_event WHERE id_ritase = $1
+	`, idRitase).Scan(&stageStartedAt)
+
+	// Progress resume (anti-manipulasi): jumlah stop yang sudah 'Tiba' = index
+	// stop yang sedang dikerjakan, + status stage terakhir. Dipakai mobile supaya
+	// app yang di-kill & dibuka lagi LANJUT dari stop yang sama (bukan mulai ulang).
+	var currentStopIndex int
+	_ = h.DB.QueryRow(ctx, `
+		SELECT COUNT(*) FROM ritase_event WHERE id_ritase = $1 AND status = 'Tiba'
+	`, idRitase).Scan(&currentStopIndex)
+
+	var lastStatus *string
+	_ = h.DB.QueryRow(ctx, `
+		SELECT status FROM ritase_event
+		WHERE id_ritase = $1
+		ORDER BY created_at DESC, id_event DESC
+		LIMIT 1
+	`, idRitase).Scan(&lastStatus)
+
 	return response.OK(c, map[string]interface{}{
-		"has_active_ritase": true,
-		"id_ritase":         idRitase,
-		"kode_ritase":       kodeRitase,
-		"status":            statusRitase,
-		"is_last_ritase":    countUnfinished <= 1,
-		"stops":             stops,
+		"has_active_ritase":  true,
+		"id_ritase":          idRitase,
+		"kode_ritase":        kodeRitase,
+		"status":             statusRitase,
+		"is_last_ritase":     countUnfinished <= 1,
+		"stops":              stops,
+		"stage_started_at":   stageStartedAt,
+		"current_stop_index": currentStopIndex,
+		"last_status":        lastStatus,
 	})
 }
 
@@ -597,11 +624,26 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 		namaLokasi = req.NamaLokasi
 	}
 
-	// 1. Insert ke ritase_event
+	// 0. Durasi stage AUTHORITATIVE dari server — hitung dari selisih created_at
+	// event terakhir ke sekarang, JANGAN percaya durasi_detik kiriman mobile
+	// (mobile gak bisa memalsukan durasi). Robust juga terhadap layar mati
+	// (timer Dart pause di background). Event terakhir = stage yang baru ditutup.
+	_, _ = h.DB.Exec(ctx, `
+		UPDATE ritase_event
+		SET durasi_detik = EXTRACT(EPOCH FROM (now() - created_at))::int
+		WHERE id_event = (
+			SELECT id_event FROM ritase_event
+			WHERE id_ritase = $1
+			ORDER BY created_at DESC, id_event DESC
+			LIMIT 1
+		)
+	`, idRitase)
+
+	// 1. Insert ke ritase_event (event baru durasi 0 — dihitung saat stage ditutup)
 	_, err := h.DB.Exec(ctx, `
 		INSERT INTO ritase_event (id_ritase, status, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, idRitase, req.Status, req.Latitude, req.Longitude, namaLokasi, req.DurasiDetik, req.JumlahKoli, req.JumlahEcer)
+		VALUES ($1, $2, $3, $4, $5, 0, $6, $7)
+	`, idRitase, req.Status, req.Latitude, req.Longitude, namaLokasi, req.JumlahKoli, req.JumlahEcer)
 	if err != nil {
 		log.Printf("[PostTripStatus] Gagal insert ritase_event: %v", err)
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan event: "+err.Error())
