@@ -63,9 +63,10 @@ type RitaseEvent struct {
 	Longitude   *float64  `json:"longitude,omitempty"`
 	NamaLokasi  *string   `json:"nama_lokasi,omitempty"`
 	DurasiDetik *int      `json:"durasi_detik,omitempty"`
-	JumlahKoli  *int      `json:"jumlah_koli,omitempty"`
-	JumlahEcer  *int      `json:"jumlah_ecer,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	JumlahKoli      *int      `json:"jumlah_koli,omitempty"`
+	JumlahEcer      *int      `json:"jumlah_ecer,omitempty"`
+	JumlahHighValue *int      `json:"jumlah_high_value,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // RitaseDetail adalah ritase + seluruh timeline event + rute (stops)-nya.
@@ -161,8 +162,9 @@ type UpdateStatusRequest struct {
 	Longitude   *float64 `json:"longitude"`
 	NamaLokasi  *string  `json:"nama_lokasi"`
 	DurasiDetik *int     `json:"durasi_detik"`
-	JumlahKoli  *int     `json:"jumlah_koli"`
-	JumlahEcer  *int     `json:"jumlah_ecer"`
+	JumlahKoli      *int     `json:"jumlah_koli"`
+	JumlahEcer      *int     `json:"jumlah_ecer"`
+	JumlahHighValue *int     `json:"jumlah_high_value"`
 }
 
 type UpdateMuatanRequest struct {
@@ -181,7 +183,8 @@ type CreateTrackingRequest struct {
 	Kecepatan   *int    `json:"kecepatan"`
 	Arah        *int    `json:"arah"`
 	Status      *string `json:"status"`
-	JumlahKoli  int     `json:"jumlah_koli"`
-	JumlahEcer  int     `json:"jumlah_ecer"`
-	DurasiDetik *int    `json:"durasi_detik"`
+	JumlahKoli      int     `json:"jumlah_koli"`
+	JumlahEcer      int     `json:"jumlah_ecer"`
+	JumlahHighValue int     `json:"jumlah_high_value"`
+	DurasiDetik     *int    `json:"durasi_detik"`
 }

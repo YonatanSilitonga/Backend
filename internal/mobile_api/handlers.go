@@ -190,9 +190,10 @@ type CreateTrackingRequest struct {
 	Kecepatan   *int    `json:"kecepatan"`
 	Arah        *int    `json:"arah"`
 	Status      *string `json:"status"`
-	JumlahKoli  int     `json:"jumlah_koli"`
-	JumlahEcer  int     `json:"jumlah_ecer"`
-	DurasiDetik *int    `json:"durasi_detik"`
+	JumlahKoli      int     `json:"jumlah_koli"`
+	JumlahEcer      int     `json:"jumlah_ecer"`
+	JumlahHighValue int     `json:"jumlah_high_value"`
+	DurasiDetik     *int    `json:"durasi_detik"`
 	NamaLokasi  *string `json:"nama_lokasi"`
 	// Offline = sinyal "app berhenti" (onDestroy). Backend langsung cap kendaraan
 	// offline (last_update di-stamp basi) TANPA mengubah posisi terakhir.
@@ -281,8 +282,8 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 	}
 
 	_, err := h.DB.Exec(ctx, `
-		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, jumlah_ecer, nama_lokasi, last_update)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, jumlah_ecer, jumlah_high_value, nama_lokasi, last_update)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
 		ON CONFLICT (id_kendaraan) DO UPDATE 
 		SET id_ritase = EXCLUDED.id_ritase,
 		    id_driver = EXCLUDED.id_driver,
@@ -293,9 +294,10 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		    status = EXCLUDED.status,
 		    jumlah_koli = EXCLUDED.jumlah_koli,
 		    jumlah_ecer = EXCLUDED.jumlah_ecer,
+		    jumlah_high_value = EXCLUDED.jumlah_high_value,
 		    nama_lokasi = EXCLUDED.nama_lokasi,
 		    last_update = now()
-	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, req.JumlahKoli, req.JumlahEcer, req.NamaLokasi)
+	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue, req.NamaLokasi)
 
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking: "+err.Error())
@@ -575,9 +577,10 @@ type TripStatusRequest struct {
 	NamaLokasi  string  `json:"nama_lokasi"`
 	Latitude    float64 `json:"latitude"`
 	Longitude   float64 `json:"longitude"`
-	JumlahKoli  int     `json:"jumlah_koli"`
-	JumlahEcer  int     `json:"jumlah_ecer"`
-	DurasiDetik int     `json:"durasi_detik"`
+	JumlahKoli      int     `json:"jumlah_koli"`
+	JumlahEcer      int     `json:"jumlah_ecer"`
+	JumlahHighValue int     `json:"jumlah_high_value"`
+	DurasiDetik     int     `json:"durasi_detik"`
 }
 
 func (h *APIHandler) PostTripStatus(c echo.Context) error {
@@ -641,9 +644,9 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 
 	// 1. Insert ke ritase_event (event baru durasi 0 — dihitung saat stage ditutup)
 	_, err := h.DB.Exec(ctx, `
-		INSERT INTO ritase_event (id_ritase, status, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer)
-		VALUES ($1, $2, $3, $4, $5, 0, $6, $7)
-	`, idRitase, req.Status, req.Latitude, req.Longitude, namaLokasi, req.JumlahKoli, req.JumlahEcer)
+		INSERT INTO ritase_event (id_ritase, status, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer, jumlah_high_value)
+		VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8)
+	`, idRitase, req.Status, req.Latitude, req.Longitude, namaLokasi, req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue)
 	if err != nil {
 		log.Printf("[PostTripStatus] Gagal insert ritase_event: %v", err)
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan event: "+err.Error())

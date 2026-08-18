@@ -276,11 +276,11 @@ func (r *Repository) AddEvent(ctx context.Context, idRitase int64, req UpdateSta
 
 	var ev RitaseEvent
 	err = tx.QueryRow(ctx, `
-		INSERT INTO ritase_event (id_ritase, status, catatan, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		RETURNING id_event, id_ritase, status, catatan, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer, created_at
-	`, idRitase, req.Status, req.Catatan, req.Latitude, req.Longitude, req.NamaLokasi, req.DurasiDetik, req.JumlahKoli, req.JumlahEcer).Scan(
-		&ev.ID, &ev.IDRitase, &ev.Status, &ev.Catatan, &ev.Latitude, &ev.Longitude, &ev.NamaLokasi, &ev.DurasiDetik, &ev.JumlahKoli, &ev.JumlahEcer, &ev.CreatedAt)
+		INSERT INTO ritase_event (id_ritase, status, catatan, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer, jumlah_high_value)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		RETURNING id_event, id_ritase, status, catatan, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer, jumlah_high_value, created_at
+	`, idRitase, req.Status, req.Catatan, req.Latitude, req.Longitude, req.NamaLokasi, req.DurasiDetik, req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue).Scan(
+		&ev.ID, &ev.IDRitase, &ev.Status, &ev.Catatan, &ev.Latitude, &ev.Longitude, &ev.NamaLokasi, &ev.DurasiDetik, &ev.JumlahKoli, &ev.JumlahEcer, &ev.JumlahHighValue, &ev.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -289,10 +289,11 @@ func (r *Repository) AddEvent(ctx context.Context, idRitase int64, req UpdateSta
 		UPDATE armada_tracking 
 		SET jumlah_koli = COALESCE($1, jumlah_koli), 
 		    jumlah_ecer = COALESCE($2, jumlah_ecer),
+		    jumlah_high_value = COALESCE($3, jumlah_high_value),
 		    status = $4,
 		    nama_lokasi = $5
-		WHERE id_ritase = $3`, 
-		req.JumlahKoli, req.JumlahEcer, idRitase, req.Status, req.NamaLokasi)
+		WHERE id_ritase = $6`, 
+		req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue, req.Status, req.NamaLokasi, idRitase)
 
 	if _, err := tx.Exec(ctx, "UPDATE ritase SET status = $1 WHERE id_ritase = $2", req.Status, idRitase); err != nil {
 		return nil, err
