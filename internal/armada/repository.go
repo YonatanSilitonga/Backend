@@ -168,7 +168,7 @@ func (r *Repository) ListStops(ctx context.Context, idRitase int64) ([]RitaseSto
 	for rows.Next() {
 		var s RitaseStop
 		if err := rows.Scan(
-			&s.ID, &s.IDRitase, &s.Urutan, &s.JenisStop,
+			&s.IDStop, &s.IDRitase, &s.Urutan, &s.JenisStop,
 			&s.IDGudang, &s.NamaGudang, &s.TipeGudang,
 			&s.IDSeller, &s.NamaSeller,
 			&s.IDDropPoint, &s.NamaDropPoint,
@@ -328,6 +328,14 @@ func (r *Repository) CreateTracking(ctx context.Context, req CreateTrackingReque
 	err := r.db.QueryRow(ctx, `
 		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, last_update)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+		ON CONFLICT (id_kendaraan)
+		DO UPDATE SET id_driver   = EXCLUDED.id_driver,
+		              latitude    = EXCLUDED.latitude,
+		              longitude   = EXCLUDED.longitude,
+		              kecepatan   = EXCLUDED.kecepatan,
+		              arah        = EXCLUDED.arah,
+		              status      = EXCLUDED.status,
+		              last_update = now()
 		RETURNING id_tracking, id_ritase, id_kendaraan, id_driver,
 		          latitude, longitude, kecepatan, arah, status, last_update
 	`, req.IDRitase, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude,
@@ -338,4 +346,154 @@ func (r *Repository) CreateTracking(ctx context.Context, req CreateTrackingReque
 		return nil, err
 	}
 	return &t, nil
+}
+
+// ListLatestTracking mengambil 1 posisi terbaru per kendaraan (data live untuk peta).
+func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, sessionHours int, sessionRequired bool) ([]TrackingLive, error) {
+	offlineExpr := fmt.Sprintf("(t.last_update < now() - make_interval(mins => %d))", offlineMin)
+	if sessionRequired {
+		offlineExpr = fmt.Sprintf(
+			"((t.last_update < now() - make_interval(mins => %d)) OR (u.last_login IS NULL OR u.last_login < now() - make_interval(hours => %d)))",
+			offlineMin, sessionHours,
+		)
+	}
+
+	rows, err := r.db.Query(ctx, fmt.Sprintf(`
+		SELECT t.id_tracking, t.id_ritase, t.id_kendaraan, COALESCE(k.plat_nomor,''),
+		       t.id_driver, COALESCE(d.nama_driver,''),
+		       t.latitude, t.longitude, t.kecepatan, t.arah, t.status, t.nama_lokasi, t.last_update,
+		       %s AS offline,
+		       (u.last_login IS NOT NULL AND u.last_login > now() - make_interval(hours => %d)) AS session_online,
+		       u.last_login, u.last_open
+		FROM armada_tracking t
+		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
+		LEFT JOIN driver d ON d.id_driver = t.id_driver
+		LEFT JOIN users u ON u.id_driver = d.id_driver
+		ORDER BY t.last_update DESC
+	`, offlineExpr, sessionHours))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []TrackingLive
+	for rows.Next() {
+		var t TrackingLive
+		if err := rows.Scan(&t.ID, &t.IDRitase, &t.IDKendaraan, &t.PlatNomor,
+			&t.IDDriver, &t.NamaDriver,
+			&t.Latitude, &t.Longitude, &t.Kecepatan, &t.Arah, &t.Status, &t.NamaLokasi, &t.LastUpdate,
+			&t.Offline, &t.SessionOnline, &t.LastLogin, &t.LastOpen); err != nil {
+			return nil, err
+		}
+		items = append(items, t)
+	}
+	return items, rows.Err()
+}
+
+// ListSellerLocations mengambil seller yang punya koordinat (untuk peta).
+func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id_seller, COALESCE(kode_seller,''), COALESCE(nama_seller,''), COALESCE(alamat,''),
+		       COALESCE(kota,''), COALESCE(pic,''), COALESCE(no_hp,''),
+		       latitude, longitude, jarak_tempuh_km, jarak_dc_km
+		FROM seller
+		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+		ORDER BY id_seller ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []SellerLocation
+	for rows.Next() {
+		var s SellerLocation
+		if err := rows.Scan(&s.IDSeller, &s.KodeSeller, &s.NamaSeller, &s.Alamat, &s.Kota, &s.PIC, &s.NoHP, &s.Latitude, &s.Longitude, &s.JarakTempuhKm, &s.JarakDcKm); err != nil {
+			return nil, err
+		}
+		items = append(items, s)
+	}
+	return items, rows.Err()
+}
+
+// ListGudangLocations mengambil posisi gudang yang punya koordinat (peta).
+func (r *Repository) ListGudangLocations(ctx context.Context) ([]GudangPoint, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id_gudang, COALESCE(nama_gudang,''), COALESCE(tipe,''), latitude, longitude
+		FROM gudang
+		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+		ORDER BY id_gudang ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []GudangPoint
+	for rows.Next() {
+		var g GudangPoint
+		if err := rows.Scan(&g.IDGudang, &g.NamaGudang, &g.Tipe, &g.Latitude, &g.Longitude); err != nil {
+			return nil, err
+		}
+		items = append(items, g)
+	}
+	return items, rows.Err()
+}
+
+// ListDropPoints mengambil posisi drop_point yang punya koordinat (peta).
+func (r *Repository) ListDropPoints(ctx context.Context) ([]DropPointPoi, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id_drop_point, COALESCE(kode_dp,''), COALESCE(nama_drop_point,''), latitude, longitude,
+		       jarak_tempuh_km, jarak_dc_km
+		FROM drop_point
+		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+		ORDER BY id_drop_point ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []DropPointPoi
+	for rows.Next() {
+		var p DropPointPoi
+		if err := rows.Scan(&p.IDDropPoint, &p.KodeDP, &p.NamaDP, &p.Latitude, &p.Longitude, &p.JarakTempuhKm, &p.JarakDcKm); err != nil {
+			return nil, err
+		}
+		items = append(items, p)
+	}
+	return items, rows.Err()
+}
+
+func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan int64, tanggal string) ([]TrackingCheckpoint, error) {
+	query := `
+		SELECT e.id_event, e.id_ritase, COALESCE(r.kode_ritase,''),
+		       e.status, e.catatan, e.latitude, e.longitude, e.durasi_detik, e.created_at
+		FROM ritase_event e
+		JOIN ritase r ON r.id_ritase = e.id_ritase
+		WHERE r.id_kendaraan = $1
+	`
+	var args []interface{} = []interface{}{idKendaraan}
+	if tanggal != "" {
+		args = append(args, tanggal)
+		query += " AND e.created_at::date = $" + fmt.Sprint(len(args))
+	}
+	query += " ORDER BY e.created_at DESC, e.id_event DESC"
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []TrackingCheckpoint
+	for rows.Next() {
+		var c TrackingCheckpoint
+		if err := rows.Scan(&c.IDEvent, &c.IDRitase, &c.KodeRitase,
+			&c.Status, &c.Catatan, &c.Latitude, &c.Longitude, &c.DurasiDetik, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, c)
+	}
+	return items, rows.Err()
 }
