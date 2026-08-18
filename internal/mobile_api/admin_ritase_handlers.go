@@ -355,11 +355,13 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 	}
 	defer tx.Rollback(ctx)
 
-	// 1. Clear current date's uncompleted ritase and stops to cleanly overwrite/replace
-	if _, err := tx.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = CURRENT_DATE AND status != 'selesai')"); err != nil {
-		return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan ritase lama: "+err.Error())
+	// 1. Clear current date's uncompleted ritase_event, ritase_stop, armada_tracking, and ritase to cleanly overwrite/replace
+	if _, err := tx.Exec(ctx, "DELETE FROM ritase_event WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = CURRENT_DATE AND status != 'selesai')"); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan event lama: "+err.Error())
 	}
-	// Hapus armada_tracking yang merujuk ke ritase yang akan dihapus (FK constraint)
+	if _, err := tx.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = CURRENT_DATE AND status != 'selesai')"); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan ritase_stop lama: "+err.Error())
+	}
 	if _, err := tx.Exec(ctx, "DELETE FROM armada_tracking WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = CURRENT_DATE AND status != 'selesai')"); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan tracking lama: "+err.Error())
 	}
