@@ -291,7 +291,7 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 			plat = p
 		}
 
-		var previewStops []PreviewStop
+		previewStops := make([]PreviewStop, 0)
 		for _, fs := range fr.Stops {
 			locName := fmt.Sprintf("Target #%d", fs.IDLokasi)
 			if fs.Jenis == "gudang" {
@@ -555,6 +555,8 @@ func (h *APIHandler) AdminDeleteRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
+	_, _ = h.DB.Exec(ctx, "UPDATE armada_tracking SET id_ritase = NULL WHERE id_ritase = $1", idRitase)
+	_, _ = h.DB.Exec(ctx, "DELETE FROM ritase_event WHERE id_ritase = $1", idRitase)
 	_, _ = h.DB.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase = $1", idRitase)
 	_, err = h.DB.Exec(ctx, "DELETE FROM ritase WHERE id_ritase = $1", idRitase)
 	if err != nil {

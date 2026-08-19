@@ -312,32 +312,30 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 	defer cancel()
 
 	idDriverParam := c.QueryParam("id_driver")
-	idKendaraanParam := c.QueryParam("id_kendaraan")
-
 	idDriver, _ := strconv.ParseInt(idDriverParam, 10, 64)
-	idKendaraan, _ := strconv.ParseInt(idKendaraanParam, 10, 64)
 
-	if idDriver == 0 || idKendaraan == 0 {
-		return response.Error(c, http.StatusBadRequest, "id_driver dan id_kendaraan harus diisi")
+	if idDriver == 0 {
+		return response.Error(c, http.StatusBadRequest, "id_driver harus diisi")
 	}
 
-	// 1. Cari Ritase Aktif
-	var idRitase int64
-	var statusRitase, kodeRitase string
+	// 1. Cari Ritase Aktif (berdasarkan penugasan driver)
+	var idRitase, assignedKendaraanID int64
+	var statusRitase, kodeRitase, platNomor, jenisKendaraan string
 	err := h.DB.QueryRow(ctx, `
-		SELECT id_ritase, status, kode_ritase
-		FROM ritase
-		WHERE id_driver = $1 AND id_kendaraan = $2 AND status != 'selesai' AND tanggal = CURRENT_DATE
-		ORDER BY id_ritase ASC
+		SELECT r.id_ritase, r.id_kendaraan, r.status, r.kode_ritase, COALESCE(k.plat_nomor, ''), COALESCE(k.jenis_kendaraan, '')
+		FROM ritase r
+		LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
+		WHERE r.id_driver = $1 AND r.status != 'selesai' AND (r.tanggal = CURRENT_DATE OR r.tanggal IS NULL)
+		ORDER BY r.ritase_ke ASC, r.id_ritase ASC
 		LIMIT 1
-	`, idDriver, idKendaraan).Scan(&idRitase, &statusRitase, &kodeRitase)
+	`, idDriver).Scan(&idRitase, &assignedKendaraanID, &statusRitase, &kodeRitase, &platNomor, &jenisKendaraan)
 
 	if err != nil {
 		var countFinishedToday int
 		_ = h.DB.QueryRow(ctx, `
 			SELECT COUNT(*) FROM ritase
-			WHERE id_driver = $1 AND id_kendaraan = $2 AND status = 'selesai' AND tanggal = CURRENT_DATE
-		`, idDriver, idKendaraan).Scan(&countFinishedToday)
+			WHERE id_driver = $1 AND status = 'selesai' AND tanggal = CURRENT_DATE
+		`, idDriver).Scan(&countFinishedToday)
 
 		// Jika tidak ada ritase, kembalikan response sukses tapi kosong (menandakan tidak ada rute)
 		return response.OK(c, map[string]interface{}{
@@ -407,8 +405,8 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 	var countUnfinished int
 	_ = h.DB.QueryRow(ctx, `
 		SELECT COUNT(*) FROM ritase
-		WHERE id_driver = $1 AND id_kendaraan = $2 AND status != 'selesai' AND tanggal = CURRENT_DATE
-	`, idDriver, idKendaraan).Scan(&countUnfinished)
+		WHERE id_driver = $1 AND status != 'selesai' AND (tanggal = CURRENT_DATE OR tanggal IS NULL)
+	`, idDriver).Scan(&countUnfinished)
 
 	// Baseline waktu stage aktif: created_at event status terakhir ritase ini.
 	// Dipakai mobile utk merekonstruksi durasi stage saat app dibuka lagi
@@ -437,6 +435,7 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 	return response.OK(c, map[string]interface{}{
 		"has_active_ritase":  true,
 		"id_ritase":          idRitase,
+		"id_kendaraan":       assignedKendaraanID,
 		"kode_ritase":        kodeRitase,
 		"status":             statusRitase,
 		"is_last_ritase":     countUnfinished <= 1,
@@ -444,6 +443,8 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		"stage_started_at":   stageStartedAt,
 		"current_stop_index": currentStopIndex,
 		"last_status":        lastStatus,
+		"plat_nomor":         platNomor,
+		"jenis_kendaraan":    jenisKendaraan,
 	})
 }
 
