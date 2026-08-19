@@ -12,11 +12,11 @@ import (
 	"backend/internal/config"
 	"backend/internal/dashboard"
 	"backend/internal/database"
- 	"backend/internal/driver"
+	"backend/internal/driver"
 	"backend/internal/eventbus"
- 	"backend/internal/kendaraan"
- 	"backend/internal/mobile_api"
- 	appJWT "backend/internal/pkg/jwt"
+	"backend/internal/kendaraan"
+	"backend/internal/mobile_api"
+	appJWT "backend/internal/pkg/jwt"
 	appMiddleware "backend/internal/pkg/middleware"
 	"backend/internal/pkg/response"
 	"backend/internal/realtime"
@@ -36,7 +36,7 @@ func main() {
 	defer db.Close()
 	log.Println("berhasil konek ke database")
 
-// Ensure database schema columns exist
+	// Ensure database schema columns exist
 	_, _ = db.Exec(ctx, `
 		ALTER TABLE ritase_event ADD COLUMN IF NOT EXISTS nama_lokasi VARCHAR(255);
 		ALTER TABLE armada_tracking ADD COLUMN IF NOT EXISTS nama_lokasi VARCHAR(255);
@@ -156,18 +156,31 @@ func (p *liveProvider) GetSnapshot(ctx context.Context) (map[string]any, error) 
 	queryCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 
+	tStart := time.Now()
+
+	t0 := time.Now()
 	summary, err := p.dash.GetSummary(queryCtx)
+	log.Printf("[TIMING] GetSummary: %v", time.Since(t0))
 	if err != nil {
 		return nil, err
 	}
+
+	t1 := time.Now()
 	analisis, err := p.dash.GetAnalisis(queryCtx)
+	log.Printf("[TIMING] GetAnalisis: %v", time.Since(t1))
 	if err != nil {
 		return nil, err
 	}
+
+	t2 := time.Now()
 	tracking, err := p.arm.GetTrackingMap(queryCtx)
+	log.Printf("[TIMING] GetTrackingMap: %v", time.Since(t2))
 	if err != nil {
 		return nil, err
 	}
+
+	log.Printf("[TIMING] TOTAL: %v", time.Since(tStart))
+
 	return map[string]any{
 		"summary":  summary,
 		"analisis": analisis,

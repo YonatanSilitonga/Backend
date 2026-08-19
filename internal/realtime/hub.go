@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"backend/internal/eventbus"
@@ -27,6 +28,8 @@ type Hub struct {
 
 	lastMu      sync.RWMutex
 	lastPayload []byte
+
+	broadcasting int32
 }
 
 func NewHub(provider Provider, interval time.Duration, bus *eventbus.Bus) *Hub {
@@ -78,8 +81,14 @@ func (h *Hub) listen(ctx context.Context) {
 	}
 }
 
-
 func (h *Hub) broadcast(ctx context.Context) {
+	// Kalau ada broadcast lain yang masih jalan, skip — jangan numpuk query DB.
+	if !atomic.CompareAndSwapInt32(&h.broadcasting, 0, 1) {
+		log.Println("[REALTIME] broadcast sebelumnya masih jalan, skip tick ini")
+		return
+	}
+	defer atomic.StoreInt32(&h.broadcasting, 0)
+
 	snapshot, err := h.provider.GetSnapshot(ctx)
 	if err != nil {
 		log.Printf("[REALTIME] gagal ambil snapshot: %v", err)

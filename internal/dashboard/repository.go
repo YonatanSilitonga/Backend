@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,11 +33,14 @@ func NewRepository(db *pgxpool.Pool, offlineMin int, sessionHours int, sessionRe
 
 // GetSummary menghitung ringkasan KPI dari tabel-tabel existing.
 // Query DIKONSOLIDASI (GROUP BY / FILTER) biar gak 24x roundtrip ke DB.
+// GetSummary menghitung ringkasan KPI dari tabel-tabel existing.
+// Query DIKONSOLIDASI (GROUP BY / FILTER) biar gak 24x roundtrip ke DB.
 func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 	s := &Summary{}
 	today := time.Now().Format("2006-01-02")
 
 	// Kendaraan — 1 query (dulu 4)
+	t := time.Now()
 	if err := r.db.QueryRow(ctx, `
 		SELECT count(*),
 		       count(*) FILTER (WHERE LOWER(status_kendaraan) IN ('aktif','berjalan','bertugas','tersedia')),
@@ -46,8 +50,10 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 	`).Scan(&s.TotalKendaraan, &s.ArmadaAktif, &s.ArmadaSelesai, &s.ArmadaIdle); err != nil {
 		return nil, err
 	}
+	log.Printf("[TIMING] kendaraan: %v", time.Since(t))
 
 	// Driver — 1 query (dulu 3)
+	t = time.Now()
 	if err := r.db.QueryRow(ctx, `
 		SELECT count(*),
 		       count(*) FILTER (WHERE LOWER(status_driver) IN ('aktif','bertugas','on_duty')),
@@ -56,8 +62,10 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 	`).Scan(&s.TotalDriver, &s.DriverAktif, &s.DriverLibur); err != nil {
 		return nil, err
 	}
+	log.Printf("[TIMING] driver: %v", time.Since(t))
 
 	// Ritase + muatan — 1 query (dulu ~8)
+	t = time.Now()
 	if err := r.db.QueryRow(ctx, `
 		SELECT count(*),
 		       count(*) FILTER (WHERE LOWER(status) NOT IN ('selesai','completed','done','batal','cancelled')),
@@ -72,8 +80,10 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 		&s.TotalAWB, &s.TotalAWBToday, &s.TotalKoli, &s.PaketTertinggal); err != nil {
 		return nil, err
 	}
+	log.Printf("[TIMING] ritase: %v", time.Since(t))
 
 	// Seller terlayani — 1 query (relasi via ritase_stop)
+	t = time.Now()
 	if err := r.db.QueryRow(ctx, `
 		SELECT count(DISTINCT rs.id_seller)
 		FROM ritase_stop rs
@@ -82,8 +92,10 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 	`).Scan(&s.SellerTerlayani); err != nil {
 		return nil, err
 	}
+	log.Printf("[TIMING] seller_terlayani: %v", time.Since(t))
 
 	// Master lainnya — 1 query (scalar subquery)
+	t = time.Now()
 	if err := r.db.QueryRow(ctx, `
 		SELECT (SELECT count(*) FROM seller),
 		       (SELECT count(*) FROM drop_point),
@@ -96,9 +108,11 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 		&s.TotalManpower, &s.TotalAbsensi, &s.TotalImplant, &s.TotalTracking); err != nil {
 		return nil, err
 	}
+	log.Printf("[TIMING] master_lainnya: %v", time.Since(t))
 
 	// Armada online = ada posisi terbaru ≤ ambang offline (menit).
 	// Saat sessionRequired: wajib juga punya session login aktif (anti ghost online).
+	t = time.Now()
 	onlineSQL := fmt.Sprintf(`
 		SELECT count(*) FROM armada_tracking
 		WHERE last_update > now() - make_interval(mins => %d)
@@ -117,8 +131,10 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 	if err := r.db.QueryRow(ctx, onlineSQL).Scan(&s.ArmadaOnline); err != nil {
 		return nil, err
 	}
+	log.Printf("[TIMING] armada_online: %v", time.Since(t))
 
 	// driver telat: ritase berjalan yang umurnya > 6 jam sejak event pertama
+	t = time.Now()
 	if err := r.db.QueryRow(ctx, `
 		SELECT count(DISTINCT r.id_driver)
 		FROM ritase r
@@ -128,6 +144,7 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 	`).Scan(&s.DriverTelat); err != nil {
 		return nil, err
 	}
+	log.Printf("[TIMING] driver_telat: %v", time.Since(t))
 
 	return s, nil
 }
