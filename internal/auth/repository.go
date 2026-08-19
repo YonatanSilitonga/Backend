@@ -74,8 +74,13 @@ func (r *Repository) SetLastLogin(ctx context.Context, id int64) error {
 	return err
 }
 
-// ClearLastLogin menandai user logout (session selesai).
+// ClearLastLogin menandai user logout (session selesai) & armada langsung offline di dashboard.
 func (r *Repository) ClearLastLogin(ctx context.Context, id int64) error {
+	_, _ = r.db.Exec(ctx, `
+		UPDATE armada_tracking
+		SET last_update = now() - interval '1 hour'
+		WHERE id_driver = (SELECT id_driver FROM users WHERE id_user = $1 AND id_driver IS NOT NULL)
+	`, id)
 	_, err := r.db.Exec(ctx, `UPDATE users SET last_login = NULL WHERE id_user = $1`, id)
 	return err
 }

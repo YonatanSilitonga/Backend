@@ -226,11 +226,12 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		_, err := h.DB.Exec(ctx, `
 			UPDATE armada_tracking
 			SET last_update = now() - interval '1 hour'
-			WHERE id_kendaraan = $1 AND id_driver = $2
+			WHERE id_kendaraan = $1 OR id_driver = $2
 		`, req.IDKendaraan, req.IDDriver)
 		if err != nil {
 			return response.Error(c, http.StatusInternalServerError, "gagal menandai offline: "+err.Error())
 		}
+		h.bus.Publish("force_refresh", "mobile_offline_signal")
 		return response.OK(c, "ok")
 	}
 
@@ -651,6 +652,13 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 	if err != nil {
 		log.Printf("[PostTripStatus] Gagal insert ritase_event: %v", err)
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan event: "+err.Error())
+	}
+
+	// Update status ritase di tabel ritase ke 'berjalan' jika belum selesai
+	if req.Status == "Selesai" {
+		_, _ = h.DB.Exec(ctx, `UPDATE ritase SET status = 'selesai' WHERE id_ritase = $1`, idRitase)
+	} else {
+		_, _ = h.DB.Exec(ctx, `UPDATE ritase SET status = 'berjalan' WHERE id_ritase = $1 AND status != 'selesai'`, idRitase)
 	}
 
 	// 2. Update armada_tracking status & nama_lokasi
