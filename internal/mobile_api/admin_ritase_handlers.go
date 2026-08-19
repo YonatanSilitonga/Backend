@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"backend/internal/pkg/response"
+	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 )
 
@@ -214,18 +215,20 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 	_ = h.DB.QueryRow(ctx, "SELECT MAX(tanggal) FROM ritase").Scan(&latestDate)
 
 	if latestDate != nil {
-		rowsR, errR := h.DB.Query(ctx, "SELECT id_ritase, id_driver, id_kendaraan, ritase_ke FROM ritase WHERE tanggal = $1 ORDER BY id_driver, ritase_ke", *latestDate)
+		rowsR, errR := h.DB.Query(ctx, "SELECT id_ritase, id_driver, id_kendaraan, COALESCE(id_drop_point, 0), ritase_ke FROM ritase WHERE tanggal = $1 ORDER BY id_driver, ritase_ke", *latestDate)
 		if errR == nil {
 			var ritaseMap = make(map[int64]*FixedRoute)
 			var orderedRitaseIDs []int64
 
 			for rowsR.Next() {
 				var idRitase, idDriver, idKendaraan int64
+				var idDropPoint int64
 				var ritaseKe int
-				if err := rowsR.Scan(&idRitase, &idDriver, &idKendaraan, &ritaseKe); err == nil {
+				if err := rowsR.Scan(&idRitase, &idDriver, &idKendaraan, &idDropPoint, &ritaseKe); err == nil {
 					ritaseMap[idRitase] = &FixedRoute{
 						IDDriver:    idDriver,
 						IDKendaraan: idKendaraan,
+						IDDropPoint: idDropPoint,
 						RitaseKe:    ritaseKe,
 						Stops:       []FixedStop{},
 					}
@@ -335,7 +338,7 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 
 // AdminGenerateDailyRitase Handler 1-Klik Generate Rute Harian
 func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 60*time.Second)
 	defer cancel()
 
 	var req struct {
@@ -389,6 +392,8 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 			kodeRitase = fmt.Sprintf("%s-%d", baseKode, counter)
 		}
 
+		finalDropPointID := getValidDropPointID(ctx, tx, route.IDDropPoint)
+
 		var idRitase int64
 		err := tx.QueryRow(ctx, `
 			INSERT INTO ritase (
@@ -396,7 +401,7 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 			) VALUES (
 				$1, CURRENT_DATE, $2, $3, $4, $5, 'direncanakan'
 			) RETURNING id_ritase
-		`, kodeRitase, route.IDDriver, route.IDKendaraan, route.IDDropPoint, route.RitaseKe).Scan(&idRitase)
+		`, kodeRitase, route.IDDriver, route.IDKendaraan, finalDropPointID, route.RitaseKe).Scan(&idRitase)
 
 		if err != nil {
 			return response.Error(c, http.StatusInternalServerError, fmt.Sprintf("Gagal generate ritase D%d: %v", route.IDDriver, err))
@@ -705,6 +710,8 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 		kodeRitase = fmt.Sprintf("%s-%d", baseKode, counter)
 	}
 
+	finalDropPointID := getValidDropPointID(ctx, tx, req.IDDropPoint)
+
 	var idRitase int64
 	err = tx.QueryRow(ctx, `
 		INSERT INTO ritase (
@@ -712,7 +719,7 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 		) VALUES (
 			$1, $2::date, $3, $4, $5, $6, 'direncanakan'
 		) RETURNING id_ritase
-	`, kodeRitase, req.Tanggal, req.IDDriver, req.IDKendaraan, req.IDDropPoint, req.RitaseKe).Scan(&idRitase)
+	`, kodeRitase, req.Tanggal, req.IDDriver, req.IDKendaraan, finalDropPointID, req.RitaseKe).Scan(&idRitase)
 
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal membuat ritase: "+err.Error())
@@ -858,5 +865,24 @@ func (h *APIHandler) AdminGetMasterOptions(c echo.Context) error {
 		"sellers":     sellers,
 		"gudangs":     gudangs,
 	})
+}
+
+// getValidDropPointID memastikan id_drop_point yang dimasukkan selalu terdaftar di database (bukan null / 0).
+func getValidDropPointID(ctx context.Context, db interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}, requestedID int64) int64 {
+	if requestedID > 0 {
+		var exists bool
+		_ = db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM drop_point WHERE id_drop_point = $1)", requestedID).Scan(&exists)
+		if exists {
+			return requestedID
+		}
+	}
+	var fallbackID int64
+	_ = db.QueryRow(ctx, "SELECT id_drop_point FROM drop_point ORDER BY id_drop_point ASC LIMIT 1").Scan(&fallbackID)
+	if fallbackID > 0 {
+		return fallbackID
+	}
+	return 2
 }
 

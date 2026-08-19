@@ -27,7 +27,7 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id_kendaraan, plat_nomor, jenis_kendaraan,
-		       kapasitas_koli, status_kendaraan
+		       kapasitas_kg, status_kendaraan
 		FROM kendaraan
 		ORDER BY id_kendaraan
 	`)
@@ -40,7 +40,7 @@ func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	for rows.Next() {
 		var k Kendaraan
 		if err := rows.Scan(&k.ID, &k.PlatNomor, &k.JenisKendaraan,
-			&k.KapasitasKoli, &k.StatusKendaraan); err != nil {
+			&k.KapasitasKg, &k.StatusKendaraan); err != nil {
 			return nil, err
 		}
 		items = append(items, k)
@@ -75,18 +75,17 @@ func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 /* ---------- Ritase ---------- */
 
 const ritaseSelect = `
-	SELECT r.id_ritase, r.kode_ritase, r.tanggal::text,
+	SELECT r.id_ritase, r.kode_ritase, COALESCE(r.tanggal::text, ''),
 	       r.id_driver, COALESCE(d.nama_driver,''),
 	       r.id_kendaraan, COALESCE(k.plat_nomor,''),
-	       r.id_seller, COALESCE(s.nama_seller,''),
-	       r.id_drop_point, COALESCE(dp.nama_drop_point,''),
-	       r.ritase_ke, r.total_awb, r.total_koli,
-	       r.paket_tertinggal, r.alasan_tertinggal,
-	       r.jam_berangkat::text, r.jam_tiba::text, r.status, r.created_at
+	       0 AS id_seller, '' AS nama_seller,
+	       COALESCE(r.id_drop_point, 0), COALESCE(dp.nama_drop_point,''),
+	       COALESCE(r.ritase_ke, 1), COALESCE(r.total_awb, 0), COALESCE(r.total_koli, 0),
+	       COALESCE(r.paket_tertinggal, 0), COALESCE(r.alasan_tertinggal, ''),
+	       COALESCE(r.jam_berangkat::text, ''), COALESCE(r.jam_tiba::text, ''), COALESCE(r.status, 'direncanakan'), COALESCE(r.created_at, now())
 	FROM ritase r
 	LEFT JOIN driver d ON d.id_driver = r.id_driver
 	LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
-	LEFT JOIN seller s ON s.id_seller = r.id_seller
 	LEFT JOIN drop_point dp ON dp.id_drop_point = r.id_drop_point
 `
 
