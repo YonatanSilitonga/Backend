@@ -256,11 +256,12 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 
 	// ritase berjalan lama tanpa update (kendaraan berhenti terlalu lama)
 	rows, err := r.db.Query(ctx, `
-		SELECT r.kode_ritase, now() - max(e.created_at), max(e.created_at)
+		SELECT r.kode_ritase, d.nama_driver, now() - max(e.created_at), max(e.created_at)
 		FROM ritase r
 		JOIN ritase_event e ON e.id_ritase = r.id_ritase
+		JOIN driver d ON d.id_driver = r.id_driver
 		WHERE r.status NOT IN ('selesai','completed','done','batal','cancelled')
-		GROUP BY r.kode_ritase
+		GROUP BY r.kode_ritase, d.nama_driver
 		HAVING now() - max(e.created_at) > interval '3 hours'
 		ORDER BY now() - max(e.created_at) DESC
 		LIMIT 5
@@ -269,17 +270,17 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 		return nil, err
 	}
 	for rows.Next() {
-		var kode string
+		var kode, namaDriver string
 		var dur time.Duration
 		var lastEvent time.Time
-		if err := rows.Scan(&kode, &dur, &lastEvent); err != nil {
+		if err := rows.Scan(&kode, &namaDriver, &dur, &lastEvent); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		items = append(items, AlertAnomali{
 			Tingkat:     "warning",
 			Kategori:    "kendaraan_berhenti",
-			Pesan:       fmt.Sprintf("Ritase %s berhenti lebih dari %s tanpa update", kode, dur.Round(time.Minute)),
+			Pesan:       fmt.Sprintf("Driver %s berhenti lebih dari %s tanpa update", namaDriver, dur.Round(time.Minute)),
 			Waktu:       lastEvent, // waktu kejadian asli (update GPS terakhir), bukan waktu query
 			Deskripsi:   "Kendaraan tidak mengirim update GPS lebih dari 3 jam padahal ritase belum selesai — berpotensi berhenti di jalan, HP mati, atau kendala armada.",
 			Rekomendasi: "Hubungi driver segera, cek posisi terakhir, dan pastikan kondisi armada serta keselamatan muatan.",
