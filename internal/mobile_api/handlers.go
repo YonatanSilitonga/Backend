@@ -182,22 +182,20 @@ func (h *APIHandler) GetVehicles(c echo.Context) error {
 }
 
 type CreateTrackingRequest struct {
-	IDRitase    int64   `json:"id_ritase"`
-	IDKendaraan int64   `json:"id_kendaraan"`
-	IDDriver    int64   `json:"id_driver"`
-	Latitude    float64 `json:"latitude"`
-	Longitude   float64 `json:"longitude"`
-	Kecepatan   *int    `json:"kecepatan"`
-	Arah        *int    `json:"arah"`
-	Status      *string `json:"status"`
+	IDRitase        int64   `json:"id_ritase"`
+	IDKendaraan     int64   `json:"id_kendaraan"`
+	IDDriver        int64   `json:"id_driver"`
+	Latitude        float64 `json:"latitude"`
+	Longitude       float64 `json:"longitude"`
+	Kecepatan       *int    `json:"kecepatan"`
+	Arah            *int    `json:"arah"`
+	Status          *string `json:"status"`
 	JumlahKoli      int     `json:"jumlah_koli"`
 	JumlahEcer      int     `json:"jumlah_ecer"`
 	JumlahHighValue int     `json:"jumlah_high_value"`
 	DurasiDetik     *int    `json:"durasi_detik"`
-	NamaLokasi  *string `json:"nama_lokasi"`
-	// Offline = sinyal "app berhenti" (onDestroy). Backend langsung cap kendaraan
-	// offline (last_update di-stamp basi) TANPA mengubah posisi terakhir.
-	Offline *bool `json:"offline"`
+	NamaLokasi      *string `json:"nama_lokasi"`
+	Offline         *bool   `json:"offline"`
 }
 
 func (h *APIHandler) PostTracking(c echo.Context) error {
@@ -574,11 +572,11 @@ func (h *APIHandler) ResetTestRitase(c echo.Context) error {
 // PostTripStatus mencatat event status perjalanan ke ritase_event dan update armada_tracking.
 // Endpoint khusus driver: POST /driver/trip-status
 type TripStatusRequest struct {
-	IDRitase    int64   `json:"id_ritase"`
-	Status      string  `json:"status"`
-	NamaLokasi  string  `json:"nama_lokasi"`
-	Latitude    float64 `json:"latitude"`
-	Longitude   float64 `json:"longitude"`
+	IDRitase        int64   `json:"id_ritase"`
+	Status          string  `json:"status"`
+	NamaLokasi      string  `json:"nama_lokasi"`
+	Latitude        float64 `json:"latitude"`
+	Longitude       float64 `json:"longitude"`
 	JumlahKoli      int     `json:"jumlah_koli"`
 	JumlahEcer      int     `json:"jumlah_ecer"`
 	JumlahHighValue int     `json:"jumlah_high_value"`
