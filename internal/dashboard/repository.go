@@ -177,7 +177,7 @@ func (r *Repository) GetDurasiAnalisis(ctx context.Context) (*DurasiAnalisis, er
 			return nil, err
 		}
 		if avgSeconds != nil {
-			*p.dst = formatDuration(*avgSeconds)
+			*p.dst = formatJamMenit(time.Duration(*avgSeconds) * time.Second)
 		} else {
 			*p.dst = "belum ada data"
 		}
@@ -280,9 +280,9 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 		items = append(items, AlertAnomali{
 			Tingkat:     "warning",
 			Kategori:    "kendaraan_berhenti",
-			Pesan:       fmt.Sprintf("Driver %s berhenti lebih dari %s tanpa update", namaDriver, dur.Round(time.Minute)),
+			Pesan:       fmt.Sprintf("Driver %s berhenti lebih dari %s tanpa update", namaDriver, formatJamMenit(dur)),
 			Waktu:       lastEvent, // waktu kejadian asli (update GPS terakhir), bukan waktu query
-			Deskripsi:   "Kendaraan tidak mengirim update GPS lebih dari 3 jam padahal ritase belum selesai — berpotensi berhenti di jalan, HP mati, atau kendala armada.",
+			Deskripsi:   "Kendaraan tidak mengirim update GPS lebih dari 3 jam padahal ritase belum selesai berpotensi berhenti di jalan, HP mati, atau kendala armada.",
 			Rekomendasi: "Hubungi driver segera, cek posisi terakhir, dan pastikan kondisi armada serta keselamatan muatan.",
 		})
 	}
@@ -323,15 +323,15 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 	return items, nil
 }
 
-func formatDuration(seconds float64) string {
-	d := time.Duration(seconds) * time.Second
-	if d < time.Minute {
-		return fmt.Sprintf("%.0f detik", seconds)
+// formatJamMenit mengubah time.Duration jadi "18 jam 18 menit" (tanpa detik).
+func formatJamMenit(d time.Duration) string {
+	d = d.Round(time.Minute)
+	h := int(d.Hours())
+	m := int(d.Minutes()) - h*60
+	if h == 0 {
+		return fmt.Sprintf("%d menit", m)
 	}
-	if d < time.Hour {
-		return fmt.Sprintf("%.0f menit", d.Minutes())
-	}
-	return fmt.Sprintf("%.1f jam", d.Hours())
+	return fmt.Sprintf("%d jam %d menit", h, m)
 }
 
 // defaultRange mengisi from/to (YYYY-MM-DD): kosong → 30 hari terakhir (to = hari ini).
