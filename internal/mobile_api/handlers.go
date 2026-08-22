@@ -306,6 +306,74 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 	return response.OK(c, "success")
 }
 
+// ── JADWAL: helper untuk mencocokkan jam sekarang dengan jendela waktu ritase ──
+
+// hitungWindowMenit menghitung rentang menit [startMin, endMin] (0-1439, endMin bisa > 1440
+// kalau window melewati tengah malam) untuk sebuah jadwal ritase, SUDAH TERMASUK toleransi
+// mulai 2 jam lebih awal dari jam_mulai resmi.
+func hitungWindowMenit(jamMulaiStr, jamSelesaiStr string) (startMin, endMin int, err error) {
+	mulai, err := time.Parse("15:04:05", jamMulaiStr)
+	if err != nil {
+		return 0, 0, err
+	}
+	selesai, err := time.Parse("15:04:05", jamSelesaiStr)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	mulaiMin := mulai.Hour()*60 + mulai.Minute()
+	selesaiMin := selesai.Hour()*60 + selesai.Minute()
+
+	startMin = mulaiMin - 120 // toleransi 2 jam lebih awal
+	if startMin < 0 {
+		startMin += 1440
+	}
+
+	endMin = selesaiMin
+	if endMin == 0 {
+		// jam_selesai "00:00:00" berarti akhir hari (tengah malam)
+		endMin = 1440
+	}
+	if endMin <= startMin {
+		endMin += 1440
+	}
+
+	return startMin, endMin, nil
+}
+
+// cocokDenganSekarang cek apakah nowMin (0-1439) berada di dalam window [startMin, endMin].
+func cocokDenganSekarang(nowMin, startMin, endMin int) bool {
+	n := nowMin
+	if n < startMin {
+		n += 1440
+	}
+	return n >= startMin && n <= endMin
+}
+
+// hitungJamBoleh mengembalikan jam (HH:MM) paling awal driver boleh mulai (2 jam sebelum jam_mulai resmi).
+func hitungJamBoleh(jamMulaiStr string) string {
+	mulai, err := time.Parse("15:04:05", jamMulaiStr)
+	if err != nil {
+		return jamMulaiStr
+	}
+	boleh := mulai.Add(-2 * time.Hour)
+	return boleh.Format("15:04")
+}
+
+// ritaseCandidate menampung 1 baris ritase kandidat (belum selesai) milik seorang driver hari ini.
+type ritaseCandidate struct {
+	IDRitase       int64
+	IDKendaraan    int64
+	Status         string
+	KodeRitase     string
+	PlatNomor      string
+	JenisKendaraan string
+	RitaseKe       int
+	JenisRitase    *string
+	JamMulai       *string
+	JamSelesai     *string
+}
+
 func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
@@ -317,33 +385,147 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		return response.Error(c, http.StatusBadRequest, "id_driver harus diisi")
 	}
 
-	// 1. Cari Ritase Aktif (berdasarkan penugasan driver)
-	var idRitase, assignedKendaraanID int64
-	var statusRitase, kodeRitase, platNomor, jenisKendaraan string
-	err := h.DB.QueryRow(ctx, `
-		SELECT r.id_ritase, r.id_kendaraan, r.status, r.kode_ritase, COALESCE(k.plat_nomor, ''), COALESCE(k.jenis_kendaraan, '')
+	// ── PAKSA WAKTU JAKARTA DI GOLANG ──
+	loc, _ := time.LoadLocation("Asia/Jakarta")
+	if loc == nil {
+		loc = time.FixedZone("WIB", 7*60*60)
+	}
+	hariIni := time.Now().In(loc).Format("2006-01-02")
+
+	// 1. Ambil SEMUA ritase yang belum selesai untuk driver ini hari ini
+	rowsCand, err := h.DB.Query(ctx, `
+		SELECT r.id_ritase, r.id_kendaraan, r.status, r.kode_ritase,
+			COALESCE(k.plat_nomor, ''), COALESCE(k.jenis_kendaraan, ''),
+			r.ritase_ke, r.jenis_ritase,
+			TO_CHAR(r.jam_mulai, 'HH24:MI:SS'), TO_CHAR(r.jam_selesai, 'HH24:MI:SS')
 		FROM ritase r
 		LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
-		WHERE r.id_driver = $1 AND r.status != 'selesai' AND (r.tanggal = CURRENT_DATE OR r.tanggal IS NULL)
+		WHERE r.id_driver = $1 AND r.status != 'selesai' AND (r.tanggal = $2 OR r.tanggal IS NULL)
 		ORDER BY r.ritase_ke ASC, r.id_ritase ASC
-		LIMIT 1
-	`, idDriver).Scan(&idRitase, &assignedKendaraanID, &statusRitase, &kodeRitase, &platNomor, &jenisKendaraan)
-
+		
+	`, idDriver, hariIni)
 	if err != nil {
+		log.Printf("Query error on active ritase candidates: %v", err)
+		return response.Error(c, http.StatusInternalServerError, "Gagal mengambil kandidat ritase")
+	}
+
+	var candidates []ritaseCandidate
+	for rowsCand.Next() {
+		var rc ritaseCandidate
+		if err := rowsCand.Scan(&rc.IDRitase, &rc.IDKendaraan, &rc.Status, &rc.KodeRitase,
+			&rc.PlatNomor, &rc.JenisKendaraan, &rc.RitaseKe, &rc.JenisRitase, &rc.JamMulai, &rc.JamSelesai); err == nil {
+			candidates = append(candidates, rc)
+		}
+	}
+	rowsCand.Close()
+	waktuRequest := time.Now().In(loc).Format("2006-01-02 15:04:05")
+	log.Printf("--------------------------------------------------")
+	log.Printf("📱 [MOBILE_REQUEST] Driver ID: %d mengecek rute", idDriver)
+	log.Printf("⏰ Jam Request Server : %s WIB", waktuRequest)
+	log.Printf("📅 Tanggal Dicari      : %s", hariIni)
+	log.Printf("📊 Jumlah Rute Valid  : %d kandidat", len(candidates))
+	for _, cand := range candidates {
+		jm, js := "-", "-"
+		if cand.JamMulai != nil {
+			jm = *cand.JamMulai
+		}
+		if cand.JamSelesai != nil {
+			js = *cand.JamSelesai
+		}
+		log.Printf("   👉 Ritase %d (ID: %d | Plat: %s) [%s - %s]", cand.RitaseKe, cand.IDRitase, cand.PlatNomor, jm, js)
+	}
+	log.Printf("--------------------------------------------------")
+
+	if len(candidates) == 0 {
 		var countFinishedToday int
 		_ = h.DB.QueryRow(ctx, `
 			SELECT COUNT(*) FROM ritase
-			WHERE id_driver = $1 AND status = 'selesai' AND tanggal = CURRENT_DATE
-		`, idDriver).Scan(&countFinishedToday)
+			WHERE id_driver = $1 AND status = 'selesai' AND tanggal = $2
+		`, idDriver, hariIni).Scan(&countFinishedToday)
 
-		// Jika tidak ada ritase, kembalikan response sukses tapi kosong (menandakan tidak ada rute)
 		return response.OK(c, map[string]interface{}{
 			"has_active_ritase": false,
 			"all_completed":     countFinishedToday > 0,
 		})
 	}
 
-	// 2. Ambil Urutan Stop (termasuk latitude/longitude per stop untuk ETA)
+	// 2. Cari kandidat yang jendela waktunya cocok dengan jam sekarang (WIB)
+	now := time.Now().In(loc)
+	nowMin := now.Hour()*60 + now.Minute()
+
+	var picked *ritaseCandidate
+	var isEarly bool
+	var nextInfo *ritaseCandidate
+	nextStartMin := 999999
+
+	for i := range candidates {
+		cand := &candidates[i]
+
+		if cand.JamMulai == nil || cand.JamSelesai == nil {
+			if picked == nil {
+				picked = cand
+				isEarly = false
+			}
+			continue
+		}
+
+		startMin, endMin, errW := hitungWindowMenit(*cand.JamMulai, *cand.JamSelesai)
+		if errW != nil {
+			continue
+		}
+
+		if cocokDenganSekarang(nowMin, startMin, endMin) {
+			if picked == nil {
+				picked = cand
+				n := nowMin
+				if n < startMin {
+					n += 1440
+				}
+				mulaiMinAdj := startMin + 120
+				isEarly = n < mulaiMinAdj
+			}
+		} else if picked == nil {
+			// Pilih jadwal berikutnya yang paling chronologically dekat (jam_mulai terkecil di masa depan)
+			if startMin > nowMin && (nextInfo == nil || startMin < nextStartMin) {
+				nextInfo = cand
+				nextStartMin = startMin
+			}
+		}
+	}
+
+	if picked == nil {
+		resp := map[string]interface{}{
+			"has_active_ritase": false,
+			"all_completed":     false,
+			"schedule_blocked":  true,
+			"message":           "Tidak ada jadwal ritase tersisa hari ini.",
+		}
+		if nextInfo != nil {
+			nextSchedule := map[string]interface{}{}
+			if nextInfo.JamMulai != nil {
+				nextSchedule["jam_mulai"] = *nextInfo.JamMulai
+			}
+			if nextInfo.JamSelesai != nil {
+				nextSchedule["jam_selesai"] = *nextInfo.JamSelesai
+			}
+			if nextInfo.JenisRitase != nil {
+				nextSchedule["jenis_ritase"] = *nextInfo.JenisRitase
+			}
+			nextSchedule["ritase_ke"] = nextInfo.RitaseKe
+			nextSchedule["kode_ritase"] = nextInfo.KodeRitase
+			resp["next_schedule"] = nextSchedule
+		}
+		return response.OK(c, resp)
+	}
+
+	idRitase := picked.IDRitase
+	assignedKendaraanID := picked.IDKendaraan
+	statusRitase := picked.Status
+	kodeRitase := picked.KodeRitase
+	platNomor := picked.PlatNomor
+	jenisKendaraan := picked.JenisKendaraan
+
+	// 3. Ambil Urutan Stop
 	rows, err := h.DB.Query(ctx, `
 		SELECT 
 			rs.id_stop, rs.urutan, rs.jenis_stop, 
@@ -396,28 +578,20 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 				stop["longitude"] = *longitude
 			}
 			stops = append(stops, stop)
-		} else {
-			log.Printf("Scan error: %v", err)
 		}
 	}
 
 	var countUnfinished int
 	_ = h.DB.QueryRow(ctx, `
 		SELECT COUNT(*) FROM ritase
-		WHERE id_driver = $1 AND status != 'selesai' AND (tanggal = CURRENT_DATE OR tanggal IS NULL)
-	`, idDriver).Scan(&countUnfinished)
+		WHERE id_driver = $1 AND status != 'selesai' AND (tanggal = $2 OR tanggal IS NULL)
+	`, idDriver, hariIni).Scan(&countUnfinished)
 
-	// Baseline waktu stage aktif: created_at event status terakhir ritase ini.
-	// Dipakai mobile utk merekonstruksi durasi stage saat app dibuka lagi
-	// (jangan mulai dari 0 tiap kali buka app). Null kalau belum ada event.
 	var stageStartedAt *time.Time
 	_ = h.DB.QueryRow(ctx, `
 		SELECT MAX(created_at) FROM ritase_event WHERE id_ritase = $1
 	`, idRitase).Scan(&stageStartedAt)
 
-	// Progress resume (anti-manipulasi): jumlah stop yang sudah 'Tiba' = index
-	// stop yang sedang dikerjakan, + status stage terakhir. Dipakai mobile supaya
-	// app yang di-kill & dibuka lagi LANJUT dari stop yang sama (bukan mulai ulang).
 	var currentStopIndex int
 	_ = h.DB.QueryRow(ctx, `
 		SELECT COUNT(*) FROM ritase_event WHERE id_ritase = $1 AND status = 'Tiba'
@@ -431,7 +605,7 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		LIMIT 1
 	`, idRitase).Scan(&lastStatus)
 
-	return response.OK(c, map[string]interface{}{
+	resp := map[string]interface{}{
 		"has_active_ritase":  true,
 		"id_ritase":          idRitase,
 		"id_kendaraan":       assignedKendaraanID,
@@ -444,7 +618,21 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		"last_status":        lastStatus,
 		"plat_nomor":         platNomor,
 		"jenis_kendaraan":    jenisKendaraan,
-	})
+		"ritase_ke":          picked.RitaseKe,
+		"jenis_ritase":       picked.JenisRitase,
+		"jam_mulai":          picked.JamMulai,
+		"jam_selesai":        picked.JamSelesai,
+		"is_early_start":     isEarly,
+	}
+
+	if isEarly && picked.JamMulai != nil {
+		resp["schedule_warning"] = fmt.Sprintf(
+			"Anda memulai Ritase %d lebih awal dari jadwal resmi (jam %s). Diperbolehkan mulai maksimal 2 jam sebelumnya.",
+			picked.RitaseKe, (*picked.JamMulai)[0:5],
+		)
+	}
+
+	return response.OK(c, resp)
 }
 
 func (h *APIHandler) StartFreeTrip(c echo.Context) error {
@@ -463,7 +651,7 @@ func (h *APIHandler) StartFreeTrip(c echo.Context) error {
 	var idRitase int64
 	err := h.DB.QueryRow(ctx, `
 		INSERT INTO ritase (kode_ritase, id_driver, id_kendaraan, status, tanggal, id_drop_point, ritase_ke, created_at)
-		VALUES ($1, $2, $3, 'mulai_loading', CURRENT_DATE, 1, 1, NOW())
+		VALUES ($1, $2, $3, 'mulai_loading', (now() AT TIME ZONE 'Asia/Jakarta')::date, 1, 1, NOW())
 		RETURNING id_ritase
 	`, kodeRitase, req.IdDriver, req.IdKendaraan).Scan(&idRitase)
 
@@ -560,7 +748,7 @@ func (h *APIHandler) ResetTestRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
-	_, err := h.DB.Exec(ctx, `UPDATE ritase SET status = 'direncanakan' WHERE id_driver = $1 AND (tanggal = CURRENT_DATE OR tanggal IS NULL)`, req.IdDriver)
+	_, err := h.DB.Exec(ctx, `UPDATE ritase SET status = 'direncanakan' WHERE id_driver = $1 AND (tanggal = (now() AT TIME ZONE 'Asia/Jakarta')::date OR tanggal IS NULL)`, req.IdDriver)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal mereset ritase test")
 	}
@@ -612,7 +800,7 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 		if driverID, ok := c.Get(middleware.CtxDriverID).(int64); ok && driverID > 0 {
 			_ = h.DB.QueryRow(ctx, `
 				SELECT id_ritase FROM ritase
-				WHERE id_driver = $1 AND status != 'selesai' AND tanggal = CURRENT_DATE
+				WHERE id_driver = $1 AND status != 'selesai' AND tanggal = (now() AT TIME ZONE 'Asia/Jakarta')::date
 				ORDER BY id_ritase DESC LIMIT 1
 			`, driverID).Scan(&idRitase)
 		}

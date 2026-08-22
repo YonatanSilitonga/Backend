@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,114 +36,104 @@ func NewRepository(db *pgxpool.Pool, offlineMin int, sessionHours int, sessionRe
 // Query DIKONSOLIDASI (GROUP BY / FILTER) biar gak 24x roundtrip ke DB.
 func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 	s := &Summary{}
-	today := time.Now().Format("2006-01-02")
+	loc, _ := time.LoadLocation("Asia/Jakarta")
+	if loc == nil {
+		loc = time.FixedZone("WIB", 7*60*60)
+	}
+	today := time.Now().In(loc).Format("2006-01-02")
 
 	// Kendaraan — 1 query (dulu 4)
-	t := time.Now()
 	if err := r.db.QueryRow(ctx, `
-		SELECT count(*),
-		       count(*) FILTER (WHERE LOWER(status_kendaraan) IN ('aktif','berjalan','bertugas','tersedia')),
-		       count(*) FILTER (WHERE LOWER(status_kendaraan) IN ('selesai','istirahat')),
-		       count(*) FILTER (WHERE LOWER(status_kendaraan) IN ('tersedia','idle','off'))
-		FROM kendaraan
-	`).Scan(&s.TotalKendaraan, &s.ArmadaAktif, &s.ArmadaSelesai, &s.ArmadaIdle); err != nil {
+        SELECT count(*),
+               count(*) FILTER (WHERE LOWER(status_kendaraan) IN ('aktif','berjalan','bertugas','tersedia')),
+               count(*) FILTER (WHERE LOWER(status_kendaraan) IN ('selesai','istirahat')),
+               count(*) FILTER (WHERE LOWER(status_kendaraan) IN ('tersedia','idle','off'))
+        FROM kendaraan
+    `).Scan(&s.TotalKendaraan, &s.ArmadaAktif, &s.ArmadaSelesai, &s.ArmadaIdle); err != nil {
 		return nil, err
 	}
-	log.Printf("[TIMING] kendaraan: %v", time.Since(t))
 
 	// Driver — 1 query (dulu 3)
-	t = time.Now()
 	if err := r.db.QueryRow(ctx, `
-		SELECT count(*),
-		       count(*) FILTER (WHERE LOWER(status_driver) IN ('aktif','bertugas','on_duty')),
-		       count(*) FILTER (WHERE LOWER(status_driver) IN ('libur','off','cuti'))
-		FROM driver
-	`).Scan(&s.TotalDriver, &s.DriverAktif, &s.DriverLibur); err != nil {
+        SELECT count(*),
+               count(*) FILTER (WHERE LOWER(status_driver) IN ('aktif','bertugas','on_duty')),
+               count(*) FILTER (WHERE LOWER(status_driver) IN ('libur','off','cuti'))
+        FROM driver
+    `).Scan(&s.TotalDriver, &s.DriverAktif, &s.DriverLibur); err != nil {
 		return nil, err
 	}
-	log.Printf("[TIMING] driver: %v", time.Since(t))
 
 	// Ritase + muatan — 1 query (dulu ~8)
-	t = time.Now()
 	if err := r.db.QueryRow(ctx, `
-		SELECT count(*),
-		       count(*) FILTER (WHERE LOWER(status) NOT IN ('selesai','completed','done','batal','cancelled')),
-		       count(*) FILTER (WHERE LOWER(status) IN ('selesai','completed','done')),
-		       count(*) FILTER (WHERE tanggal = $1),
-		       COALESCE(sum(total_awb),0),
-		       COALESCE(sum(total_awb) FILTER (WHERE tanggal = $1),0),
-		       COALESCE(sum(total_koli),0),
-		       COALESCE(sum(paket_tertinggal),0)
-		FROM ritase
-	`, today).Scan(&s.TotalRitase, &s.RitaseAktif, &s.RitaseSelesai, &s.RitaseToday,
+        SELECT count(*),
+               count(*) FILTER (WHERE LOWER(status) NOT IN ('selesai','completed','done','batal','cancelled')),
+               count(*) FILTER (WHERE LOWER(status) IN ('selesai','completed','done')),
+               count(*) FILTER (WHERE tanggal = $1),
+               COALESCE(sum(total_awb),0),
+               COALESCE(sum(total_awb) FILTER (WHERE tanggal = $1),0),
+               COALESCE(sum(total_koli),0),
+               COALESCE(sum(paket_tertinggal),0)
+        FROM ritase
+    `, today).Scan(&s.TotalRitase, &s.RitaseAktif, &s.RitaseSelesai, &s.RitaseToday,
 		&s.TotalAWB, &s.TotalAWBToday, &s.TotalKoli, &s.PaketTertinggal); err != nil {
 		return nil, err
 	}
-	log.Printf("[TIMING] ritase: %v", time.Since(t))
 
 	// Seller terlayani — 1 query (relasi via ritase_stop)
-	t = time.Now()
 	if err := r.db.QueryRow(ctx, `
-		SELECT count(DISTINCT rs.id_seller)
-		FROM ritase_stop rs
-		JOIN ritase r ON r.id_ritase = rs.id_ritase
-		WHERE rs.jenis_stop = 'seller' AND LOWER(r.status) IN ('selesai','completed','done')
-	`).Scan(&s.SellerTerlayani); err != nil {
+        SELECT count(DISTINCT rs.id_seller)
+        FROM ritase_stop rs
+        JOIN ritase r ON r.id_ritase = rs.id_ritase
+        WHERE rs.jenis_stop = 'seller' AND LOWER(r.status) IN ('selesai','completed','done')
+    `).Scan(&s.SellerTerlayani); err != nil {
 		return nil, err
 	}
-	log.Printf("[TIMING] seller_terlayani: %v", time.Since(t))
 
 	// Master lainnya — 1 query (scalar subquery)
-	t = time.Now()
 	if err := r.db.QueryRow(ctx, `
-		SELECT (SELECT count(*) FROM seller),
-		       (SELECT count(*) FROM drop_point),
-		       (SELECT count(*) FROM karyawan),
-		       (SELECT COALESCE(sum(jumlah_manpower),0) FROM implant),
-		       (SELECT count(*) FROM absensi),
-		       (SELECT count(*) FROM implant),
-		       (SELECT count(*) FROM armada_tracking)
-	`).Scan(&s.TotalSeller, &s.TotalDropPoint, &s.TotalKaryawan,
+        SELECT (SELECT count(*) FROM seller),
+               (SELECT count(*) FROM drop_point),
+               (SELECT count(*) FROM karyawan),
+               (SELECT COALESCE(sum(jumlah_manpower),0) FROM implant),
+               (SELECT count(*) FROM absensi),
+               (SELECT count(*) FROM implant),
+               (SELECT count(*) FROM armada_tracking)
+    `).Scan(&s.TotalSeller, &s.TotalDropPoint, &s.TotalKaryawan,
 		&s.TotalManpower, &s.TotalAbsensi, &s.TotalImplant, &s.TotalTracking); err != nil {
 		return nil, err
 	}
-	log.Printf("[TIMING] master_lainnya: %v", time.Since(t))
 
 	// Armada online = ada posisi terbaru ≤ ambang offline (menit).
 	// Saat sessionRequired: wajib juga punya session login aktif (anti ghost online).
-	t = time.Now()
 	onlineSQL := fmt.Sprintf(`
-		SELECT count(*) FROM armada_tracking
-		WHERE last_update > now() - make_interval(mins => %d)
-	`, r.offlineMin)
+        SELECT count(*) FROM armada_tracking
+        WHERE last_update > now() - make_interval(mins => %d)
+    `, r.offlineMin)
 	if r.sessionRequired {
 		onlineSQL = fmt.Sprintf(`
-			SELECT count(*)
-			FROM armada_tracking t
-			JOIN driver d ON d.id_driver = t.id_driver
-			JOIN users u ON u.id_driver = d.id_driver
-			WHERE t.last_update > now() - make_interval(mins => %d)
-			  AND u.last_login IS NOT NULL
-			  AND u.last_login > now() - make_interval(hours => %d)
-		`, r.offlineMin, r.sessionHours)
+            SELECT count(*)
+            FROM armada_tracking t
+            JOIN driver d ON d.id_driver = t.id_driver
+            JOIN users u ON u.id_driver = d.id_driver
+            WHERE t.last_update > now() - make_interval(mins => %d)
+              AND u.last_login IS NOT NULL
+              AND u.last_login > now() - make_interval(hours => %d)
+        `, r.offlineMin, r.sessionHours)
 	}
 	if err := r.db.QueryRow(ctx, onlineSQL).Scan(&s.ArmadaOnline); err != nil {
 		return nil, err
 	}
-	log.Printf("[TIMING] armada_online: %v", time.Since(t))
 
 	// driver telat: ritase berjalan yang umurnya > 6 jam sejak event pertama
-	t = time.Now()
 	if err := r.db.QueryRow(ctx, `
-		SELECT count(DISTINCT r.id_driver)
-		FROM ritase r
-		JOIN ritase_event e ON e.id_ritase = r.id_ritase
-		WHERE LOWER(r.status) NOT IN ('selesai','completed','done','batal','cancelled')
-		  AND e.created_at < now() - interval '6 hours'
-	`).Scan(&s.DriverTelat); err != nil {
+        SELECT count(DISTINCT r.id_driver)
+        FROM ritase r
+        JOIN ritase_event e ON e.id_ritase = r.id_ritase
+        WHERE LOWER(r.status) NOT IN ('selesai','completed','done','batal','cancelled')
+          AND e.created_at < now() - interval '6 hours'
+    `).Scan(&s.DriverTelat); err != nil {
 		return nil, err
 	}
-	log.Printf("[TIMING] driver_telat: %v", time.Since(t))
 
 	return s, nil
 }
@@ -336,11 +325,16 @@ func formatJamMenit(d time.Duration) string {
 
 // defaultRange mengisi from/to (YYYY-MM-DD): kosong → 30 hari terakhir (to = hari ini).
 func defaultRange(from, to string) (string, string) {
+	loc, _ := time.LoadLocation("Asia/Jakarta")
+	if loc == nil {
+		loc = time.FixedZone("WIB", 7*60*60)
+	}
+	now := time.Now().In(loc)
 	if from == "" {
-		from = time.Now().AddDate(0, 0, -29).Format("2006-01-02")
+		from = now.AddDate(0, 0, -29).Format("2006-01-02")
 	}
 	if to == "" {
-		to = time.Now().Format("2006-01-02")
+		to = now.Format("2006-01-02")
 	}
 	return from, to
 }

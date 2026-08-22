@@ -156,30 +156,20 @@ func (p *liveProvider) GetSnapshot(ctx context.Context) (map[string]any, error) 
 	queryCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 
-	tStart := time.Now()
-
-	t0 := time.Now()
 	summary, err := p.dash.GetSummary(queryCtx)
-	log.Printf("[TIMING] GetSummary: %v", time.Since(t0))
 	if err != nil {
 		return nil, err
 	}
 
-	t1 := time.Now()
 	analisis, err := p.dash.GetAnalisis(queryCtx)
-	log.Printf("[TIMING] GetAnalisis: %v", time.Since(t1))
 	if err != nil {
 		return nil, err
 	}
 
-	t2 := time.Now()
 	tracking, err := p.arm.GetTrackingMap(queryCtx)
-	log.Printf("[TIMING] GetTrackingMap: %v", time.Since(t2))
 	if err != nil {
 		return nil, err
 	}
-
-	log.Printf("[TIMING] TOTAL: %v", time.Since(tStart))
 
 	return map[string]any{
 		"summary":  summary,

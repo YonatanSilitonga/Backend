@@ -24,7 +24,7 @@ func main() {
 	err = db.QueryRow(ctx, `
 		SELECT id_ritase, status, kode_ritase
 		FROM ritase
-		WHERE status != 'selesai' AND (tanggal = CURRENT_DATE OR tanggal IS NULL)
+		WHERE status != 'selesai' AND (tanggal = (now() AT TIME ZONE 'Asia/Jakarta')::date OR tanggal IS NULL)
 		ORDER BY id_ritase ASC
 		LIMIT 1
 	`).Scan(&idRitase, &statusRitase, &kodeRitase)

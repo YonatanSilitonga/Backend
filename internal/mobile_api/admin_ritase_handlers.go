@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"backend/internal/pkg/response"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 )
@@ -27,13 +28,48 @@ type FixedRoute struct {
 	IDKendaraan int64       `json:"id_kendaraan"`
 	IDDropPoint int64       `json:"id_drop_point"`
 	RitaseKe    int         `json:"ritase_ke"`
+	Jenis       string      `json:"jenis_ritase"` // "outgoing" atau "incoming"
 	Stops       []FixedStop `json:"stops"`
+}
+
+// ── JADWAL RITASE ──
+// Tabel jadwal resmi per jenis + ritase_ke. Dipakai untuk mengisi otomatis
+// kolom jam_mulai/jam_selesai saat generate/create ritase, dan dipakai lagi
+// di sisi mobile (GetActiveRitase) untuk mencocokkan jam sekarang.
+type JadwalRitase struct {
+	JamMulai   string
+	JamSelesai string
+}
+
+var jadwalRitaseMap = map[string]map[int]JadwalRitase{
+	"outgoing": {
+		1: {"16:00:00", "20:00:00"},
+		2: {"20:01:00", "00:00:00"},
+		3: {"00:01:00", "03:00:00"},
+	},
+	"incoming": {
+		1: {"01:00:00", "04:30:00"},
+		2: {"07:00:00", "10:30:00"},
+		3: {"13:00:00", "16:30:00"},
+		4: {"19:00:00", "22:30:00"},
+	},
+}
+
+// ambilJadwal mengembalikan jam_mulai/jam_selesai untuk kombinasi jenis + ritase_ke,
+// atau (nil, nil) kalau tidak ditemukan di tabel jadwal (mis. jenis kosong/tidak dikenal).
+func ambilJadwal(jenis string, ritaseKe int) (jamMulai, jamSelesai interface{}) {
+	if m, ok := jadwalRitaseMap[jenis]; ok {
+		if j, ok2 := m[ritaseKe]; ok2 {
+			return j.JamMulai, j.JamSelesai
+		}
+	}
+	return nil, nil
 }
 
 // Fixed Route Template Definitions for 1-Click Auto-Generate
 var defaultFixedRoutes = []FixedRoute{
 	{
-		IDDriver: 3, IDKendaraan: 2, IDDropPoint: 2, RitaseKe: 1,
+		IDDriver: 3, IDKendaraan: 2, IDDropPoint: 2, RitaseKe: 1, Jenis: "outgoing",
 		Stops: []FixedStop{
 			{1, "gudang", 1, "id_gudang", "Mulai dari gudang origin"},
 			{2, "seller", 3, "id_seller", "Ambil paket di Seller 3"},
@@ -42,7 +78,7 @@ var defaultFixedRoutes = []FixedRoute{
 		},
 	},
 	{
-		IDDriver: 3, IDKendaraan: 2, IDDropPoint: 2, RitaseKe: 2,
+		IDDriver: 3, IDKendaraan: 2, IDDropPoint: 2, RitaseKe: 2, Jenis: "outgoing",
 		Stops: []FixedStop{
 			{1, "gudang", 1, "id_gudang", "Gudang 1"},
 			{2, "seller", 3, "id_seller", "Seller 3"},
@@ -51,7 +87,7 @@ var defaultFixedRoutes = []FixedRoute{
 		},
 	},
 	{
-		IDDriver: 2, IDKendaraan: 6, IDDropPoint: 2, RitaseKe: 1,
+		IDDriver: 2, IDKendaraan: 6, IDDropPoint: 2, RitaseKe: 1, Jenis: "outgoing",
 		Stops: []FixedStop{
 			{1, "gudang", 1, "id_gudang", "Gudang 1"},
 			{2, "seller", 2, "id_seller", "Seller 2"},
@@ -60,7 +96,7 @@ var defaultFixedRoutes = []FixedRoute{
 		},
 	},
 	{
-		IDDriver: 2, IDKendaraan: 6, IDDropPoint: 2, RitaseKe: 2,
+		IDDriver: 2, IDKendaraan: 6, IDDropPoint: 2, RitaseKe: 2, Jenis: "outgoing",
 		Stops: []FixedStop{
 			{1, "gateway", 2, "id_drop_point", "Gateway 2"},
 			{2, "seller", 2, "id_seller", "Seller 2"},
@@ -69,7 +105,7 @@ var defaultFixedRoutes = []FixedRoute{
 		},
 	},
 	{
-		IDDriver: 1, IDKendaraan: 11, IDDropPoint: 2, RitaseKe: 2,
+		IDDriver: 1, IDKendaraan: 11, IDDropPoint: 2, RitaseKe: 2, Jenis: "outgoing",
 		Stops: []FixedStop{
 			{1, "gateway", 2, "id_drop_point", "Gateway 2"},
 			{2, "seller", 4, "id_seller", "Seller 4"},
@@ -79,7 +115,7 @@ var defaultFixedRoutes = []FixedRoute{
 		},
 	},
 	{
-		IDDriver: 4, IDKendaraan: 15, IDDropPoint: 2, RitaseKe: 2,
+		IDDriver: 4, IDKendaraan: 15, IDDropPoint: 2, RitaseKe: 2, Jenis: "outgoing",
 		Stops: []FixedStop{
 			{1, "gudang", 1, "id_gudang", "Gudang 1"},
 			{2, "seller", 7, "id_seller", "PGA2 Seller 7"},
@@ -87,7 +123,7 @@ var defaultFixedRoutes = []FixedRoute{
 		},
 	},
 	{
-		IDDriver: 15, IDKendaraan: 3, IDDropPoint: 2, RitaseKe: 3,
+		IDDriver: 15, IDKendaraan: 3, IDDropPoint: 2, RitaseKe: 3, Jenis: "outgoing",
 		Stops: []FixedStop{
 			{1, "gudang", 1, "id_gudang", "Gudang 1"},
 			{2, "gateway", 2, "id_drop_point", "Gateway 2"},
@@ -95,14 +131,14 @@ var defaultFixedRoutes = []FixedRoute{
 		},
 	},
 	{
-		IDDriver: 11, IDKendaraan: 9, IDDropPoint: 3, RitaseKe: 2,
+		IDDriver: 11, IDKendaraan: 9, IDDropPoint: 3, RitaseKe: 2, Jenis: "incoming",
 		Stops: []FixedStop{
 			{1, "gudang", 2, "id_gudang", "Gudang 2"},
 			{2, "gateway", 3, "id_drop_point", "Gateway 3"},
 		},
 	},
 	{
-		IDDriver: 11, IDKendaraan: 9, IDDropPoint: 3, RitaseKe: 3,
+		IDDriver: 11, IDKendaraan: 9, IDDropPoint: 3, RitaseKe: 3, Jenis: "incoming",
 		Stops: []FixedStop{
 			{1, "gudang", 3, "id_gudang", "Gudang 3"},
 			{2, "gudang", 2, "id_gudang", "Gudang 2"},
@@ -110,14 +146,14 @@ var defaultFixedRoutes = []FixedRoute{
 		},
 	},
 	{
-		IDDriver: 10, IDKendaraan: 9, IDDropPoint: 3, RitaseKe: 1,
+		IDDriver: 10, IDKendaraan: 9, IDDropPoint: 3, RitaseKe: 1, Jenis: "incoming",
 		Stops: []FixedStop{
 			{1, "gudang", 2, "id_gudang", "Gudang 2"},
 			{2, "gateway", 3, "id_drop_point", "Gateway 3"},
 		},
 	},
 	{
-		IDDriver: 10, IDKendaraan: 9, IDDropPoint: 3, RitaseKe: 4,
+		IDDriver: 10, IDKendaraan: 9, IDDropPoint: 3, RitaseKe: 4, Jenis: "incoming",
 		Stops: []FixedStop{
 			{1, "gudang", 2, "id_gudang", "Gudang 2"},
 			{2, "gateway", 3, "id_drop_point", "Gateway 3"},
@@ -131,6 +167,7 @@ type PreviewRoute struct {
 	IDKendaraan int64         `json:"id_kendaraan"`
 	PlatNomor   string        `json:"plat_nomor"`
 	RitaseKe    int           `json:"ritase_ke"`
+	Jenis       string        `json:"jenis_ritase"`
 	Stops       []PreviewStop `json:"stops"`
 }
 
@@ -140,6 +177,22 @@ type PreviewStop struct {
 	IDLokasi   int64  `json:"id_lokasi"`
 	NamaLokasi string `json:"nama_lokasi"`
 	Keterangan string `json:"keterangan"`
+}
+
+// Taruh fungsi ini di admin_ritase_handler.go
+func tentukanJenisRitase(idDriver int64, ritaseKe int) string {
+	// Driver D11 (Udin): Ritase 2 & 3 adalah incoming
+	if idDriver == 11 && (ritaseKe == 2 || ritaseKe == 3) {
+		return "incoming"
+	}
+
+	// Driver D10 (Gery): Ritase 1 & 4 adalah incoming
+	if idDriver == 10 && (ritaseKe == 1 || ritaseKe == 4) {
+		return "incoming"
+	}
+
+	// Selain kondisi di atas, semuanya dianggap outgoing
+	return "outgoing"
 }
 
 // AdminPreviewGenerateDailyRitase mengembalikan data rute yang akan digenerate beserta nama lokasinya
@@ -215,7 +268,7 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 	_ = h.DB.QueryRow(ctx, "SELECT MAX(tanggal) FROM ritase").Scan(&latestDate)
 
 	if latestDate != nil {
-		rowsR, errR := h.DB.Query(ctx, "SELECT id_ritase, id_driver, id_kendaraan, COALESCE(id_drop_point, 0), ritase_ke FROM ritase WHERE tanggal = $1 ORDER BY id_driver, ritase_ke", *latestDate)
+		rowsR, errR := h.DB.Query(ctx, "SELECT id_ritase, id_driver, id_kendaraan, COALESCE(id_drop_point, 0), ritase_ke, COALESCE(jenis_ritase, '') FROM ritase WHERE tanggal = $1 ORDER BY id_driver, ritase_ke", *latestDate)
 		if errR == nil {
 			var ritaseMap = make(map[int64]*FixedRoute)
 			var orderedRitaseIDs []int64
@@ -224,12 +277,14 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 				var idRitase, idDriver, idKendaraan int64
 				var idDropPoint int64
 				var ritaseKe int
-				if err := rowsR.Scan(&idRitase, &idDriver, &idKendaraan, &idDropPoint, &ritaseKe); err == nil {
+				var jenis string
+				if err := rowsR.Scan(&idRitase, &idDriver, &idKendaraan, &idDropPoint, &ritaseKe, &jenis); err == nil {
 					ritaseMap[idRitase] = &FixedRoute{
 						IDDriver:    idDriver,
 						IDKendaraan: idKendaraan,
 						IDDropPoint: idDropPoint,
 						RitaseKe:    ritaseKe,
+						Jenis:       jenis,
 						Stops:       []FixedStop{},
 					}
 					orderedRitaseIDs = append(orderedRitaseIDs, idRitase)
@@ -326,6 +381,7 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 			IDKendaraan: fr.IDKendaraan,
 			PlatNomor:   plat,
 			RitaseKe:    fr.RitaseKe,
+			Jenis:       fr.Jenis,
 			Stops:       previewStops,
 		})
 	}
@@ -336,7 +392,13 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 	})
 }
 
-// AdminGenerateDailyRitase Handler 1-Klik Generate Rute Harian
+// AdminGenerateDailyRitas
+// FIX anti-duplikat: sebelum insert, cek dulu apakah kombinasi (id_driver, ritase_ke)
+// untuk tanggal hari ini SUDAH ADA. Kalau sudah ada (otomatis berarti statusnya
+// 'selesai', karena yang belum selesai sudah dihapus di step DELETE di atas), SKIP.
+//
+// FIX jadwal: jam_mulai/jam_selesai/jenis_ritase sekarang diisi otomatis dari
+// tabel jadwalRitaseMap berdasarkan Jenis + RitaseKe tiap rute template.
 func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 60*time.Second)
 	defer cancel()
@@ -358,23 +420,45 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 	}
 	defer tx.Rollback(ctx)
 
-	// 1. Clear current date's ALL ritase_event, ritase_stop, armada_tracking, and ritase to cleanly overwrite/replace everything
-	if _, err := tx.Exec(ctx, "DELETE FROM ritase_event WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = CURRENT_DATE)"); err != nil {
-		return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan event lama: "+err.Error())
+	// ── FIX ZONA WAKTU GOLANG ──
+	// Paksa Golang membaca waktu Jakarta untuk variabel string hari ini
+	loc, _ := time.LoadLocation("Asia/Jakarta")
+	if loc == nil {
+		loc = time.FixedZone("WIB", 7*60*60)
 	}
-	if _, err := tx.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = CURRENT_DATE)"); err != nil {
-		return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan ritase_stop lama: "+err.Error())
-	}
-	if _, err := tx.Exec(ctx, "DELETE FROM armada_tracking WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = CURRENT_DATE)"); err != nil {
-		return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan tracking lama: "+err.Error())
-	}
-	if _, err := tx.Exec(ctx, "DELETE FROM ritase WHERE tanggal = CURRENT_DATE"); err != nil {
-		return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan ritase lama: "+err.Error())
+	nowWIB := time.Now().In(loc)
+	hariIni := nowWIB.Format("2006-01-02")
+	hariBesok := nowWIB.AddDate(0, 0, 1).Format("2006-01-02")
+	todayStr := nowWIB.Format("20060102")
+
+	// 1. Clear uncompleted ritase untuk HARI INI & BESOK (karena ritase < 07:00 masuk tanggal besok)
+	for _, tgl := range []string{hariIni, hariBesok} {
+		if _, err := tx.Exec(ctx, "DELETE FROM ritase_event WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = $1 AND status != 'selesai')", tgl); err != nil {
+			return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan event lama: "+err.Error())
+		}
+		if _, err := tx.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = $1 AND status != 'selesai')", tgl); err != nil {
+			return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan ritase_stop lama: "+err.Error())
+		}
+		if _, err := tx.Exec(ctx, "DELETE FROM armada_tracking WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = $1 AND status != 'selesai')", tgl); err != nil {
+			return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan tracking lama: "+err.Error())
+		}
+		if _, err := tx.Exec(ctx, "DELETE FROM ritase WHERE tanggal = $1 AND status != 'selesai'", tgl); err != nil {
+			return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan ritase lama: "+err.Error())
+		}
 	}
 
 	countGenerated := 0
-	todayStr := time.Now().Format("20060102")
+	countSkipped := 0
 
+	// ── LOG DETAIL GENERATE (TANGGAL, JAM, MENIT, DETIK) ──
+	waktuEksekusi := nowWIB.Format("2006-01-02 15:04:05")
+	log.Printf("==================================================")
+	log.Printf("🚀 [WEB_GENERATE] Admin menjalankan Generate Ritase!")
+	log.Printf("📅 Tanggal Format Kode  : TR-%s-...", todayStr)
+	log.Printf("⏰ Jam Eksekusi Server  : %s WIB", waktuEksekusi)
+	log.Printf("==================================================")
+
+	// Mulai perulangan generate rute
 	for _, route := range targetRoutes {
 		if route.IDDropPoint <= 0 {
 			route.IDDropPoint = 1
@@ -395,14 +479,41 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 
 		finalDropPointID := getValidDropPointID(ctx, tx, route.IDDropPoint)
 
+		// ── FIX jadwal & penentuan jenis: Pastikan backend yang menentukan jenisnya ──
+		jenisPasti := tentukanJenisRitase(route.IDDriver, route.RitaseKe)
+
+		jamMulai, jamSelesai := ambilJadwal(jenisPasti, route.RitaseKe)
+
+		// ── HITUNG TANGGAL: jam_mulai < 07:00 → tanggal besok, else hari ini ──
+		tanggalRitase := hariIni
+		if jm, ok := jamMulai.(string); ok && len(jm) >= 2 {
+			jam, _ := strconv.Atoi(jm[:2])
+			if jam < 7 {
+				tanggalRitase = hariBesok
+			}
+		}
+
+		// ── Anti-duplikat: cek apakah ritase untuk tanggal yang sudah dihitung sudah ada ──
+		var existingCount int
+		_ = tx.QueryRow(ctx, `
+			SELECT COUNT(*) FROM ritase
+			WHERE tanggal = $1 AND id_driver = $2 AND ritase_ke = $3
+		`, tanggalRitase, route.IDDriver, route.RitaseKe).Scan(&existingCount)
+
+		if existingCount > 0 {
+			countSkipped++
+			continue
+		}
+
 		var idRitase int64
 		err := tx.QueryRow(ctx, `
-			INSERT INTO ritase (
-				kode_ritase, tanggal, id_driver, id_kendaraan, id_drop_point, ritase_ke, status
-			) VALUES (
-				$1, CURRENT_DATE, $2, $3, $4, $5, 'direncanakan'
-			) RETURNING id_ritase
-		`, kodeRitase, route.IDDriver, route.IDKendaraan, finalDropPointID, route.RitaseKe).Scan(&idRitase)
+            INSERT INTO ritase (
+                kode_ritase, tanggal, id_driver, id_kendaraan, id_drop_point, ritase_ke, status,
+                jenis_ritase, jam_mulai, jam_selesai
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, 'direncanakan', $7, $8, $9
+            ) RETURNING id_ritase
+        `, kodeRitase, tanggalRitase, route.IDDriver, route.IDKendaraan, finalDropPointID, route.RitaseKe, jenisPasti, jamMulai, jamSelesai).Scan(&idRitase)
 
 		if err != nil {
 			return response.Error(c, http.StatusInternalServerError, fmt.Sprintf("Gagal generate ritase D%d: %v", route.IDDriver, err))
@@ -442,10 +553,11 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 	}
 
 	h.bus.Publish("force_refresh", "admin_generate_ritase")
-
+	log.Printf("✅ [GENERATE_SELESAI] Berhasil dibuat: %d | Dilewati: %d", countGenerated, countSkipped)
 	return response.OK(c, map[string]interface{}{
 		"total_generated": countGenerated,
-		"message":         fmt.Sprintf("Berhasil menimpa & meng-generate %d ritase harian!", countGenerated),
+		"total_skipped":   countSkipped,
+		"message":         fmt.Sprintf("Berhasil generate %d ritase harian (%d rute dilewati karena sudah ada/selesai)!", countGenerated, countSkipped),
 	})
 }
 
@@ -456,9 +568,13 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 
 	tanggalParam := c.QueryParam("tanggal")
 	if tanggalParam == "" {
-		tanggalParam = time.Now().Format("2006-01-02")
+		// Paksa ke waktu Jakarta
+		loc, _ := time.LoadLocation("Asia/Jakarta")
+		if loc == nil {
+			loc = time.FixedZone("WIB", 7*60*60)
+		}
+		tanggalParam = time.Now().In(loc).Format("2006-01-02")
 	}
-
 	rows, err := h.DB.Query(ctx, `
 		SELECT 
 			r.id_ritase, r.kode_ritase, TO_CHAR(r.tanggal, 'YYYY-MM-DD') AS tanggal,
@@ -466,7 +582,8 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			COALESCE(d.jabatan, 'TRANSPORTER') AS jabatan_driver,
 			r.id_kendaraan, COALESCE(k.plat_nomor, 'KD-' || r.id_kendaraan) AS nopol,
 			r.id_drop_point, COALESCE(dp.nama_drop_point, 'Gateway #' || r.id_drop_point) AS nama_drop_point,
-			r.ritase_ke, r.status
+			r.ritase_ke, r.status, COALESCE(r.jenis_ritase, ''),
+			TO_CHAR(r.jam_mulai, 'HH24:MI'), TO_CHAR(r.jam_selesai, 'HH24:MI')
 		FROM ritase r
 		LEFT JOIN driver d ON d.id_driver = r.id_driver
 		LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
@@ -484,10 +601,11 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 
 	for rows.Next() {
 		var idRitase, idDriver, idKendaraan, idDropPoint int64
-		var kodeRitase, tanggal, namaDriver, jabatanDriver, nopol, namaDropPoint, status string
+		var kodeRitase, tanggal, namaDriver, jabatanDriver, nopol, namaDropPoint, status, jenisRitase string
 		var ritaseKe int
+		var jamMulai, jamSelesai *string
 
-		if err := rows.Scan(&idRitase, &kodeRitase, &tanggal, &idDriver, &namaDriver, &jabatanDriver, &idKendaraan, &nopol, &idDropPoint, &namaDropPoint, &ritaseKe, &status); err != nil {
+		if err := rows.Scan(&idRitase, &kodeRitase, &tanggal, &idDriver, &namaDriver, &jabatanDriver, &idKendaraan, &nopol, &idDropPoint, &namaDropPoint, &ritaseKe, &status, &jenisRitase, &jamMulai, &jamSelesai); err != nil {
 			continue
 		}
 
@@ -543,6 +661,9 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			"nama_drop_point": namaDropPoint,
 			"ritase_ke":       ritaseKe,
 			"status":          status,
+			"jenis_ritase":    jenisRitase,
+			"jam_mulai":       jamMulai,
+			"jam_selesai":     jamSelesai,
 			"stops":           stops,
 		})
 	}
@@ -582,6 +703,7 @@ type UpdateRitaseRequest struct {
 	IDDropPoint int64       `json:"id_drop_point"`
 	RitaseKe    int         `json:"ritase_ke"`
 	Status      string      `json:"status"`
+	JenisRitase string      `json:"jenis_ritase"`
 	Stops       []FixedStop `json:"stops"`
 }
 
@@ -607,6 +729,13 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 	}
 	defer tx.Rollback(ctx)
 
+	// Kalau jenis_ritase atau ritase_ke berubah, hitung ulang jam_mulai/jam_selesai dari jadwal.
+	var jamMulai, jamSelesai interface{}
+	hasJadwalBaru := req.JenisRitase != "" && req.RitaseKe != 0
+	if hasJadwalBaru {
+		jamMulai, jamSelesai = ambilJadwal(req.JenisRitase, req.RitaseKe)
+	}
+
 	// Update Header Ritase
 	tag, err := tx.Exec(ctx, `
 		UPDATE ritase
@@ -614,9 +743,12 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 		    id_kendaraan = COALESCE(NULLIF($2, 0), id_kendaraan),
 		    id_drop_point = COALESCE(NULLIF($3, 0), id_drop_point),
 		    ritase_ke = COALESCE(NULLIF($4, 0), ritase_ke),
-		    status = COALESCE(NULLIF($5, ''), status)
-		WHERE id_ritase = $6
-	`, req.IDDriver, req.IDKendaraan, req.IDDropPoint, req.RitaseKe, req.Status, idRitase)
+		    status = COALESCE(NULLIF($5, ''), status),
+		    jenis_ritase = COALESCE(NULLIF($6, ''), jenis_ritase),
+		    jam_mulai = COALESCE($7, jam_mulai),
+		    jam_selesai = COALESCE($8, jam_selesai)
+		WHERE id_ritase = $9
+	`, req.IDDriver, req.IDKendaraan, req.IDDropPoint, req.RitaseKe, req.Status, req.JenisRitase, jamMulai, jamSelesai, idRitase)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal mengupdate ritase: "+err.Error())
 	}
@@ -667,6 +799,7 @@ type CreateRitaseRequest struct {
 	IDKendaraan int64       `json:"id_kendaraan"`
 	IDDropPoint int64       `json:"id_drop_point"`
 	RitaseKe    int         `json:"ritase_ke"`
+	JenisRitase string      `json:"jenis_ritase"`
 	Stops       []FixedStop `json:"stops"`
 }
 
@@ -682,7 +815,11 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 	}
 
 	if req.Tanggal == "" {
-		req.Tanggal = time.Now().Format("2006-01-02")
+		loc, _ := time.LoadLocation("Asia/Jakarta")
+		if loc == nil {
+			loc = time.FixedZone("WIB", 7*60*60)
+		}
+		req.Tanggal = time.Now().In(loc).Format("2006-01-02")
 	}
 	if req.RitaseKe == 0 {
 		req.RitaseKe = 1
@@ -713,14 +850,21 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 
 	finalDropPointID := getValidDropPointID(ctx, tx, req.IDDropPoint)
 
+	jamMulai, jamSelesai := ambilJadwal(req.JenisRitase, req.RitaseKe)
+	var jenisVal interface{}
+	if req.JenisRitase != "" {
+		jenisVal = req.JenisRitase
+	}
+
 	var idRitase int64
 	err = tx.QueryRow(ctx, `
 		INSERT INTO ritase (
-			kode_ritase, tanggal, id_driver, id_kendaraan, id_drop_point, ritase_ke, status
+			kode_ritase, tanggal, id_driver, id_kendaraan, id_drop_point, ritase_ke, status,
+			jenis_ritase, jam_mulai, jam_selesai
 		) VALUES (
-			$1, $2::date, $3, $4, $5, $6, 'direncanakan'
+			$1, $2::date, $3, $4, $5, $6, 'direncanakan', $7, $8, $9
 		) RETURNING id_ritase
-	`, kodeRitase, req.Tanggal, req.IDDriver, req.IDKendaraan, finalDropPointID, req.RitaseKe).Scan(&idRitase)
+	`, kodeRitase, req.Tanggal, req.IDDriver, req.IDKendaraan, finalDropPointID, req.RitaseKe, jenisVal, jamMulai, jamSelesai).Scan(&idRitase)
 
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal membuat ritase: "+err.Error())
@@ -886,4 +1030,3 @@ func getValidDropPointID(ctx context.Context, db interface {
 	}
 	return 2
 }
-
