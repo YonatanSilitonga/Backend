@@ -24,7 +24,9 @@ type Summary struct {
 	TotalAWB         int64 `json:"total_awb"`
 	TotalAWBToday    int64 `json:"total_awb_hari_ini"`
 	TotalKoli        int64 `json:"total_koli"`
-	PaketTertinggal  int64 `json:"paket_tertinggal"`
+	TotalKoliToday      int64 `json:"total_koli_hari_ini"`
+	TotalHighValueToday int64 `json:"total_high_value_hari_ini"`
+	TotalEceranToday    int64 `json:"total_eceran_hari_ini"`
 	// Lainnya
 	TotalSeller    int64 `json:"total_seller"`
 	SellerTerlayani int64 `json:"seller_terlayani"`
@@ -82,6 +84,8 @@ type TrendPoint struct {
 	RitaseBatal     int64  `json:"ritase_batal"`
 	TotalAWB        int64  `json:"total_awb"`
 	TotalKoli       int64  `json:"total_koli"`
+	TotalHighValue  int64  `json:"total_high_value"`
+	TotalEceran     int64  `json:"total_eceran"`
 	SellerTerlayani int64  `json:"seller_terlayani"`
 	Outgoing        int64  `json:"outgoing"`
 	Incoming        int64  `json:"incoming"`
@@ -95,7 +99,8 @@ type DriverPerf struct {
 	RitaseSelesai   int64    `json:"ritase_selesai"`
 	TotalAWB        int64    `json:"total_awb"`
 	TotalKoli       int64    `json:"total_koli"`
-	PaketTertinggal int64    `json:"paket_tertinggal"`
+	TotalHighValue  int64    `json:"total_high_value"`
+	TotalEceran     int64    `json:"total_eceran"`
 	Outgoing        int64    `json:"outgoing"`
 	Incoming        int64    `json:"incoming"`
 	RataLoading     *float64 `json:"rata_loading,omitempty"`
@@ -115,6 +120,8 @@ type SellerAnalytics struct {
 	RitaseSelesai int64   `json:"ritase_selesai"`
 	TotalAWB     int64    `json:"total_awb"`
 	TotalKoli    int64    `json:"total_koli"`
+	TotalHighValue int64  `json:"total_high_value"`
+	TotalEceran   int64   `json:"total_eceran"`
 	// RataBongkar = rata-rata durasi di lokasi (sampai_seller → berangkat_seller), detik.
 	RataBongkar *float64 `json:"rata_bongkar,omitempty"`
 }

@@ -41,6 +41,8 @@ type Ritase struct {
 	RitaseKe         *int      `json:"ritase_ke,omitempty"`
 	TotalAWB         *int      `json:"total_awb,omitempty"`
 	TotalKoli        *int      `json:"total_koli,omitempty"`
+	TotalHighValue   *int      `json:"total_high_value,omitempty"`
+	TotalEceran      *int      `json:"total_eceran,omitempty"`
 	PaketTertinggal  *int      `json:"paket_tertinggal,omitempty"`
 	AlasanTertinggal *string   `json:"alasan_tertinggal,omitempty"`
 	JamBerangkat     *string   `json:"jam_berangkat,omitempty"`
@@ -102,9 +104,9 @@ type TrackingLive struct {
 	Arah          *int       `json:"arah,omitempty"`
 	Status        *string    `json:"status,omitempty"`
 	NamaLokasi      *string    `json:"nama_lokasi,omitempty"`
-	JumlahKoli      *int       `json:"jumlah_koli,omitempty"`
-	JumlahEcer      *int       `json:"jumlah_ecer,omitempty"`
-	JumlahHighValue *int       `json:"jumlah_high_value,omitempty"`
+	JumlahKoli      *int       `json:"total_koli,omitempty"`
+	JumlahEcer      *int       `json:"total_eceran,omitempty"`
+	JumlahHighValue *int       `json:"total_high_value,omitempty"`
 	LastUpdate      time.Time  `json:"last_update"`
 	Offline         bool       `json:"offline"`
 	SessionOnline   bool       `json:"session_online"`
