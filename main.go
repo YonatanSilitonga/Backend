@@ -107,6 +107,9 @@ func main() {
 	v1.GET("/drivers", handler.GetDrivers)
 	v1.GET("/vehicles", handler.GetVehicles)
 
+	// Serve static uploads (manifest photos, etc.)
+	e.Static("/uploads", "./uploads")
+
 	// Endpoint driver mobile — WAJIB JWT (Authorization: Bearer). Tanpa token → 401.
 	// Ini menutup celah "ghost GPS": siapa pun tidak bisa mengirim posisi palsu.
 	// Catatan: app mobile harus login via /auth/login dulu untuk dapat JWT.
@@ -116,6 +119,7 @@ func main() {
 	v1.POST("/driver/add-stop", handler.AddRitaseStop, authMW)
 	v1.POST("/driver/finish-ritase", handler.FinishRitase, authMW)
 	v1.POST("/driver/trip-status", handler.PostTripStatus, authMW)
+	v1.POST("/driver/upload-manifest", handler.UploadManifest, authMW)
 	v1.POST("/driver/reset-test-ritase", handler.ResetTestRitase, authMW)
 
 	// GPS tracker hardware — sumber posisi cadangan saat HP mati.

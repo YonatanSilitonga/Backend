@@ -3,8 +3,11 @@ package mobile_api
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -769,6 +772,7 @@ type TripStatusRequest struct {
 	JumlahEcer      int     `json:"jumlah_ecer"`
 	JumlahHighValue int     `json:"jumlah_high_value"`
 	DurasiDetik     int     `json:"durasi_detik"`
+	FotoManifestURL string  `json:"foto_manifest_url"`
 }
 
 func (h *APIHandler) PostTripStatus(c echo.Context) error {
@@ -831,10 +835,14 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 	`, idRitase)
 
 	// 1. Insert ke ritase_event (event baru durasi 0 — dihitung saat stage ditutup)
+	var fotoURL interface{}
+	if req.FotoManifestURL != "" {
+		fotoURL = req.FotoManifestURL
+	}
 	_, err := h.DB.Exec(ctx, `
-		INSERT INTO ritase_event (id_ritase, status, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer, jumlah_high_value)
-		VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8)
-	`, idRitase, req.Status, req.Latitude, req.Longitude, namaLokasi, req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue)
+		INSERT INTO ritase_event (id_ritase, status, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer, jumlah_high_value, foto_manifest_url)
+		VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9)
+	`, idRitase, req.Status, req.Latitude, req.Longitude, namaLokasi, req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue, fotoURL)
 	if err != nil {
 		log.Printf("[PostTripStatus] Gagal insert ritase_event: %v", err)
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan event: "+err.Error())
@@ -863,5 +871,76 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 		"id_ritase":   idRitase,
 		"status":      req.Status,
 		"nama_lokasi": req.NamaLokasi,
+	})
+}
+
+// UploadManifest menangani upload foto bukti manifest dari driver (multipart form)
+// POST /api/v1/driver/upload-manifest
+func (h *APIHandler) UploadManifest(c echo.Context) error {
+	file, err := c.FormFile("file")
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "file foto wajib diunggah")
+	}
+
+	src, err := file.Open()
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal membaca file foto")
+	}
+	defer src.Close()
+
+	idRitase, _ := strconv.ParseInt(c.FormValue("id_ritase"), 10, 64)
+	namaLokasi := c.FormValue("nama_lokasi")
+
+	uploadDir := "./uploads/manifest"
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal membuat direktori upload")
+	}
+
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if ext == "" {
+		ext = ".webp"
+	}
+	fileName := fmt.Sprintf("manifest_r%d_%d%s", idRitase, time.Now().UnixNano()/1e6, ext)
+	dstPath := filepath.Join(uploadDir, fileName)
+
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan file foto")
+	}
+	defer dst.Close()
+
+	if _, err = io.Copy(dst, src); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal menulis file foto")
+	}
+
+	photoURL := "/uploads/manifest/" + fileName
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel()
+
+	if idRitase > 0 {
+		if namaLokasi != "" {
+			_, _ = h.DB.Exec(ctx, `
+				UPDATE ritase_event
+				SET foto_manifest_url = $1
+				WHERE id_ritase = $2 AND (nama_lokasi = $3 OR POSITION(LOWER($3) in LOWER(nama_lokasi)) > 0)
+			`, photoURL, idRitase, namaLokasi)
+		} else {
+			_, _ = h.DB.Exec(ctx, `
+				UPDATE ritase_event
+				SET foto_manifest_url = $1
+				WHERE id_event = (
+					SELECT id_event FROM ritase_event
+					WHERE id_ritase = $2
+					ORDER BY created_at DESC, id_event DESC
+					LIMIT 1
+				)
+			`, photoURL, idRitase)
+		}
+	}
+
+	return response.OK(c, map[string]interface{}{
+		"message":   "Foto manifest berhasil diunggah",
+		"photo_url": photoURL,
 	})
 }
