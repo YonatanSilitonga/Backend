@@ -283,6 +283,18 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		ritaseID = targetRitaseID
 	}
 
+	var totalKoli, totalEcer, totalHV int
+	if targetRitaseID > 0 {
+		_ = h.DB.QueryRow(ctx, `
+			SELECT 
+				COALESCE(SUM(jumlah_koli), 0),
+				COALESCE(SUM(jumlah_ecer), 0),
+				COALESCE(SUM(jumlah_high_value), 0)
+			FROM ritase_event
+			WHERE id_ritase = $1 AND status = 'Bongkar Muat Barang'
+		`, targetRitaseID).Scan(&totalKoli, &totalEcer, &totalHV)
+	}
+
 	_, err := h.DB.Exec(ctx, `
 		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, jumlah_ecer, jumlah_high_value, nama_lokasi, last_update)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
@@ -294,12 +306,12 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		    kecepatan = EXCLUDED.kecepatan,
 		    arah = EXCLUDED.arah,
 		    status = COALESCE(NULLIF(EXCLUDED.status, ''), armada_tracking.status),
-		    jumlah_koli = CASE WHEN EXCLUDED.jumlah_koli > 0 THEN EXCLUDED.jumlah_koli ELSE armada_tracking.jumlah_koli END,
-		    jumlah_ecer = CASE WHEN EXCLUDED.jumlah_ecer > 0 THEN EXCLUDED.jumlah_ecer ELSE armada_tracking.jumlah_ecer END,
-		    jumlah_high_value = CASE WHEN EXCLUDED.jumlah_high_value > 0 THEN EXCLUDED.jumlah_high_value ELSE armada_tracking.jumlah_high_value END,
+		    jumlah_koli = $9,
+		    jumlah_ecer = $10,
+		    jumlah_high_value = $11,
 		    nama_lokasi = COALESCE(NULLIF(EXCLUDED.nama_lokasi, ''), armada_tracking.nama_lokasi),
 		    last_update = now()
-	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue, req.NamaLokasi)
+	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, totalKoli, totalEcer, totalHV, req.NamaLokasi)
 
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking: "+err.Error())
