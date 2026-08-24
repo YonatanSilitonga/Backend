@@ -74,19 +74,32 @@ func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 
 /* ---------- Ritase ---------- */
 
-const ritaseSelect = `
+	const ritaseSelect = `
+	WITH muatan AS (
+		SELECT id_ritase,
+		       sum(jumlah_koli) AS koli,
+		       sum(jumlah_high_value) AS hv,
+		       sum(jumlah_ecer) AS ecer
+		FROM ritase_event
+		WHERE status = 'Bongkar Muat Barang'
+		GROUP BY id_ritase
+	)
 	SELECT r.id_ritase, r.kode_ritase, COALESCE(r.tanggal::text, ''),
 	       r.id_driver, COALESCE(d.nama_driver,''),
 	       r.id_kendaraan, COALESCE(k.plat_nomor,''),
 	       0 AS id_seller, '' AS nama_seller,
 	       COALESCE(r.id_drop_point, 0), COALESCE(dp.nama_drop_point,''),
-	       COALESCE(r.ritase_ke, 1), COALESCE(r.total_awb, 0), COALESCE(r.total_koli, 0),
+	       COALESCE(r.ritase_ke, 1), COALESCE(r.total_awb, 0), COALESCE(m.koli, 0),
+	       COALESCE(m.hv, 0), COALESCE(m.ecer, 0),
 	       COALESCE(r.paket_tertinggal, 0), COALESCE(r.alasan_tertinggal, ''),
-	       COALESCE(r.jam_berangkat::text, ''), COALESCE(r.jam_tiba::text, ''), COALESCE(r.status, 'direncanakan'), COALESCE(r.created_at, now())
+	       COALESCE(r.jam_berangkat::text, ''), COALESCE(r.jam_tiba::text, ''),
+	       TO_CHAR(r.jam_mulai, 'HH24:MI'), TO_CHAR(r.jam_selesai, 'HH24:MI'),
+	       COALESCE(r.status, 'direncanakan'), COALESCE(r.created_at, now())
 	FROM ritase r
 	LEFT JOIN driver d ON d.id_driver = r.id_driver
 	LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
 	LEFT JOIN drop_point dp ON dp.id_drop_point = r.id_drop_point
+	LEFT JOIN muatan m ON m.id_ritase = r.id_ritase
 `
 
 func scanRitase(row pgx.Row) (*Ritase, error) {
@@ -97,8 +110,11 @@ func scanRitase(row pgx.Row) (*Ritase, error) {
 		&r.IDSeller, &r.NamaSeller,
 		&r.IDDropPoint, &r.NamaDropPoint,
 		&r.RitaseKe, &r.TotalAWB, &r.TotalKoli,
+		&r.TotalHighValue, &r.TotalEceran,
 		&r.PaketTertinggal, &r.AlasanTertinggal,
-		&r.JamBerangkat, &r.JamTiba, &r.Status, &r.CreatedAt)
+		&r.JamBerangkat, &r.JamTiba,
+		&r.JamMulai, &r.JamSelesai,
+		&r.Status, &r.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -249,10 +265,11 @@ func (r *Repository) AddEvent(ctx context.Context, idRitase int64, req UpdateSta
 
 	var ev RitaseEvent
 	err = tx.QueryRow(ctx, `
-		INSERT INTO ritase_event (id_ritase, status, catatan, latitude, longitude, durasi_detik)
-		VALUES ($1,$2,$3,$4,$5,$6)
+		INSERT INTO ritase_event (id_ritase, status, catatan, latitude, longitude, durasi_detik, jumlah_koli, jumlah_ecer, jumlah_high_value)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		RETURNING id_event, id_ritase, status, catatan, latitude, longitude, durasi_detik, created_at
-	`, idRitase, req.Status, req.Catatan, req.Latitude, req.Longitude, req.DurasiDetik).Scan(
+	`, idRitase, req.Status, req.Catatan, req.Latitude, req.Longitude, req.DurasiDetik,
+		req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue).Scan(
 		&ev.ID, &ev.IDRitase, &ev.Status, &ev.Catatan, &ev.Latitude, &ev.Longitude, &ev.DurasiDetik, &ev.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -349,8 +366,8 @@ func (r *Repository) ListTracking(ctx context.Context, limit int) ([]Tracking, e
 func (r *Repository) CreateTracking(ctx context.Context, req CreateTrackingRequest) (*Tracking, error) {
 	var t Tracking
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, last_update)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, jumlah_ecer, jumlah_high_value, last_update)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
 		ON CONFLICT (id_kendaraan)
 		DO UPDATE SET id_driver   = EXCLUDED.id_driver,
 		              latitude    = EXCLUDED.latitude,
@@ -358,11 +375,15 @@ func (r *Repository) CreateTracking(ctx context.Context, req CreateTrackingReque
 		              kecepatan   = EXCLUDED.kecepatan,
 		              arah        = EXCLUDED.arah,
 		              status      = EXCLUDED.status,
+		              jumlah_koli        = CASE WHEN EXCLUDED.jumlah_koli > 0 THEN EXCLUDED.jumlah_koli ELSE armada_tracking.jumlah_koli END,
+		              jumlah_ecer        = CASE WHEN EXCLUDED.jumlah_ecer > 0 THEN EXCLUDED.jumlah_ecer ELSE armada_tracking.jumlah_ecer END,
+		              jumlah_high_value  = CASE WHEN EXCLUDED.jumlah_high_value > 0 THEN EXCLUDED.jumlah_high_value ELSE armada_tracking.jumlah_high_value END,
 		              last_update = now()
 		RETURNING id_tracking, id_ritase, id_kendaraan, id_driver,
 		          latitude, longitude, kecepatan, arah, status, last_update
 	`, req.IDRitase, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude,
-		req.Kecepatan, req.Arah, req.Status).Scan(
+		req.Kecepatan, req.Arah, req.Status,
+		req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue).Scan(
 		&t.ID, &t.IDRitase, &t.IDKendaraan, &t.IDDriver,
 		&t.Latitude, &t.Longitude, &t.Kecepatan, &t.Arah, &t.Status, &t.LastUpdate)
 	if err != nil {

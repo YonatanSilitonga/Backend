@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -71,13 +72,30 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
                count(*) FILTER (WHERE tanggal = $1),
                COALESCE(sum(total_awb),0),
                COALESCE(sum(total_awb) FILTER (WHERE tanggal = $1),0),
-               COALESCE(sum(total_koli),0),
-               COALESCE(sum(paket_tertinggal),0)
+               COALESCE(sum(total_koli),0)
         FROM ritase
     `, today).Scan(&s.TotalRitase, &s.RitaseAktif, &s.RitaseSelesai, &s.RitaseToday,
-		&s.TotalAWB, &s.TotalAWBToday, &s.TotalKoli, &s.PaketTertinggal); err != nil {
+		&s.TotalAWB, &s.TotalAWBToday, &s.TotalKoli); err != nil {
 		return nil, err
 	}
+
+	// Muatan hari ini — SUM dari event "Bongkar Muat Barang" per ritase.
+	t := time.Now()
+	if err := r.db.QueryRow(ctx, `
+		SELECT COALESCE(sum(koli),0), COALESCE(sum(hv),0), COALESCE(sum(ecer),0)
+		FROM (
+			SELECT ev.id_ritase,
+			       sum(ev.jumlah_koli) AS koli,
+			       sum(ev.jumlah_high_value) AS hv,
+			       sum(ev.jumlah_ecer) AS ecer
+			FROM ritase_event ev
+			WHERE ev.created_at::date = $1 AND ev.status = 'Bongkar Muat Barang'
+			GROUP BY ev.id_ritase
+		) latest
+	`, today).Scan(&s.TotalKoliToday, &s.TotalHighValueToday, &s.TotalEceranToday); err != nil {
+		return nil, err
+	}
+	log.Printf("[TIMING] muatan_hari_ini: %v", time.Since(t))
 
 	// Seller terlayani — 1 query (relasi via ritase_stop)
 	if err := r.db.QueryRow(ctx, `
@@ -183,60 +201,10 @@ func (r *Repository) GetDurasiAnalisis(ctx context.Context) (*DurasiAnalisis, er
 }
 
 // GetBottleneck mendeteksi titik-titik hambatan dari data existing.
+// Saat ini belum ada bottleneck yang cukup signifikan untuk ditampilkan.
+// Alert (kendaraan berhenti lama, perjalanan terlalu lama) sudah cover fungsi ini.
 func (r *Repository) GetBottleneck(ctx context.Context) ([]Bottleneck, error) {
-	var items []Bottleneck
-
-	// seller dengan ritase paling banyak tapi lama tidak selesai
-	// (relasi seller via ritase_stop — skema baru, ritase gak punya id_seller lagi)
-	rows, err := r.db.Query(ctx, `
-		SELECT 'seller', s.nama_seller, 'ritase terbanyak', count(DISTINCT rs.id_ritase)::float8
-		FROM ritase_stop rs
-		JOIN ritase r ON r.id_ritase = rs.id_ritase
-		JOIN seller s ON s.id_seller = rs.id_seller
-		WHERE rs.jenis_stop = 'seller' AND r.status NOT IN ('selesai','completed','done')
-		GROUP BY s.nama_seller
-		ORDER BY count(DISTINCT rs.id_ritase) DESC
-		LIMIT 3
-	`)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var b Bottleneck
-		if err := rows.Scan(&b.Kategori, &b.Label, &b.Indikator, &b.Nilai); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		b.Deskripsi = "Seller ini paling sering disinggahi ritase yang belum selesai — indikasi antrean loading atau kapasitas bongkar yang lambat."
-		b.Rekomendasi = "Cek antrean & jadwal kunjungan seller, pertimbangkan tambah slot atau relokasi ritase ke driver lain."
-		items = append(items, b)
-	}
-	rows.Close()
-
-	// driver dengan jumlah paket tertinggal terbesar
-	rows, err = r.db.Query(ctx, `
-		SELECT 'driver', d.nama_driver, 'paket tertinggal', COALESCE(sum(r.paket_tertinggal),0)::float8
-		FROM ritase r JOIN driver d ON d.id_driver = r.id_driver
-		GROUP BY d.nama_driver
-		ORDER BY COALESCE(sum(r.paket_tertinggal),0) DESC
-		LIMIT 3
-	`)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var b Bottleneck
-		if err := rows.Scan(&b.Kategori, &b.Label, &b.Indikator, &b.Nilai); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		b.Deskripsi = "Driver dengan total paket tertinggal terbesar — indikasi pengecekan muatan kurang ketat saat loading."
-		b.Rekomendasi = "Evaluasi SOP pengecekan paket, pantau daftar tertinggal, dan konfirmasi ke driver sebelum berangkat."
-		items = append(items, b)
-	}
-	rows.Close()
-
-	return items, rows.Err()
+	return nil, nil
 }
 
 // GetAlerts mendeteksi anomali yang perlu notifikasi.
@@ -361,19 +329,31 @@ func (r *Repository) GetAnalyticsTrend(ctx context.Context, from, to string) ([]
 			  AND LOWER(r.status) IN ('selesai','completed','done')
 			  AND r.tanggal BETWEEN $1 AND $2
 			GROUP BY r.tanggal
+		), muatan AS (
+			SELECT ev.id_ritase,
+			       sum(ev.jumlah_koli) AS koli,
+			       sum(ev.jumlah_high_value) AS hv,
+			       sum(ev.jumlah_ecer) AS ecer
+			FROM ritase_event ev
+			WHERE ev.status = 'Bongkar Muat Barang'
+			  AND ev.created_at::date BETWEEN $1 AND $2
+			GROUP BY ev.id_ritase
 		)
 		SELECT r.tanggal::text,
 		       count(*),
 		       count(*) FILTER (WHERE LOWER(r.status) IN ('selesai','completed','done')),
 		       count(*) FILTER (WHERE LOWER(r.status) IN ('batal','cancelled')),
 		       COALESCE(sum(r.total_awb),0),
-		       COALESCE(sum(r.total_koli),0),
+		       COALESCE(sum(m.koli),0),
+		       COALESCE(sum(m.hv),0),
+		       COALESCE(sum(m.ecer),0),
 		       COALESCE(sd.n,0),
 		       count(*) FILTER (WHERE `+arahSQL+` = 'outgoing'),
 		       count(*) FILTER (WHERE `+arahSQL+` = 'incoming')
 		FROM ritase r
 		LEFT JOIN drop_point dp ON dp.id_drop_point = r.id_drop_point
 		LEFT JOIN seller_day sd ON sd.tanggal = r.tanggal
+		LEFT JOIN muatan m ON m.id_ritase = r.id_ritase
 		WHERE r.tanggal BETWEEN $1 AND $2
 		GROUP BY r.tanggal, sd.n
 		ORDER BY r.tanggal
@@ -387,7 +367,8 @@ func (r *Repository) GetAnalyticsTrend(ctx context.Context, from, to string) ([]
 	for rows.Next() {
 		var t TrendPoint
 		if err := rows.Scan(&t.Tanggal, &t.RitaseTotal, &t.RitaseSelesai, &t.RitaseBatal,
-			&t.TotalAWB, &t.TotalKoli, &t.SellerTerlayani, &t.Outgoing, &t.Incoming); err != nil {
+			&t.TotalAWB, &t.TotalKoli, &t.TotalHighValue, &t.TotalEceran,
+			&t.SellerTerlayani, &t.Outgoing, &t.Incoming); err != nil {
 			return nil, err
 		}
 		items = append(items, t)
@@ -419,13 +400,23 @@ func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) (
 			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'selesai_unloading'
 			WHERE e1.status = 'mulai_unloading' AND e2.created_at > e1.created_at
 			GROUP BY e1.id_ritase
+		), muatan AS (
+			SELECT ev.id_ritase,
+			       sum(ev.jumlah_koli) AS koli,
+			       sum(ev.jumlah_high_value) AS hv,
+			       sum(ev.jumlah_ecer) AS ecer
+			FROM ritase_event ev
+			WHERE ev.status = 'Bongkar Muat Barang'
+			  AND ev.created_at::date BETWEEN $1 AND $2
+			GROUP BY ev.id_ritase
 		)
 		SELECT d.id_driver, d.nama_driver,
 		       count(DISTINCT r.id_ritase),
 		       count(DISTINCT r.id_ritase) FILTER (WHERE LOWER(r.status) IN ('selesai','completed','done')),
 		       COALESCE(sum(r.total_awb),0),
-		       COALESCE(sum(r.total_koli),0),
-		       COALESCE(sum(r.paket_tertinggal),0),
+		       COALESCE(sum(m.koli),0),
+		       COALESCE(sum(m.hv),0),
+		       COALESCE(sum(m.ecer),0),
 		       count(*) FILTER (WHERE `+arahSQL+` = 'outgoing'),
 		       count(*) FILTER (WHERE `+arahSQL+` = 'incoming'),
 		       avg(l.dur), avg(p.dur), avg(u.dur)
@@ -435,6 +426,7 @@ func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) (
 		LEFT JOIN loading l ON l.id_ritase = r.id_ritase
 		LEFT JOIN perjalanan p ON p.id_ritase = r.id_ritase
 		LEFT JOIN unloading u ON u.id_ritase = r.id_ritase
+		LEFT JOIN muatan m ON m.id_ritase = r.id_ritase
 		WHERE r.tanggal BETWEEN $1 AND $2
 		GROUP BY d.id_driver, d.nama_driver
 		ORDER BY count(DISTINCT r.id_ritase) DESC
@@ -449,7 +441,8 @@ func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) (
 		var p DriverPerf
 		var loading, perjalanan, unloading sql.NullFloat64
 		if err := rows.Scan(&p.IDDriver, &p.NamaDriver,
-			&p.RitaseTotal, &p.RitaseSelesai, &p.TotalAWB, &p.TotalKoli, &p.PaketTertinggal,
+			&p.RitaseTotal, &p.RitaseSelesai, &p.TotalAWB, &p.TotalKoli,
+			&p.TotalHighValue, &p.TotalEceran,
 			&p.Outgoing, &p.Incoming, &loading, &perjalanan, &unloading); err != nil {
 			return nil, err
 		}
@@ -479,18 +472,30 @@ func (r *Repository) GetAnalyticsSellers(ctx context.Context, from, to string) (
 			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'berangkat_seller'
 			WHERE e1.status = 'sampai_seller' AND e2.created_at > e1.created_at
 			GROUP BY e1.id_ritase
+		), muatan AS (
+			SELECT ev.id_ritase,
+			       sum(ev.jumlah_koli) AS koli,
+			       sum(ev.jumlah_high_value) AS hv,
+			       sum(ev.jumlah_ecer) AS ecer
+			FROM ritase_event ev
+			WHERE ev.status = 'Bongkar Muat Barang'
+			  AND ev.created_at::date BETWEEN $1 AND $2
+			GROUP BY ev.id_ritase
 		)
 		SELECT s.id_seller, COALESCE(s.kode_seller,''), COALESCE(s.nama_seller,''), COALESCE(s.kota,''),
 		       s.jarak_tempuh_km, s.jarak_dc_km,
 		       count(DISTINCT r.id_ritase),
 		       count(DISTINCT r.id_ritase) FILTER (WHERE LOWER(r.status) IN ('selesai','completed','done')),
 		       COALESCE(sum(r.total_awb),0),
-		       COALESCE(sum(r.total_koli),0),
+		       COALESCE(sum(m.koli),0),
+		       COALESCE(sum(m.hv),0),
+		       COALESCE(sum(m.ecer),0),
 		       avg(ld.dur)
 		FROM seller s
 		JOIN ritase_stop rs ON rs.id_seller = s.id_seller AND rs.jenis_stop = 'seller'
 		JOIN ritase r ON r.id_ritase = rs.id_ritase
 		LEFT JOIN loc_dur ld ON ld.id_ritase = r.id_ritase
+		LEFT JOIN muatan m ON m.id_ritase = r.id_ritase
 		WHERE r.tanggal BETWEEN $1 AND $2
 		GROUP BY s.id_seller, s.kode_seller, s.nama_seller, s.kota, s.jarak_tempuh_km, s.jarak_dc_km
 		ORDER BY count(DISTINCT r.id_ritase) DESC
@@ -506,7 +511,8 @@ func (r *Repository) GetAnalyticsSellers(ctx context.Context, from, to string) (
 		var bongkar sql.NullFloat64
 		if err := rows.Scan(&s.IDSeller, &s.KodeSeller, &s.NamaSeller, &s.Kota,
 			&s.JarakTempuhKm, &s.JarakDcKm,
-			&s.Kunjungan, &s.RitaseSelesai, &s.TotalAWB, &s.TotalKoli, &bongkar); err != nil {
+			&s.Kunjungan, &s.RitaseSelesai, &s.TotalAWB, &s.TotalKoli,
+			&s.TotalHighValue, &s.TotalEceran, &bongkar); err != nil {
 			return nil, err
 		}
 		if bongkar.Valid {

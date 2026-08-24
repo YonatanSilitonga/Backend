@@ -545,6 +545,15 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 		tanggalParam = time.Now().In(loc).Format("2006-01-02")
 	}
 	rows, err := h.DB.Query(ctx, `
+		WITH muatan AS (
+			SELECT id_ritase,
+			       sum(jumlah_koli) AS koli,
+			       sum(jumlah_ecer) AS ecer,
+			       sum(jumlah_high_value) AS hv
+			FROM ritase_event
+			WHERE status = 'Bongkar Muat Barang'
+			GROUP BY id_ritase
+		)
 		SELECT 
 			r.id_ritase, r.kode_ritase, TO_CHAR(r.tanggal, 'YYYY-MM-DD') AS tanggal,
 			r.id_driver, COALESCE(d.nama_driver, 'Driver #' || r.id_driver) AS nama_driver,
@@ -552,11 +561,13 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			r.id_kendaraan, COALESCE(k.plat_nomor, 'KD-' || r.id_kendaraan) AS nopol,
 			r.id_drop_point, COALESCE(dp.nama_drop_point, 'Gateway #' || r.id_drop_point) AS nama_drop_point,
 			r.ritase_ke, r.status, COALESCE(r.jenis_ritase, ''),
-			TO_CHAR(r.jam_mulai, 'HH24:MI'), TO_CHAR(r.jam_selesai, 'HH24:MI')
+			TO_CHAR(r.jam_mulai, 'HH24:MI'), TO_CHAR(r.jam_selesai, 'HH24:MI'),
+			COALESCE(m.koli, 0), COALESCE(m.ecer, 0), COALESCE(m.hv, 0)
 		FROM ritase r
 		LEFT JOIN driver d ON d.id_driver = r.id_driver
 		LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
 		LEFT JOIN drop_point dp ON dp.id_drop_point = r.id_drop_point
+		LEFT JOIN muatan m ON m.id_ritase = r.id_ritase
 		WHERE r.tanggal = $1::date
 		ORDER BY r.id_driver ASC, r.ritase_ke ASC
 	`, tanggalParam)
@@ -573,8 +584,9 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 		var kodeRitase, tanggal, namaDriver, jabatanDriver, nopol, namaDropPoint, status, jenisRitase string
 		var ritaseKe int
 		var jamMulai, jamSelesai *string
+		var totalKoli, totalEcer, totalHV int
 
-		if err := rows.Scan(&idRitase, &kodeRitase, &tanggal, &idDriver, &namaDriver, &jabatanDriver, &idKendaraan, &nopol, &idDropPoint, &namaDropPoint, &ritaseKe, &status, &jenisRitase, &jamMulai, &jamSelesai); err != nil {
+		if err := rows.Scan(&idRitase, &kodeRitase, &tanggal, &idDriver, &namaDriver, &jabatanDriver, &idKendaraan, &nopol, &idDropPoint, &namaDropPoint, &ritaseKe, &status, &jenisRitase, &jamMulai, &jamSelesai, &totalKoli, &totalEcer, &totalHV); err != nil {
 			continue
 		}
 
@@ -656,6 +668,9 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			"jenis_ritase":    jenisRitase,
 			"jam_mulai":       jamMulai,
 			"jam_selesai":     jamSelesai,
+			"total_koli":      totalKoli,
+			"total_eceran":    totalEcer,
+			"total_high_value": totalHV,
 			"stops":           stops,
 		})
 	}
