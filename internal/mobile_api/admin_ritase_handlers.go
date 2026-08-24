@@ -594,7 +594,11 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			LEFT JOIN drop_point dp ON dp.id_drop_point = rs.id_drop_point
 			LEFT JOIN gudang g ON g.id_gudang = rs.id_gudang
 			LEFT JOIN LATERAL (
-				SELECT ev.jumlah_koli, ev.jumlah_ecer, ev.jumlah_high_value, ev.durasi_detik
+				SELECT 
+					COALESCE(MAX(ev.jumlah_koli), 0) AS jumlah_koli,
+					COALESCE(MAX(ev.jumlah_ecer), 0) AS jumlah_ecer,
+					COALESCE(MAX(ev.jumlah_high_value), 0) AS jumlah_high_value,
+					COALESCE(MAX(ev.durasi_detik), 0) AS durasi_detik
 				FROM ritase_event ev
 				WHERE ev.id_ritase = rs.id_ritase
 				  AND (
@@ -602,8 +606,6 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 				    OR (ev.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev.nama_lokasi) in LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
 				    OR (ev.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(ev.nama_lokasi)) > 0)
 				  )
-				ORDER BY ev.created_at DESC, ev.id_event DESC
-				LIMIT 1
 			) re ON true
 			WHERE rs.id_ritase = $1
 			ORDER BY rs.urutan ASC
