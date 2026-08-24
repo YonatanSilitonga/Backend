@@ -615,11 +615,27 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			SELECT 
 				rs.id_stop, rs.urutan, rs.jenis_stop,
 				rs.id_seller, rs.id_drop_point, rs.id_gudang, rs.keterangan,
-				COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, 'Lokasi') AS nama_lokasi
+				COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, 'Lokasi') AS nama_lokasi,
+				re.jumlah_koli,
+				re.jumlah_ecer,
+				re.jumlah_high_value,
+				re.durasi_detik
 			FROM ritase_stop rs
 			LEFT JOIN seller s ON s.id_seller = rs.id_seller
 			LEFT JOIN drop_point dp ON dp.id_drop_point = rs.id_drop_point
 			LEFT JOIN gudang g ON g.id_gudang = rs.id_gudang
+			LEFT JOIN LATERAL (
+				SELECT ev.jumlah_koli, ev.jumlah_ecer, ev.jumlah_high_value, ev.durasi_detik
+				FROM ritase_event ev
+				WHERE ev.id_ritase = rs.id_ritase
+				  AND (
+				    ev.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
+				    OR (ev.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev.nama_lokasi) in LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
+				    OR (ev.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(ev.nama_lokasi)) > 0)
+				  )
+				ORDER BY ev.created_at DESC, ev.id_event DESC
+				LIMIT 1
+			) re ON true
 			WHERE rs.id_ritase = $1
 			ORDER BY rs.urutan ASC
 		`, idRitase)
@@ -631,17 +647,22 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 				var jenisStop, namaLokasi string
 				var idSeller, idDP, idGudang *int64
 				var ket *string
+				var koli, ecer, highValue, durasiDetik *int
 
-				if err := stopRows.Scan(&idStop, &urutan, &jenisStop, &idSeller, &idDP, &idGudang, &ket, &namaLokasi); err == nil {
+				if err := stopRows.Scan(&idStop, &urutan, &jenisStop, &idSeller, &idDP, &idGudang, &ket, &namaLokasi, &koli, &ecer, &highValue, &durasiDetik); err == nil {
 					stops = append(stops, map[string]interface{}{
-						"id_stop":       idStop,
-						"urutan":        urutan,
-						"jenis_stop":    jenisStop,
-						"id_seller":     idSeller,
-						"id_drop_point": idDP,
-						"id_gudang":     idGudang,
-						"keterangan":    ket,
-						"nama_lokasi":   namaLokasi,
+						"id_stop":           idStop,
+						"urutan":            urutan,
+						"jenis_stop":        jenisStop,
+						"id_seller":         idSeller,
+						"id_drop_point":     idDP,
+						"id_gudang":         idGudang,
+						"keterangan":        ket,
+						"nama_lokasi":       namaLokasi,
+						"jumlah_koli":       koli,
+						"jumlah_ecer":       ecer,
+						"jumlah_high_value": highValue,
+						"durasi_detik":      durasiDetik,
 					})
 				}
 			}

@@ -20,6 +20,10 @@ type RitaseStop struct {
 	Keterangan     *string `json:"keterangan,omitempty"`
 	Latitude       *float64 `json:"latitude,omitempty"`
 	Longitude      *float64 `json:"longitude,omitempty"`
+	JumlahKoli      *int     `json:"jumlah_koli,omitempty"`
+	JumlahEcer      *int     `json:"jumlah_ecer,omitempty"`
+	JumlahHighValue *int     `json:"jumlah_high_value,omitempty"`
+	DurasiDetik     *int     `json:"durasi_detik,omitempty"`
 }
 
 // RitaseStopRequest adalah satu titik rute saat membuat ritase.

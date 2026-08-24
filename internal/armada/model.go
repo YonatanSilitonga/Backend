@@ -101,12 +101,15 @@ type TrackingLive struct {
 	Kecepatan     *int       `json:"kecepatan,omitempty"`
 	Arah          *int       `json:"arah,omitempty"`
 	Status        *string    `json:"status,omitempty"`
-	NamaLokasi    *string    `json:"nama_lokasi,omitempty"`
-	LastUpdate    time.Time  `json:"last_update"`
-	Offline       bool       `json:"offline"`
-	SessionOnline bool       `json:"session_online"`
-	LastLogin     *time.Time `json:"last_login,omitempty"`
-	LastOpen      *time.Time `json:"last_open,omitempty"`
+	NamaLokasi      *string    `json:"nama_lokasi,omitempty"`
+	JumlahKoli      *int       `json:"jumlah_koli,omitempty"`
+	JumlahEcer      *int       `json:"jumlah_ecer,omitempty"`
+	JumlahHighValue *int       `json:"jumlah_high_value,omitempty"`
+	LastUpdate      time.Time  `json:"last_update"`
+	Offline         bool       `json:"offline"`
+	SessionOnline   bool       `json:"session_online"`
+	LastLogin       *time.Time `json:"last_login,omitempty"`
+	LastOpen        *time.Time `json:"last_open,omitempty"`
 }
 
 // MapTracking gabungan posisi live kendaraan + titik seller + gudang + drop_point (data peta).
@@ -119,15 +122,19 @@ type MapTracking struct {
 
 // TrackingCheckpoint satu baris riwayat status dari ritase_event.
 type TrackingCheckpoint struct {
-	IDEvent     int64     `json:"id_event"`
-	IDRitase    int64     `json:"id_ritase"`
-	KodeRitase  string    `json:"kode_ritase"`
-	Status      string    `json:"status"`
-	Catatan     *string   `json:"catatan,omitempty"`
-	Latitude    *float64  `json:"latitude,omitempty"`
-	Longitude   *float64  `json:"longitude,omitempty"`
-	DurasiDetik *int      `json:"durasi_detik,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	IDEvent         int64     `json:"id_event"`
+	IDRitase        int64     `json:"id_ritase"`
+	KodeRitase      string    `json:"kode_ritase"`
+	Status          string    `json:"status"`
+	Catatan         *string   `json:"catatan,omitempty"`
+	Latitude        *float64  `json:"latitude,omitempty"`
+	Longitude       *float64  `json:"longitude,omitempty"`
+	NamaLokasi      *string   `json:"nama_lokasi,omitempty"`
+	DurasiDetik     *int      `json:"durasi_detik,omitempty"`
+	JumlahKoli      *int      `json:"jumlah_koli,omitempty"`
+	JumlahEcer      *int      `json:"jumlah_ecer,omitempty"`
+	JumlahHighValue *int      `json:"jumlah_high_value,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 /* ---------- Request bodies ---------- */

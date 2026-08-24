@@ -284,17 +284,17 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, jumlah_ecer, jumlah_high_value, nama_lokasi, last_update)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
 		ON CONFLICT (id_kendaraan) DO UPDATE 
-		SET id_ritase = EXCLUDED.id_ritase,
+		SET id_ritase = COALESCE(EXCLUDED.id_ritase, armada_tracking.id_ritase),
 		    id_driver = EXCLUDED.id_driver,
 		    latitude = EXCLUDED.latitude,
 		    longitude = EXCLUDED.longitude,
 		    kecepatan = EXCLUDED.kecepatan,
 		    arah = EXCLUDED.arah,
-		    status = EXCLUDED.status,
-		    jumlah_koli = EXCLUDED.jumlah_koli,
-		    jumlah_ecer = EXCLUDED.jumlah_ecer,
-		    jumlah_high_value = EXCLUDED.jumlah_high_value,
-		    nama_lokasi = EXCLUDED.nama_lokasi,
+		    status = COALESCE(NULLIF(EXCLUDED.status, ''), armada_tracking.status),
+		    jumlah_koli = CASE WHEN EXCLUDED.jumlah_koli > 0 THEN EXCLUDED.jumlah_koli ELSE armada_tracking.jumlah_koli END,
+		    jumlah_ecer = CASE WHEN EXCLUDED.jumlah_ecer > 0 THEN EXCLUDED.jumlah_ecer ELSE armada_tracking.jumlah_ecer END,
+		    jumlah_high_value = CASE WHEN EXCLUDED.jumlah_high_value > 0 THEN EXCLUDED.jumlah_high_value ELSE armada_tracking.jumlah_high_value END,
+		    nama_lokasi = COALESCE(NULLIF(EXCLUDED.nama_lokasi, ''), armada_tracking.nama_lokasi),
 		    last_update = now()
 	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue, req.NamaLokasi)
 
@@ -847,12 +847,17 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 		_, _ = h.DB.Exec(ctx, `UPDATE ritase SET status = 'berjalan' WHERE id_ritase = $1 AND status != 'selesai'`, idRitase)
 	}
 
-	// 2. Update armada_tracking status & nama_lokasi
+	// 2. Update armada_tracking status & nama_lokasi & muatan
 	_, _ = h.DB.Exec(ctx, `
 		UPDATE armada_tracking
-		SET status = $1, nama_lokasi = $2
-		WHERE id_ritase = $3
-	`, req.Status, namaLokasi, idRitase)
+		SET status = $1,
+		    nama_lokasi = $2,
+		    jumlah_koli = $3,
+		    jumlah_ecer = $4,
+		    jumlah_high_value = $5,
+		    last_update = now()
+		WHERE id_ritase = $6
+	`, req.Status, namaLokasi, req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue, idRitase)
 
 	return response.Created(c, map[string]interface{}{
 		"id_ritase":   idRitase,

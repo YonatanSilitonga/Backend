@@ -150,11 +150,27 @@ func (r *Repository) ListStops(ctx context.Context, idRitase int64) ([]RitaseSto
 		       rs.id_drop_point, dp.nama_drop_point,
 		       rs.keterangan,
 		       COALESCE(g.latitude, s.latitude, dp.latitude) as latitude,
-		       COALESCE(g.longitude, s.longitude, dp.longitude) as longitude
+		       COALESCE(g.longitude, s.longitude, dp.longitude) as longitude,
+		       re.jumlah_koli,
+		       re.jumlah_ecer,
+		       re.jumlah_high_value,
+		       re.durasi_detik
 		FROM ritase_stop rs
 		LEFT JOIN gudang g ON rs.id_gudang = g.id_gudang
 		LEFT JOIN seller s ON rs.id_seller = s.id_seller
 		LEFT JOIN drop_point dp ON rs.id_drop_point = dp.id_drop_point
+		LEFT JOIN LATERAL (
+			SELECT ev.jumlah_koli, ev.jumlah_ecer, ev.jumlah_high_value, ev.durasi_detik
+			FROM ritase_event ev
+			WHERE ev.id_ritase = rs.id_ritase
+			  AND (
+			    ev.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
+			    OR (ev.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev.nama_lokasi) in LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
+			    OR (ev.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(ev.nama_lokasi)) > 0)
+			  )
+			ORDER BY ev.created_at DESC, ev.id_event DESC
+			LIMIT 1
+		) re ON true
 		WHERE rs.id_ritase = $1
 		ORDER BY rs.urutan ASC
 	`, idRitase)
@@ -172,6 +188,8 @@ func (r *Repository) ListStops(ctx context.Context, idRitase int64) ([]RitaseSto
 			&s.IDSeller, &s.NamaSeller,
 			&s.IDDropPoint, &s.NamaDropPoint,
 			&s.Keterangan, &s.Latitude, &s.Longitude,
+			&s.JumlahKoli, &s.JumlahEcer, &s.JumlahHighValue,
+			&s.DurasiDetik,
 		); err != nil {
 			return nil, err
 		}
@@ -270,7 +288,8 @@ func (r *Repository) UpdateMuatan(ctx context.Context, idRitase int64, req Updat
 // ListEvents mengambil timeline status sebuah ritase.
 func (r *Repository) ListEvents(ctx context.Context, idRitase int64) ([]RitaseEvent, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_event, id_ritase, status, catatan, latitude, longitude, created_at
+		SELECT id_event, id_ritase, status, catatan, latitude, longitude,
+		       nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer, jumlah_high_value, created_at
 		FROM ritase_event
 		WHERE id_ritase = $1
 		ORDER BY created_at, id_event
@@ -283,7 +302,10 @@ func (r *Repository) ListEvents(ctx context.Context, idRitase int64) ([]RitaseEv
 	var items []RitaseEvent
 	for rows.Next() {
 		var e RitaseEvent
-		if err := rows.Scan(&e.ID, &e.IDRitase, &e.Status, &e.Catatan, &e.Latitude, &e.Longitude, &e.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&e.ID, &e.IDRitase, &e.Status, &e.Catatan, &e.Latitude, &e.Longitude,
+			&e.NamaLokasi, &e.DurasiDetik, &e.JumlahKoli, &e.JumlahEcer, &e.JumlahHighValue, &e.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, e)
@@ -360,7 +382,12 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT t.id_tracking, t.id_ritase, t.id_kendaraan, COALESCE(k.plat_nomor,''),
 		       t.id_driver, COALESCE(d.nama_driver,''),
-		       t.latitude, t.longitude, t.kecepatan, t.arah, t.status, t.nama_lokasi, t.last_update,
+		       t.latitude, t.longitude, t.kecepatan, t.arah, t.status,
+		       COALESCE(NULLIF(t.nama_lokasi, ''), re.nama_lokasi, ''),
+		       COALESCE(NULLIF(t.jumlah_koli, 0), re.jumlah_koli, 0),
+		       COALESCE(NULLIF(t.jumlah_ecer, 0), re.jumlah_ecer, 0),
+		       COALESCE(NULLIF(t.jumlah_high_value, 0), re.jumlah_high_value, 0),
+		       t.last_update,
 		       %s AS offline,
 		       (u.last_login IS NOT NULL AND u.last_login > now() - make_interval(hours => %d)) AS session_online,
 		       u.last_login, u.last_open
@@ -368,6 +395,13 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
 		LEFT JOIN driver d ON d.id_driver = t.id_driver
 		LEFT JOIN users u ON u.id_driver = d.id_driver
+		LEFT JOIN LATERAL (
+			SELECT ev.nama_lokasi, ev.jumlah_koli, ev.jumlah_ecer, ev.jumlah_high_value
+			FROM ritase_event ev
+			WHERE ev.id_ritase = t.id_ritase AND (ev.jumlah_koli > 0 OR ev.jumlah_ecer > 0 OR ev.jumlah_high_value > 0)
+			ORDER BY ev.created_at DESC, ev.id_event DESC
+			LIMIT 1
+		) re ON true
 		ORDER BY t.last_update DESC
 	`, offlineExpr, sessionHours))
 	if err != nil {
@@ -380,7 +414,9 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 		var t TrackingLive
 		if err := rows.Scan(&t.ID, &t.IDRitase, &t.IDKendaraan, &t.PlatNomor,
 			&t.IDDriver, &t.NamaDriver,
-			&t.Latitude, &t.Longitude, &t.Kecepatan, &t.Arah, &t.Status, &t.NamaLokasi, &t.LastUpdate,
+			&t.Latitude, &t.Longitude, &t.Kecepatan, &t.Arah, &t.Status, &t.NamaLokasi,
+			&t.JumlahKoli, &t.JumlahEcer, &t.JumlahHighValue,
+			&t.LastUpdate,
 			&t.Offline, &t.SessionOnline, &t.LastLogin, &t.LastOpen); err != nil {
 			return nil, err
 		}
@@ -467,7 +503,9 @@ func (r *Repository) ListDropPoints(ctx context.Context) ([]DropPointPoi, error)
 func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan int64, tanggal string) ([]TrackingCheckpoint, error) {
 	query := `
 		SELECT e.id_event, e.id_ritase, COALESCE(r.kode_ritase,''),
-		       e.status, e.catatan, e.latitude, e.longitude, e.durasi_detik, e.created_at
+		       e.status, e.catatan, e.latitude, e.longitude,
+		       e.nama_lokasi, e.durasi_detik, e.jumlah_koli, e.jumlah_ecer, e.jumlah_high_value,
+		       e.created_at
 		FROM ritase_event e
 		JOIN ritase r ON r.id_ritase = e.id_ritase
 		WHERE r.id_kendaraan = $1
@@ -488,8 +526,12 @@ func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan int64,
 	var items []TrackingCheckpoint
 	for rows.Next() {
 		var c TrackingCheckpoint
-		if err := rows.Scan(&c.IDEvent, &c.IDRitase, &c.KodeRitase,
-			&c.Status, &c.Catatan, &c.Latitude, &c.Longitude, &c.DurasiDetik, &c.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&c.IDEvent, &c.IDRitase, &c.KodeRitase,
+			&c.Status, &c.Catatan, &c.Latitude, &c.Longitude,
+			&c.NamaLokasi, &c.DurasiDetik, &c.JumlahKoli, &c.JumlahEcer, &c.JumlahHighValue,
+			&c.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, c)
