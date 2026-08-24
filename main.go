@@ -42,6 +42,28 @@ func main() {
 		ALTER TABLE armada_tracking ADD COLUMN IF NOT EXISTS nama_lokasi VARCHAR(255);
 	`)
 
+	// Auto-recalculate armada_tracking muatan dari ritase_event (sync data)
+	if _, err := db.Exec(ctx, `
+		UPDATE armada_tracking at SET
+			jumlah_koli = COALESCE(sub.koli, 0),
+			jumlah_ecer = COALESCE(sub.ecer, 0),
+			jumlah_high_value = COALESCE(sub.hv, 0)
+		FROM (
+			SELECT id_ritase,
+			       sum(jumlah_koli) AS koli,
+			       sum(jumlah_ecer) AS ecer,
+			       sum(jumlah_high_value) AS hv
+			FROM ritase_event
+			WHERE status = 'Bongkar Muat Barang'
+			GROUP BY id_ritase
+		) sub
+		WHERE at.id_ritase = sub.id_ritase
+	`); err != nil {
+		log.Printf("[STARTUP] warning: gagal sync muatan armada_tracking: %v", err)
+	} else {
+		log.Println("[STARTUP] armada_tracking muatan tersync dari ritase_event")
+	}
+
 	// Event bus untuk komunikasi instan antar modul
 	eventBus := eventbus.New()
 
