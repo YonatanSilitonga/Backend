@@ -151,30 +151,55 @@ func main() {
 	}
 	fmt.Println()
 
-	// 5. Cek semua ritase aktif (bukan hari ini aja)
-	fmt.Println("--- 5. Ritase dengan event (30 hari terakhir) ---")
-	rows4, err := db.Query(ctx, `
-		SELECT DISTINCT ON (ev.id_ritase) ev.id_ritase, ev.status,
-		       COALESCE(ev.jumlah_koli,0), COALESCE(ev.jumlah_ecer,0), COALESCE(ev.jumlah_high_value,0),
-		       ev.created_at
-		FROM ritase_event ev
-		WHERE ev.created_at > now() - interval '30 days'
-		ORDER BY ev.id_ritase, ev.created_at DESC
-		LIMIT 10
+	// 5. Cek semua unique status di ritase_event
+	fmt.Println("--- 5. Semua unique status di ritase_event ---")
+	rows5, err := db.Query(ctx, `
+		SELECT status, count(*) FROM ritase_event
+		GROUP BY status ORDER BY count(*) DESC
 	`)
 	if err != nil {
-		log.Fatal("query recent:", err)
+		log.Fatal("query status:", err)
 	}
-	defer rows4.Close()
-	for rows4.Next() {
-		var id int64
+	defer rows5.Close()
+	for rows5.Next() {
 		var status string
-		var koli, ecer, hv int
-		var createdAt time.Time
-		if err := rows4.Scan(&id, &status, &koli, &ecer, &hv, &createdAt); err != nil {
+		var cnt int
+		if err := rows5.Scan(&status, &cnt); err != nil {
 			log.Fatal("scan:", err)
 		}
-		fmt.Printf("  ritase=%d | %-25s | koli=%d ecer=%d hv=%d | %s\n", id, status, koli, ecer, hv, createdAt.Format("2006-01-02 15:04:05"))
+		fmt.Printf("  %-30s → %d events\n", status, cnt)
+	}
+	fmt.Println()
+
+	// 6. Cek event loading/perjalanan per ritase
+	fmt.Println("--- 6. Cek pasangan event durasi (30 hari terakhir) ---")
+	rows6, err := db.Query(ctx, `
+		SELECT e1.id_ritase, e1.status AS start_status, e2.status AS end_status,
+		       EXTRACT(EPOCH FROM (e2.created_at - e1.created_at)) AS dur_detik
+		FROM ritase_event e1
+		JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.created_at > e1.created_at
+		WHERE e1.status IN ('Bongkar Muat Barang','Keluar Gudang','mulai_unloading')
+		  AND e2.status IN ('selesai_loading','tiba','selesai_unloading')
+		ORDER BY e1.id_ritase, e1.created_at
+		LIMIT 20
+	`)
+	if err != nil {
+		log.Fatal("query pairs:", err)
+	}
+	defer rows6.Close()
+	count6 := 0
+	for rows6.Next() {
+		var idRitase int64
+		var startStatus, endStatus string
+		var dur float64
+		if err := rows6.Scan(&idRitase, &startStatus, &endStatus, &dur); err != nil {
+			log.Fatal("scan:", err)
+		}
+		fmt.Printf("  ritase=%d | %s → %s | %.0f detik\n", idRitase, startStatus, endStatus, dur)
+		count6++
+	}
+	if count6 == 0 {
+		fmt.Println("  [KOSONG] Tidak ada pasangan event durasi ditemukan!")
 	}
 	fmt.Println()
 	fmt.Println("=== SELESAI ===")
