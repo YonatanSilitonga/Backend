@@ -157,8 +157,8 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 }
 
 // GetDurasiAnalisis menghitung rata-rata durasi proses dari timeline event.
-// Pakai pasangan status: loading = mulai_loading -> selesai_loading,
-// perjalanan = berangkat_gudang -> sampai_gudang, unloading = mulai_unloading -> selesai_unloading.
+// Pakai pasangan status stored di DB: loading = Bongkar Muat Barang -> selesai_loading,
+// perjalanan = Keluar Gudang -> tiba, unloading = mulai_unloading -> selesai_unloading.
 func (r *Repository) GetDurasiAnalisis(ctx context.Context) (*DurasiAnalisis, error) {
 	d := &DurasiAnalisis{}
 
@@ -167,8 +167,8 @@ func (r *Repository) GetDurasiAnalisis(ctx context.Context) (*DurasiAnalisis, er
 		end   string
 		dst   *string
 	}{
-		{"mulai_loading", "selesai_loading", &d.RataRataLoading},
-		{"berangkat_gudang", "sampai_gudang", &d.RataRataPerjalanan},
+		{"Bongkar Muat Barang", "selesai_loading", &d.RataRataLoading},
+		{"Keluar Gudang", "tiba", &d.RataRataPerjalanan},
 		{"mulai_unloading", "selesai_unloading", &d.RataRataUnloading},
 	}
 
@@ -192,7 +192,7 @@ func (r *Repository) GetDurasiAnalisis(ctx context.Context) (*DurasiAnalisis, er
 
 	if err := r.db.QueryRow(ctx, `
 		SELECT count(DISTINCT id_ritase) FROM ritase_event
-		WHERE status IN ('mulai_loading','berangkat_gudang','mulai_unloading')
+		WHERE status IN ('Bongkar Muat Barang','Keluar Gudang','mulai_unloading')
 	`).Scan(&d.TotalRitaseDihitung); err != nil {
 		return nil, err
 	}
@@ -249,8 +249,8 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 	rows, err = r.db.Query(ctx, `
 		SELECT r.kode_ritase, max(e2.created_at)
 		FROM ritase r
-		JOIN ritase_event e1 ON e1.id_ritase = r.id_ritase AND e1.status = 'berangkat_gudang'
-		JOIN ritase_event e2 ON e2.id_ritase = r.id_ritase AND e2.status = 'sampai_gudang'
+		JOIN ritase_event e1 ON e1.id_ritase = r.id_ritase AND e1.status = 'Keluar Gudang'
+		JOIN ritase_event e2 ON e2.id_ritase = r.id_ritase AND e2.status = 'tiba'
 		WHERE r.status NOT IN ('selesai','completed','done','batal','cancelled')
 		  AND EXTRACT(EPOCH FROM (e2.created_at - e1.created_at)) > 8*3600
 		GROUP BY r.kode_ritase
@@ -386,13 +386,13 @@ func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) (
 			SELECT e1.id_ritase, avg(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at))) AS dur
 			FROM ritase_event e1
 			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'selesai_loading'
-			WHERE e1.status = 'mulai_loading' AND e2.created_at > e1.created_at
+			WHERE e1.status = 'Bongkar Muat Barang' AND e2.created_at > e1.created_at
 			GROUP BY e1.id_ritase
 		), perjalanan AS (
 			SELECT e1.id_ritase, avg(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at))) AS dur
 			FROM ritase_event e1
-			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'sampai_gudang'
-			WHERE e1.status = 'berangkat_gudang' AND e2.created_at > e1.created_at
+			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'tiba'
+			WHERE e1.status = 'Keluar Gudang' AND e2.created_at > e1.created_at
 			GROUP BY e1.id_ritase
 		), unloading AS (
 			SELECT e1.id_ritase, avg(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at))) AS dur
