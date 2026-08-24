@@ -162,13 +162,16 @@ var defaultFixedRoutes = []FixedRoute{
 }
 
 type PreviewRoute struct {
-	IDDriver    int64         `json:"id_driver"`
-	NamaDriver  string        `json:"nama_driver"`
-	IDKendaraan int64         `json:"id_kendaraan"`
-	PlatNomor   string        `json:"plat_nomor"`
-	RitaseKe    int           `json:"ritase_ke"`
-	Jenis       string        `json:"jenis_ritase"`
-	Stops       []PreviewStop `json:"stops"`
+	IDDriver     int64         `json:"id_driver"`
+	NamaDriver   string        `json:"nama_driver"`
+	IDKendaraan  int64         `json:"id_kendaraan"`
+	PlatNomor    string        `json:"plat_nomor"`
+	RitaseKe     int           `json:"ritase_ke"`
+	Jenis        string        `json:"jenis_ritase"`
+	JamMulai     string        `json:"jam_mulai"`
+	Tanggal      string        `json:"tanggal"`
+	TanggalLabel string        `json:"tanggal_label"`
+	Stops        []PreviewStop `json:"stops"`
 }
 
 type PreviewStop struct {
@@ -195,10 +198,20 @@ func tentukanJenisRitase(idDriver int64, ritaseKe int) string {
 	return "outgoing"
 }
 
-// AdminPreviewGenerateDailyRitase mengembalikan data rute yang akan digenerate beserta nama lokasinya
+// AdminPreviewGenerateDailyRitase mengembalikan semua rute dari defaultFixedRoutes
+// dengan info tanggal (hari ini / besok) berdasarkan jam_mulai.
 func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
 	defer cancel()
+
+	// --- ZONA WAKTU JAKARTA ---
+	loc, _ := time.LoadLocation("Asia/Jakarta")
+	if loc == nil {
+		loc = time.FixedZone("WIB", 7*60*60)
+	}
+	nowWIB := time.Now().In(loc)
+	hariIniStr := nowWIB.Format("2006-01-02")
+	besokStr := nowWIB.AddDate(0, 0, 1).Format("2006-01-02")
 
 	// 1. Fetch Master Data to Maps
 	drivers := make(map[int64]string)
@@ -262,82 +275,13 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 	}
 	rowsDP.Close()
 
-	// 2. Determine Routes to Use (Latest generated or fallback to default)
-	var routesToUse []FixedRoute
-	var latestDate *time.Time
-	_ = h.DB.QueryRow(ctx, "SELECT MAX(tanggal) FROM ritase").Scan(&latestDate)
-
-	if latestDate != nil {
-		rowsR, errR := h.DB.Query(ctx, "SELECT id_ritase, id_driver, id_kendaraan, COALESCE(id_drop_point, 0), ritase_ke, COALESCE(jenis_ritase, '') FROM ritase WHERE tanggal = $1 ORDER BY id_driver, ritase_ke", *latestDate)
-		if errR == nil {
-			var ritaseMap = make(map[int64]*FixedRoute)
-			var orderedRitaseIDs []int64
-
-			for rowsR.Next() {
-				var idRitase, idDriver, idKendaraan int64
-				var idDropPoint int64
-				var ritaseKe int
-				var jenis string
-				if err := rowsR.Scan(&idRitase, &idDriver, &idKendaraan, &idDropPoint, &ritaseKe, &jenis); err == nil {
-					ritaseMap[idRitase] = &FixedRoute{
-						IDDriver:    idDriver,
-						IDKendaraan: idKendaraan,
-						IDDropPoint: idDropPoint,
-						RitaseKe:    ritaseKe,
-						Jenis:       jenis,
-						Stops:       []FixedStop{},
-					}
-					orderedRitaseIDs = append(orderedRitaseIDs, idRitase)
-				}
-			}
-			rowsR.Close()
-
-			if len(orderedRitaseIDs) > 0 {
-				rowsS, errS := h.DB.Query(ctx, `
-					SELECT rs.id_ritase, rs.urutan, rs.jenis_stop,
-						COALESCE(rs.id_gudang, rs.id_seller, rs.id_drop_point) as id_lokasi,
-						rs.keterangan
-					FROM ritase_stop rs
-					JOIN ritase r ON r.id_ritase = rs.id_ritase
-					WHERE r.tanggal = $1
-					ORDER BY rs.id_ritase, rs.urutan
-				`, *latestDate)
-
-				if errS == nil {
-					for rowsS.Next() {
-						var idRitase int64
-						var stop FixedStop
-						var idLokasi *int64
-						var ket *string
-
-						if err := rowsS.Scan(&idRitase, &stop.Urutan, &stop.Jenis, &idLokasi, &ket); err == nil {
-							if idLokasi != nil {
-								stop.IDLokasi = *idLokasi
-							}
-							if ket != nil {
-								stop.Keterangan = *ket
-							}
-							if r, ok := ritaseMap[idRitase]; ok {
-								r.Stops = append(r.Stops, stop)
-							}
-						}
-					}
-					rowsS.Close()
-				}
-
-				for _, idRitase := range orderedRitaseIDs {
-					routesToUse = append(routesToUse, *ritaseMap[idRitase])
-				}
-			}
-		}
-	}
-
-	if len(routesToUse) == 0 {
-		routesToUse = defaultFixedRoutes
-	}
+	// 2. Selalu pakai defaultFixedRoutes
+	routesToUse := defaultFixedRoutes
 
 	// 3. Map Routes to Preview Format
 	var previewRoutes []PreviewRoute
+	var countHariIni, countBesok int
+
 	for _, fr := range routesToUse {
 		driverName := fmt.Sprintf("Driver #%d", fr.IDDriver)
 		if name, ok := drivers[fr.IDDriver]; ok {
@@ -347,6 +291,32 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 		plat := fmt.Sprintf("Kendaraan #%d", fr.IDKendaraan)
 		if p, ok := vehicles[fr.IDKendaraan]; ok {
 			plat = p
+		}
+
+		// Hitung tanggal berdasarkan jam_mulai
+		jenisPasti := fr.Jenis
+		if jenisPasti == "" {
+			jenisPasti = tentukanJenisRitase(fr.IDDriver, fr.RitaseKe)
+		}
+		jm, _ := ambilJadwal(jenisPasti, fr.RitaseKe)
+
+		var tanggalStr, tanggalLabel, jamMulaiStr string
+		if jms, ok := jm.(string); ok && len(jms) >= 2 {
+			jam, _ := strconv.Atoi(jms[:2])
+			jamMulaiStr = jms
+			if jam < 7 {
+				tanggalStr = besokStr
+				tanggalLabel = "Besok"
+				countBesok++
+			} else {
+				tanggalStr = hariIniStr
+				tanggalLabel = "Hari Ini"
+				countHariIni++
+			}
+		} else {
+			tanggalStr = hariIniStr
+			tanggalLabel = "Hari Ini"
+			countHariIni++
 		}
 
 		previewStops := make([]PreviewStop, 0)
@@ -371,28 +341,33 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 				JenisStop:  fs.Jenis,
 				IDLokasi:   fs.IDLokasi,
 				NamaLokasi: locName,
-				Keterangan: fs.Keterangan,
+				Keterangan:   fs.Keterangan,
 			})
 		}
 
 		previewRoutes = append(previewRoutes, PreviewRoute{
-			IDDriver:    fr.IDDriver,
-			NamaDriver:  driverName,
+			IDDriver:     fr.IDDriver,
+			NamaDriver:   driverName,
 			IDKendaraan: fr.IDKendaraan,
-			PlatNomor:   plat,
-			RitaseKe:    fr.RitaseKe,
-			Jenis:       fr.Jenis,
-			Stops:       previewStops,
+			PlatNomor:    plat,
+			RitaseKe:     fr.RitaseKe,
+			Jenis:        jenisPasti,
+			JamMulai:     jamMulaiStr,
+			Tanggal:      tanggalStr,
+			TanggalLabel: tanggalLabel,
+			Stops:        previewStops,
 		})
 	}
 
 	return response.OK(c, map[string]interface{}{
-		"total_preview": len(previewRoutes),
-		"routes":        previewRoutes,
+		"total_preview":  len(previewRoutes),
+		"total_hari_ini": countHariIni,
+		"total_besok":    countBesok,
+		"routes":         previewRoutes,
 	})
 }
 
-// AdminGenerateDailyRitas
+// AdminGenerateDailyRitase
 // FIX anti-duplikat: sebelum insert, cek dulu apakah kombinasi (id_driver, ritase_ke)
 // untuk tanggal hari ini SUDAH ADA. Kalau sudah ada (otomatis berarti statusnya
 // 'selesai', karena yang belum selesai sudah dihapus di step DELETE di atas), SKIP.
@@ -404,7 +379,8 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 	defer cancel()
 
 	var req struct {
-		Routes []FixedRoute `json:"routes"`
+		Tanggal string       `json:"tanggal"`
+		Routes  []FixedRoute `json:"routes"`
 	}
 	// Try parsing body if provided
 	_ = c.Bind(&req)
@@ -427,25 +403,18 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 		loc = time.FixedZone("WIB", 7*60*60)
 	}
 	nowWIB := time.Now().In(loc)
+
+	// Base date: gunakan tanggal dari request, fallback ke server today
 	hariIni := nowWIB.Format("2006-01-02")
 	hariBesok := nowWIB.AddDate(0, 0, 1).Format("2006-01-02")
-	todayStr := nowWIB.Format("20060102")
-
-	// 1. Clear uncompleted ritase untuk HARI INI & BESOK (karena ritase < 07:00 masuk tanggal besok)
-	for _, tgl := range []string{hariIni, hariBesok} {
-		if _, err := tx.Exec(ctx, "DELETE FROM ritase_event WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = $1 AND status != 'selesai')", tgl); err != nil {
-			return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan event lama: "+err.Error())
-		}
-		if _, err := tx.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = $1 AND status != 'selesai')", tgl); err != nil {
-			return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan ritase_stop lama: "+err.Error())
-		}
-		if _, err := tx.Exec(ctx, "DELETE FROM armada_tracking WHERE id_ritase IN (SELECT id_ritase FROM ritase WHERE tanggal = $1 AND status != 'selesai')", tgl); err != nil {
-			return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan tracking lama: "+err.Error())
-		}
-		if _, err := tx.Exec(ctx, "DELETE FROM ritase WHERE tanggal = $1 AND status != 'selesai'", tgl); err != nil {
-			return response.Error(c, http.StatusInternalServerError, "Gagal membersihkan ritase lama: "+err.Error())
+	if req.Tanggal != "" {
+		parsed, err := time.ParseInLocation("2006-01-02", req.Tanggal, loc)
+		if err == nil {
+			hariIni = parsed.Format("2006-01-02")
+			hariBesok = parsed.AddDate(0, 0, 1).Format("2006-01-02")
 		}
 	}
+	todayStr := strings.ReplaceAll(hariIni, "-", "")
 
 	countGenerated := 0
 	countSkipped := 0
