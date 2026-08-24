@@ -129,6 +129,7 @@ func main() {
 	// Admin Ritase Endpoints (Tower Control Web)
 	v1.GET("/admin/master-options", handler.AdminGetMasterOptions)
 	v1.GET("/admin/ritases", handler.AdminGetRitases)
+	v1.GET("/admin/manifest-photos", handler.AdminGetManifestPhotos)
 	v1.GET("/admin/ritase/generate/preview", handler.AdminPreviewGenerateDailyRitase)
 	v1.POST("/admin/ritase/generate", handler.AdminGenerateDailyRitase)
 	v1.POST("/admin/ritase", handler.AdminCreateRitase)

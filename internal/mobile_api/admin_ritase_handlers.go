@@ -1020,3 +1020,113 @@ func getValidDropPointID(ctx context.Context, db interface {
 	}
 	return 2
 }
+
+// AdminGetManifestPhotos mengambil seluruh daftar foto bukti manifest yang diunggah driver
+// GET /api/v1/admin/manifest-photos?tanggal=YYYY-MM-DD&driver_id=&search=
+func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
+	defer cancel()
+
+	tanggalParam := c.QueryParam("tanggal")
+	driverIDParam, _ := strconv.ParseInt(c.QueryParam("driver_id"), 10, 64)
+	searchParam := strings.TrimSpace(c.QueryParam("search"))
+
+	query := `
+		SELECT 
+			ev.id_event,
+			ev.id_ritase,
+			COALESCE(r.kode_ritase, 'R-' || ev.id_ritase) AS kode_ritase,
+			TO_CHAR(COALESCE(r.tanggal, ev.created_at::date), 'YYYY-MM-DD') AS tanggal,
+			COALESCE(r.ritase_ke, 1) AS ritase_ke,
+			COALESCE(r.id_driver, 0) AS id_driver,
+			COALESCE(d.nama_driver, 'Driver') AS nama_driver,
+			COALESCE(d.jabatan, 'TRANSPORTER') AS jabatan_driver,
+			COALESCE(r.id_kendaraan, 0) AS id_kendaraan,
+			COALESCE(k.plat_nomor, '-') AS nopol,
+			COALESCE(k.jenis_kendaraan, 'Blindvan') AS jenis_kendaraan,
+			COALESCE(ev.nama_lokasi, 'Lokasi') AS nama_lokasi,
+			COALESCE(ev.status, 'Bongkar Muat') AS status,
+			COALESCE(ev.jumlah_koli, 0) AS jumlah_koli,
+			COALESCE(ev.jumlah_ecer, 0) AS jumlah_ecer,
+			COALESCE(ev.jumlah_high_value, 0) AS jumlah_high_value,
+			COALESCE(ev.durasi_detik, 0) AS durasi_detik,
+			ev.foto_manifest_url,
+			ev.created_at
+		FROM ritase_event ev
+		LEFT JOIN ritase r ON r.id_ritase = ev.id_ritase
+		LEFT JOIN driver d ON d.id_driver = r.id_driver
+		LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
+		WHERE ev.foto_manifest_url IS NOT NULL AND ev.foto_manifest_url != ''
+	`
+
+	args := make([]interface{}, 0)
+	argIdx := 1
+
+	if tanggalParam != "" {
+		query += fmt.Sprintf(" AND (r.tanggal = $%d::date OR (r.tanggal IS NULL AND ev.created_at::date = $%d::date))", argIdx, argIdx)
+		args = append(args, tanggalParam)
+		argIdx++
+	}
+
+	if driverIDParam > 0 {
+		query += fmt.Sprintf(" AND r.id_driver = $%d", argIdx)
+		args = append(args, driverIDParam)
+		argIdx++
+	}
+
+	if searchParam != "" {
+		likePattern := "%" + strings.ToLower(searchParam) + "%"
+		query += fmt.Sprintf(" AND (LOWER(d.nama_driver) LIKE $%d OR LOWER(k.plat_nomor) LIKE $%d OR LOWER(ev.nama_lokasi) LIKE $%d OR LOWER(r.kode_ritase) LIKE $%d)", argIdx, argIdx, argIdx, argIdx)
+		args = append(args, likePattern)
+		argIdx++
+	}
+
+	query += " ORDER BY ev.created_at DESC LIMIT 100"
+
+	rows, err := h.DB.Query(ctx, query, args...)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "Gagal mengambil foto manifest: "+err.Error())
+	}
+	defer rows.Close()
+
+	photos := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var idEvent, idRitase, idDriver, idKendaraan int64
+		var kodeRitase, tanggal, namaDriver, jabatanDriver, nopol, jenisKendaraan, namaLokasi, status, fotoURL string
+		var ritaseKe, koli, ecer, highValue, durasiDetik int
+		var createdAt time.Time
+
+		if err := rows.Scan(
+			&idEvent, &idRitase, &kodeRitase, &tanggal, &ritaseKe,
+			&idDriver, &namaDriver, &jabatanDriver,
+			&idKendaraan, &nopol, &jenisKendaraan,
+			&namaLokasi, &status,
+			&koli, &ecer, &highValue, &durasiDetik,
+			&fotoURL, &createdAt,
+		); err == nil {
+			photos = append(photos, map[string]interface{}{
+				"id_event":          idEvent,
+				"id_ritase":         idRitase,
+				"kode_ritase":       kodeRitase,
+				"tanggal":           tanggal,
+				"ritase_ke":         ritaseKe,
+				"id_driver":         idDriver,
+				"nama_driver":       namaDriver,
+				"jabatan_driver":    jabatanDriver,
+				"id_kendaraan":      idKendaraan,
+				"nopol":             nopol,
+				"jenis_kendaraan":   jenisKendaraan,
+				"nama_lokasi":       namaLokasi,
+				"status":            status,
+				"jumlah_koli":       koli,
+				"jumlah_ecer":       ecer,
+				"jumlah_high_value": highValue,
+				"durasi_detik":      durasiDetik,
+				"foto_manifest_url": fotoURL,
+				"created_at":        createdAt.Format(time.RFC3339),
+			})
+		}
+	}
+
+	return response.OK(c, photos)
+}

@@ -855,7 +855,18 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 		_, _ = h.DB.Exec(ctx, `UPDATE ritase SET status = 'berjalan' WHERE id_ritase = $1 AND status != 'selesai'`, idRitase)
 	}
 
-	// 2. Update armada_tracking status & nama_lokasi & muatan
+	// 2. Hitung total akumulasi muatan yang sedang dibawa di ritase ini (SUM dari semua event Bongkar Muat Barang)
+	var totalKoli, totalEcer, totalHV int
+	_ = h.DB.QueryRow(ctx, `
+		SELECT 
+			COALESCE(SUM(jumlah_koli), 0),
+			COALESCE(SUM(jumlah_ecer), 0),
+			COALESCE(SUM(jumlah_high_value), 0)
+		FROM ritase_event
+		WHERE id_ritase = $1 AND status = 'Bongkar Muat Barang'
+	`, idRitase).Scan(&totalKoli, &totalEcer, &totalHV)
+
+	// Update armada_tracking status & nama_lokasi & total muatan akumulasi
 	_, _ = h.DB.Exec(ctx, `
 		UPDATE armada_tracking
 		SET status = $1,
@@ -865,7 +876,7 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 		    jumlah_high_value = $5,
 		    last_update = now()
 		WHERE id_ritase = $6
-	`, req.Status, namaLokasi, req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue, idRitase)
+	`, req.Status, namaLokasi, totalKoli, totalEcer, totalHV, idRitase)
 
 	return response.Created(c, map[string]interface{}{
 		"id_ritase":   idRitase,
@@ -918,12 +929,15 @@ func (h *APIHandler) UploadManifest(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
+	idStop, _ := strconv.ParseInt(c.FormValue("id_stop"), 10, 64)
+
+	// 1. Update ritase_event
 	if idRitase > 0 {
 		if namaLokasi != "" {
 			_, _ = h.DB.Exec(ctx, `
 				UPDATE ritase_event
 				SET foto_manifest_url = $1
-				WHERE id_ritase = $2 AND (nama_lokasi = $3 OR POSITION(LOWER($3) in LOWER(nama_lokasi)) > 0)
+				WHERE id_ritase = $2 AND (nama_lokasi = $3 OR POSITION(LOWER($3) in LOWER(nama_lokasi)) > 0 OR POSITION(LOWER(nama_lokasi) in LOWER($3)) > 0)
 			`, photoURL, idRitase, namaLokasi)
 		} else {
 			_, _ = h.DB.Exec(ctx, `
@@ -937,6 +951,30 @@ func (h *APIHandler) UploadManifest(c echo.Context) error {
 				)
 			`, photoURL, idRitase)
 		}
+	}
+
+	// 2. Update ritase_stop
+	if idStop > 0 {
+		_, _ = h.DB.Exec(ctx, `UPDATE ritase_stop SET foto_manifest_url = $1 WHERE id_stop = $2`, photoURL, idStop)
+	} else if idRitase > 0 && namaLokasi != "" {
+		_, _ = h.DB.Exec(ctx, `
+			UPDATE ritase_stop
+			SET foto_manifest_url = $1
+			WHERE id_stop = (
+				SELECT rs.id_stop
+				FROM ritase_stop rs
+				LEFT JOIN seller s ON s.id_seller = rs.id_seller
+				LEFT JOIN drop_point dp ON dp.id_drop_point = rs.id_drop_point
+				LEFT JOIN gudang g ON g.id_gudang = rs.id_gudang
+				WHERE rs.id_ritase = $2
+				  AND (
+				    COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang) = $3
+				    OR POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER($3)) > 0
+				    OR POSITION(LOWER($3) in LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0
+				  )
+				LIMIT 1
+			)
+		`, photoURL, idRitase, namaLokasi)
 	}
 
 	return response.OK(c, map[string]interface{}{
