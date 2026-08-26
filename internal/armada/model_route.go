@@ -24,6 +24,7 @@ type RitaseStop struct {
 	JumlahEcer      *int     `json:"jumlah_ecer,omitempty"`
 	JumlahHighValue *int     `json:"jumlah_high_value,omitempty"`
 	DurasiDetik     *int     `json:"durasi_detik,omitempty"`
+	FotoManifestURL *string `json:"foto_manifest_url,omitempty"`
 }
 
 // RitaseStopRequest adalah satu titik rute saat membuat ritase.

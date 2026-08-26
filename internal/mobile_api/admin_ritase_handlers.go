@@ -600,7 +600,8 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 				re.jumlah_koli,
 				re.jumlah_ecer,
 				re.jumlah_high_value,
-				re.durasi_detik
+				re.durasi_detik,
+				COALESCE(re.foto_manifest_url, rs.foto_manifest_url) AS foto_manifest_url
 			FROM ritase_stop rs
 			LEFT JOIN seller s ON s.id_seller = rs.id_seller
 			LEFT JOIN drop_point dp ON dp.id_drop_point = rs.id_drop_point
@@ -610,7 +611,17 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 					COALESCE(MAX(ev.jumlah_koli), 0) AS jumlah_koli,
 					COALESCE(MAX(ev.jumlah_ecer), 0) AS jumlah_ecer,
 					COALESCE(MAX(ev.jumlah_high_value), 0) AS jumlah_high_value,
-					COALESCE(MAX(ev.durasi_detik), 0) AS durasi_detik
+					COALESCE(MAX(ev.durasi_detik), 0) AS durasi_detik,
+					(SELECT ev2.foto_manifest_url FROM ritase_event ev2
+					 WHERE ev2.id_ritase = rs.id_ritase
+					   AND ev2.foto_manifest_url IS NOT NULL AND ev2.foto_manifest_url != ''
+					   AND (
+					     ev2.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
+					     OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev2.nama_lokasi) in LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
+					     OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(ev2.nama_lokasi)) > 0)
+					   )
+					 LIMIT 1
+					) AS foto_manifest_url
 				FROM ritase_event ev
 				WHERE ev.id_ritase = rs.id_ritase
 				  AND (
@@ -631,21 +642,23 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 				var idSeller, idDP, idGudang *int64
 				var ket *string
 				var koli, ecer, highValue, durasiDetik *int
+				var fotoManifestURL *string
 
-				if err := stopRows.Scan(&idStop, &urutan, &jenisStop, &idSeller, &idDP, &idGudang, &ket, &namaLokasi, &koli, &ecer, &highValue, &durasiDetik); err == nil {
+				if err := stopRows.Scan(&idStop, &urutan, &jenisStop, &idSeller, &idDP, &idGudang, &ket, &namaLokasi, &koli, &ecer, &highValue, &durasiDetik, &fotoManifestURL); err == nil {
 					stops = append(stops, map[string]interface{}{
-						"id_stop":           idStop,
-						"urutan":            urutan,
-						"jenis_stop":        jenisStop,
-						"id_seller":         idSeller,
-						"id_drop_point":     idDP,
-						"id_gudang":         idGudang,
-						"keterangan":        ket,
-						"nama_lokasi":       namaLokasi,
-						"jumlah_koli":       koli,
-						"jumlah_ecer":       ecer,
-						"jumlah_high_value": highValue,
-						"durasi_detik":      durasiDetik,
+						"id_stop":            idStop,
+						"urutan":             urutan,
+						"jenis_stop":         jenisStop,
+						"id_seller":          idSeller,
+						"id_drop_point":      idDP,
+						"id_gudang":          idGudang,
+						"keterangan":         ket,
+						"nama_lokasi":        namaLokasi,
+						"jumlah_koli":        koli,
+						"jumlah_ecer":        ecer,
+						"jumlah_high_value":  highValue,
+						"durasi_detik":       durasiDetik,
+						"foto_manifest_url":  fotoManifestURL,
 					})
 				}
 			}
