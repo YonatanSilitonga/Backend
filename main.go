@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"backend/internal/armada"
+	"backend/internal/admin"
 	"backend/internal/auth"
 	"backend/internal/config"
 	"backend/internal/dashboard"
@@ -148,15 +149,26 @@ func main() {
 	// Tanpa JWT (device tidak login), dilindungi header X-Tracker-Key.
 	v1.POST("/tracker/gps", handler.PostTrackerGPS)
 
-	// Admin Ritase Endpoints (Tower Control Web)
-	v1.GET("/admin/master-options", handler.AdminGetMasterOptions)
-	v1.GET("/admin/ritases", handler.AdminGetRitases)
-	v1.GET("/admin/manifest-photos", handler.AdminGetManifestPhotos)
-	v1.GET("/admin/ritase/generate/preview", handler.AdminPreviewGenerateDailyRitase)
-	v1.POST("/admin/ritase/generate", handler.AdminGenerateDailyRitase)
-	v1.POST("/admin/ritase", handler.AdminCreateRitase)
-	v1.PUT("/admin/ritase/:id", handler.AdminUpdateRitase)
-	v1.DELETE("/admin/ritase/:id", handler.AdminDeleteRitase)
+	// Admin Ritase Endpoints (Tower Control Web) — butuh JWT + role admin
+	adminMW := []echo.MiddlewareFunc{authMW, appMiddleware.RequireRoles("admin")}
+
+	admin := v1.Group("/admin", adminMW...)
+	admin.GET("/master-options", handler.AdminGetMasterOptions)
+	admin.GET("/ritases", handler.AdminGetRitases)
+	admin.GET("/manifest-photos", handler.AdminGetManifestPhotos)
+	admin.GET("/ritase/generate/preview", handler.AdminPreviewGenerateDailyRitase)
+	admin.POST("/ritase/generate", handler.AdminGenerateDailyRitase)
+	admin.POST("/ritase", handler.AdminCreateRitase)
+	admin.PUT("/ritase/:id", handler.AdminUpdateRitase)
+	admin.DELETE("/ritase/:id", handler.AdminDeleteRitase)
+
+	// Admin CRUD master data + user management
+	adminH.RegisterRoutes(admin)
+
+	// modul admin: CRUD master data + user management
+	adminRepo := admin.NewRepository(db)
+	adminSvc := admin.NewService(adminRepo)
+	adminH := admin.NewHandler(adminSvc)
 
 	// ── ROUTE AUTH WEB (login JWT + me + logout) ──
 	authH.RegisterRoutes(v1, authMW)
