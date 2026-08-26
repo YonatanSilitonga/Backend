@@ -52,9 +52,19 @@ func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 
 func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_driver, nama_driver, no_hp, no_sim, jenis_sim, status_driver
-		FROM driver
-		ORDER BY id_driver
+		SELECT d.id_driver, d.nama_driver, d.no_hp, d.no_sim, d.jenis_sim, d.status_driver,
+		       k.plat_nomor, t.id_kendaraan,
+		       CASE WHEN t.last_update IS NOT NULL AND t.last_update > now() - interval '5 minutes' THEN true ELSE false END AS tracking_fresh
+		FROM driver d
+		LEFT JOIN LATERAL (
+			SELECT id_kendaraan, last_update
+			FROM armada_tracking
+			WHERE id_driver = d.id_driver
+			ORDER BY last_update DESC
+			LIMIT 1
+		) t ON true
+		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
+		ORDER BY d.id_driver
 	`)
 	if err != nil {
 		return nil, err
@@ -64,7 +74,8 @@ func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 	var items []Driver
 	for rows.Next() {
 		var d Driver
-		if err := rows.Scan(&d.ID, &d.NamaDriver, &d.NoHP, &d.NoSIM, &d.JenisSIM, &d.StatusDriver); err != nil {
+		if err := rows.Scan(&d.ID, &d.NamaDriver, &d.NoHP, &d.NoSIM, &d.JenisSIM, &d.StatusDriver,
+			&d.PlatNomor, &d.IDKendaraan, &d.TrackingFresh); err != nil {
 			return nil, err
 		}
 		items = append(items, d)
