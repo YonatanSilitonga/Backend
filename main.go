@@ -8,7 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"backend/internal/armada"
-	"backend/internal/admin"
+	adminpkg "backend/internal/admin"
 	"backend/internal/auth"
 	"backend/internal/config"
 	"backend/internal/dashboard"
@@ -152,11 +152,19 @@ func main() {
 	// Admin Ritase Endpoints (Tower Control Web) — butuh JWT + role admin
 	adminMW := []echo.MiddlewareFunc{authMW, appMiddleware.RequireRoles("admin")}
 
+	// modul admin: CRUD master data + user management
+	adminRepo := adminpkg.NewRepository(db)
+	adminSvc := adminpkg.NewService(adminRepo)
+	adminH := adminpkg.NewHandler(adminSvc)
+
+	// ── READ-ONLY RITASE ENDPOINTS (semua role web bisa baca) ──
+	v1.GET("/ritases", handler.AdminGetRitases, authMW)
+	v1.GET("/master-options", handler.AdminGetMasterOptions, authMW)
+	v1.GET("/manifest-photos", handler.AdminGetManifestPhotos, authMW)
+	v1.GET("/ritase/generate/preview", handler.AdminPreviewGenerateDailyRitase, authMW)
+
+	// ── GROUP ADMIN (tulis hapus ritase + CRUD baru) ──
 	admin := v1.Group("/admin", adminMW...)
-	admin.GET("/master-options", handler.AdminGetMasterOptions)
-	admin.GET("/ritases", handler.AdminGetRitases)
-	admin.GET("/manifest-photos", handler.AdminGetManifestPhotos)
-	admin.GET("/ritase/generate/preview", handler.AdminPreviewGenerateDailyRitase)
 	admin.POST("/ritase/generate", handler.AdminGenerateDailyRitase)
 	admin.POST("/ritase", handler.AdminCreateRitase)
 	admin.PUT("/ritase/:id", handler.AdminUpdateRitase)
@@ -164,11 +172,6 @@ func main() {
 
 	// Admin CRUD master data + user management
 	adminH.RegisterRoutes(admin)
-
-	// modul admin: CRUD master data + user management
-	adminRepo := admin.NewRepository(db)
-	adminSvc := admin.NewService(adminRepo)
-	adminH := admin.NewHandler(adminSvc)
 
 	// ── ROUTE AUTH WEB (login JWT + me + logout) ──
 	authH.RegisterRoutes(v1, authMW)
