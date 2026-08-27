@@ -129,6 +129,7 @@ func main() {
 	v1.GET("/sellers", handler.GetSellers)
 	v1.GET("/drivers", handler.GetDrivers)
 	v1.GET("/vehicles", handler.GetVehicles)
+	v1.GET("/app/version", handler.GetAppVersion)
 
 	// Serve static uploads (manifest photos, etc.)
 	e.Static("/uploads", "./uploads")

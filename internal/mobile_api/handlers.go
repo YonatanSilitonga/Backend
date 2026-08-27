@@ -37,6 +37,24 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+type AppVersionResponse struct {
+	VersionCode int    `json:"version_code"`
+	VersionName string `json:"version_name"`
+	DownloadURL string `json:"download_url"`
+	ForceUpdate bool   `json:"force_update"`
+	ReleaseNotes string `json:"release_notes"`
+}
+
+func (h *APIHandler) GetAppVersion(c echo.Context) error {
+	return c.JSON(http.StatusOK, AppVersionResponse{
+		VersionCode:  1,
+		VersionName:  "1.0.0",
+		DownloadURL:  "https://api.controltowerslb.tech/uploads/apk/tower-control-latest.apk",
+		ForceUpdate:  false,
+		ReleaseNotes: "Pembaruan kestabilan lokasi GPS real-time & foto bukti manifest e-POD.",
+	})
+}
+
 func (h *APIHandler) Login(c echo.Context) error {
 	var req LoginRequest
 	if err := c.Bind(&req); err != nil {
