@@ -145,6 +145,8 @@ func main() {
 	v1.POST("/driver/trip-status", handler.PostTripStatus, authMW)
 	v1.POST("/driver/upload-manifest", handler.UploadManifest, authMW)
 	v1.POST("/driver/reset-test-ritase", handler.ResetTestRitase, authMW)
+	v1.GET("/driver/history-ritase", handler.GetDriverHistoryRitase, authMW)
+	v1.GET("/driver/history-ritase/:id", handler.GetDriverHistoryDetail, authMW)
 
 	// GPS tracker hardware — sumber posisi cadangan saat HP mati.
 	// Tanpa JWT (device tidak login), dilindungi header X-Tracker-Key.
