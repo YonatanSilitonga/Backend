@@ -65,6 +65,36 @@ func main() {
 		log.Println("[STARTUP] armada_tracking muatan tersync dari ritase_event")
 	}
 
+	// Cleanup status armada_tracking yang stale (sisa ritase kemarin/belum selesai)
+	if _, err := db.Exec(ctx, `
+		UPDATE armada_tracking SET status = NULL
+		WHERE status IS NOT NULL
+		  AND id_ritase IN (
+			SELECT id_ritase FROM ritase
+			WHERE status = 'selesai'
+			   OR tanggal < (now() AT TIME ZONE 'Asia/Jakarta')::date
+		  )
+	`); err != nil {
+		log.Printf("[STARTUP] warning: gagal cleanup stale status: %v", err)
+	} else {
+		log.Println("[STARTUP] armada_tracking stale status cleaned up")
+	}
+
+	// Cleanup id_ritase di armada_tracking yang sudah selesai atau tanggal kemarin
+	if _, err := db.Exec(ctx, `
+		UPDATE armada_tracking SET id_ritase = NULL
+		WHERE id_ritase IS NOT NULL
+		  AND id_ritase IN (
+			SELECT id_ritase FROM ritase
+			WHERE status = 'selesai'
+			   OR tanggal < (now() AT TIME ZONE 'Asia/Jakarta')::date
+		  )
+	`); err != nil {
+		log.Printf("[STARTUP] warning: gagal cleanup stale id_ritase: %v", err)
+	} else {
+		log.Println("[STARTUP] armada_tracking stale id_ritase cleaned up")
+	}
+
 	// Event bus untuk komunikasi instan antar modul
 	eventBus := eventbus.New()
 
@@ -147,6 +177,8 @@ func main() {
 	v1.POST("/driver/reset-test-ritase", handler.ResetTestRitase, authMW)
 	v1.GET("/driver/history-ritase", handler.GetDriverHistoryRitase, authMW)
 	v1.GET("/driver/history-ritase/:id", handler.GetDriverHistoryDetail, authMW)
+	v1.GET("/driver/my-schedules", handler.GetMySchedules, authMW)
+	v1.GET("/driver/history", handler.GetHistory, authMW)
 
 	// GPS tracker hardware — sumber posisi cadangan saat HP mati.
 	// Tanpa JWT (device tidak login), dilindungi header X-Tracker-Key.
@@ -166,14 +198,16 @@ func main() {
 	v1.GET("/manifest-photos", handler.AdminGetManifestPhotos, authMW)
 	v1.GET("/ritase/generate/preview", handler.AdminPreviewGenerateDailyRitase, authMW)
 
-	// ── GROUP ADMIN (tulis hapus ritase + CRUD baru) ──
-	admin := v1.Group("/admin", adminMW...)
-	admin.POST("/ritase/generate", handler.AdminGenerateDailyRitase)
-	admin.POST("/ritase", handler.AdminCreateRitase)
-	admin.PUT("/ritase/:id", handler.AdminUpdateRitase)
-	admin.DELETE("/ritase/:id", handler.AdminDeleteRitase)
+	// ── RITASE WRITE ENDPOINTS (admin + direktur + kapten) ──
+	ritaseWriteMW := []echo.MiddlewareFunc{authMW, appMiddleware.RequireRoles("admin", "direktur", "kapten")}
+	ritaseWrite := v1.Group("/ritase", ritaseWriteMW...)
+	ritaseWrite.POST("/generate", handler.AdminGenerateDailyRitase)
+	ritaseWrite.POST("", handler.AdminCreateRitase)
+	ritaseWrite.PUT("/:id", handler.AdminUpdateRitase)
+	ritaseWrite.DELETE("/:id", handler.AdminDeleteRitase)
 
-	// Admin CRUD master data + user management
+	// Admin CRUD master data + user management (hanya admin)
+	admin := v1.Group("/admin", adminMW...)
 	adminH.RegisterRoutes(admin)
 
 	// ── ROUTE AUTH WEB (login JWT + me + logout) ──

@@ -290,7 +290,9 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		_ = h.DB.QueryRow(ctx, `
 			SELECT id_ritase 
 			FROM ritase 
-			WHERE id_driver = $1 OR id_kendaraan = $2 
+			WHERE (id_driver = $1 OR id_kendaraan = $2)
+			  AND tanggal = (now() AT TIME ZONE 'Asia/Jakarta')::date
+			  AND status != 'selesai'
 			ORDER BY id_ritase DESC 
 			LIMIT 1
 		`, req.IDDriver, req.IDKendaraan).Scan(&targetRitaseID)
@@ -343,7 +345,7 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 
 // hitungWindowMenit menghitung rentang menit [startMin, endMin] (0-1439, endMin bisa > 1440
 // kalau window melewati tengah malam) untuk sebuah jadwal ritase, SUDAH TERMASUK toleransi
-// mulai 2 jam lebih awal dari jam_mulai resmi.
+// mulai 30 menit lebih awal dari jam_mulai resmi.
 func hitungWindowMenit(jamMulaiStr, jamSelesaiStr string) (startMin, endMin int, err error) {
 	mulai, err := time.Parse("15:04:05", jamMulaiStr)
 	if err != nil {
@@ -357,7 +359,7 @@ func hitungWindowMenit(jamMulaiStr, jamSelesaiStr string) (startMin, endMin int,
 	mulaiMin := mulai.Hour()*60 + mulai.Minute()
 	selesaiMin := selesai.Hour()*60 + selesai.Minute()
 
-	startMin = mulaiMin - 120 // toleransi 2 jam lebih awal
+	startMin = mulaiMin - 30 // toleransi 30 menit lebih awal
 	if startMin < 0 {
 		startMin += 1440
 	}
@@ -433,7 +435,7 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 			TO_CHAR(r.jam_mulai, 'HH24:MI:SS'), TO_CHAR(r.jam_selesai, 'HH24:MI:SS')
 		FROM ritase r
 		LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
-		WHERE r.id_driver = $1 AND r.status != 'selesai' AND (r.tanggal = $2 OR r.tanggal IS NULL)
+		WHERE r.id_driver = $1 AND r.status != 'selesai' AND r.tanggal = $2
 		ORDER BY r.ritase_ke ASC, r.id_ritase ASC
 		
 	`, idDriver, hariIni)
@@ -531,6 +533,7 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 			"has_active_ritase": false,
 			"all_completed":     false,
 			"schedule_blocked":  true,
+			"total_ritase":      len(candidates),
 			"message":           "Tidak ada jadwal ritase tersisa hari ini.",
 		}
 		if nextInfo != nil {
@@ -546,6 +549,14 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 			}
 			nextSchedule["ritase_ke"] = nextInfo.RitaseKe
 			nextSchedule["kode_ritase"] = nextInfo.KodeRitase
+			nextSchedule["plat_nomor"] = nextInfo.PlatNomor
+			nextSchedule["jenis_kendaraan"] = nextInfo.JenisKendaraan
+			// Hitung total stop untuk ritase berikutnya
+			var totalStop int
+			_ = h.DB.QueryRow(ctx,
+				`SELECT COUNT(*) FROM ritase_stop WHERE id_ritase = $1`, nextInfo.IDRitase,
+			).Scan(&totalStop)
+			nextSchedule["total_stop"] = totalStop
 			resp["next_schedule"] = nextSchedule
 		}
 		return response.OK(c, resp)
@@ -617,7 +628,7 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 	var countUnfinished int
 	_ = h.DB.QueryRow(ctx, `
 		SELECT COUNT(*) FROM ritase
-		WHERE id_driver = $1 AND status != 'selesai' AND (tanggal = $2 OR tanggal IS NULL)
+		WHERE id_driver = $1 AND status != 'selesai' AND tanggal = $2
 	`, idDriver, hariIni).Scan(&countUnfinished)
 
 	var stageStartedAt *time.Time
@@ -657,6 +668,14 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		"jam_selesai":        picked.JamSelesai,
 		"is_early_start":     isEarly,
 	}
+
+	// Total ritase hari ini (termasuk yang sudah selesai)
+	var totalRitaseHariIni int
+	_ = h.DB.QueryRow(ctx, `
+		SELECT COUNT(*) FROM ritase
+		WHERE id_driver = $1 AND tanggal = $2
+	`, idDriver, hariIni).Scan(&totalRitaseHariIni)
+	resp["total_ritase"] = totalRitaseHariIni
 
 	if isEarly && picked.JamMulai != nil {
 		resp["schedule_warning"] = fmt.Sprintf(
@@ -762,6 +781,9 @@ func (h *APIHandler) FinishRitase(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "Gagal menyelesaikan ritase")
 	}
 
+	// Bersihkan status di armada_tracking agar gak nempel di dashboard
+	_, _ = h.DB.Exec(ctx, `UPDATE armada_tracking SET status = NULL WHERE id_ritase = $1`, req.IdRitase)
+
 	h.bus.Publish("force_refresh", "mobile_finish_ritase")
 	return response.OK(c, "success")
 }
@@ -781,7 +803,7 @@ func (h *APIHandler) ResetTestRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
-	_, err := h.DB.Exec(ctx, `UPDATE ritase SET status = 'direncanakan' WHERE id_driver = $1 AND (tanggal = (now() AT TIME ZONE 'Asia/Jakarta')::date OR tanggal IS NULL)`, req.IdDriver)
+	_, err := h.DB.Exec(ctx, `UPDATE ritase SET status = 'direncanakan' WHERE id_driver = $1 AND tanggal = (now() AT TIME ZONE 'Asia/Jakarta')::date AND status != 'selesai'`, req.IdDriver)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal mereset ritase test")
 	}
@@ -1068,6 +1090,8 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 	// Update status ritase di tabel ritase ke 'berjalan' jika belum selesai
 	if req.Status == "Selesai" {
 		_, _ = h.DB.Exec(ctx, `UPDATE ritase SET status = 'selesai' WHERE id_ritase = $1`, idRitase)
+		// Bersihkan status di armada_tracking agar gak nempel di dashboard
+		_, _ = h.DB.Exec(ctx, `UPDATE armada_tracking SET status = NULL WHERE id_ritase = $1`, idRitase)
 	} else {
 		_, _ = h.DB.Exec(ctx, `UPDATE ritase SET status = 'berjalan' WHERE id_ritase = $1 AND status != 'selesai'`, idRitase)
 	}
