@@ -47,11 +47,11 @@ type AppVersionResponse struct {
 
 func (h *APIHandler) GetAppVersion(c echo.Context) error {
 	return c.JSON(http.StatusOK, AppVersionResponse{
-		VersionCode:  5,
-		VersionName:  "1.0.4",
+		VersionCode:  6,
+		VersionName:  "1.0.5",
 		DownloadURL:  "https://api.controltowerslb.tech/uploads/apk/tower-control-latest.apk",
 		ForceUpdate:  false,
-		ReleaseNotes: "Pembaruan tampilan beranda & penyempurnaan riwayat ritase.",
+		ReleaseNotes: "Konfirmasi keluar pada halaman login & pembaruan sistem.",
 	})
 }
 
