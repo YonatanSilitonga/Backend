@@ -51,7 +51,7 @@ func (h *APIHandler) GetAppVersion(c echo.Context) error {
 		VersionName:  "1.0.6",
 		DownloadURL:  "https://api.controltowerslb.tech/uploads/apk/tower-control-latest.apk",
 		ForceUpdate:  false,
-		ReleaseNotes: "Uji coba pembaruan otomatis sistem versi 1.0.6.",
+		ReleaseNotes: "Pembaruan otomatis versi 1.0.6.",
 	})
 }
 
