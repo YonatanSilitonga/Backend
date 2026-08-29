@@ -47,11 +47,11 @@ type AppVersionResponse struct {
 
 func (h *APIHandler) GetAppVersion(c echo.Context) error {
 	return c.JSON(http.StatusOK, AppVersionResponse{
-		VersionCode:  7,
-		VersionName:  "1.0.6",
+		VersionCode:  8,
+		VersionName:  "1.0.7",
 		DownloadURL:  "https://api.controltowerslb.tech/uploads/apk/tower-control-latest.apk",
 		ForceUpdate:  false,
-		ReleaseNotes: "Pembaruan otomatis versi 1.0.6.",
+		ReleaseNotes: "Pembaruan sistem error handling, perlindungan offline, dan peningkatan keamanan.",
 	})
 }
 
@@ -88,7 +88,7 @@ func (h *APIHandler) Login(c echo.Context) error {
 
 	// Cek password bcrypt
 	err = bcrypt.CompareHashAndPassword([]byte(dbPassword), []byte(req.Password))
-	if err != nil && dbPassword != req.Password {
+	if err != nil {
 		return response.Error(c, http.StatusUnauthorized, "Password salah")
 	}
 
