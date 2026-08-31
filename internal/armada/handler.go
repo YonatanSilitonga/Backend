@@ -77,7 +77,7 @@ func (h *Handler) GetRitase(c echo.Context) error {
 	return response.OK(c, data)
 }
 
-// CreateRitase menangani POST /armada/ritase (penugasan oleh kapten).
+// CreateRitase menangani POST /armada/ritase (penugasan oleh tower_control).
 func (h *Handler) CreateRitase(c echo.Context) error {
 	var req CreateRitaseRequest
 	if err := c.Bind(&req); err != nil {

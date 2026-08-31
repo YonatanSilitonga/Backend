@@ -205,7 +205,8 @@ func (r *Repository) DeleteGudang(ctx context.Context, id int64) error {
 func (r *Repository) ListUser(ctx context.Context) ([]User, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT u.id_user, u.username, COALESCE(k.nama, '') AS name, u.role, u.karyawan_id,
-		       CASE WHEN u.last_login IS NOT NULL AND u.last_login > now() - interval '30 minutes' THEN true ELSE false END AS is_active
+		       CASE WHEN u.last_login IS NOT NULL AND u.last_login > now() - interval '30 minutes' THEN true ELSE false END AS is_active,
+		       COALESCE(u.status, 'aktif') AS status
 		FROM users u
 		LEFT JOIN karyawan k ON k.id_karyawan = u.karyawan_id
 		ORDER BY u.id_user`)
@@ -216,7 +217,7 @@ func (r *Repository) ListUser(ctx context.Context) ([]User, error) {
 	var items []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.KaryawanID, &u.IsActive); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.KaryawanID, &u.IsActive, &u.Status); err != nil {
 			return nil, err
 		}
 		items = append(items, u)
@@ -225,17 +226,26 @@ func (r *Repository) ListUser(ctx context.Context) ([]User, error) {
 }
 
 func (r *Repository) CreateUser(ctx context.Context, req UserRequest, passwordHash string) (int64, error) {
+	status := req.Status
+	if status == "" {
+		status = "aktif"
+	}
 	var id int64
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO users (username, password, role, karyawan_id)
-		VALUES ($1, $2, $3, $4) RETURNING id_user`,
-		req.Username, passwordHash, req.Role, req.KaryawanID,
+		INSERT INTO users (username, password, role, karyawan_id, status)
+		VALUES ($1, $2, $3, $4, $5) RETURNING id_user`,
+		req.Username, passwordHash, req.Role, req.KaryawanID, status,
 	).Scan(&id)
 	return id, err
 }
 
 func (r *Repository) UpdateUserRole(ctx context.Context, id int64, role string) error {
 	_, err := r.db.Exec(ctx, `UPDATE users SET role=$1 WHERE id_user=$2`, role, id)
+	return err
+}
+
+func (r *Repository) UpdateUserStatus(ctx context.Context, id int64, status string) error {
+	_, err := r.db.Exec(ctx, `UPDATE users SET status=$1 WHERE id_user=$2`, status, id)
 	return err
 }
 

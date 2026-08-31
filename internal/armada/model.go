@@ -94,6 +94,10 @@ type Tracking struct {
 type TrackingLive struct {
 	ID            int64      `json:"id_tracking"`
 	IDRitase      *int64     `json:"id_ritase,omitempty"`
+	StatusRitase    *string    `json:"status_ritase,omitempty"`
+	TanggalRitase   *string    `json:"tanggal,omitempty"` // YYYY-MM-DD
+	JamMulai        *string    `json:"jam_mulai,omitempty"`
+	JamSelesai      *string    `json:"jam_selesai,omitempty"`
 	IDKendaraan   int64      `json:"id_kendaraan"`
 	PlatNomor     string     `json:"plat_nomor"`
 	IDDriver      int64      `json:"id_driver"`

@@ -425,7 +425,10 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 	}
 
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
-		SELECT t.id_tracking, t.id_ritase, t.id_kendaraan, COALESCE(k.plat_nomor,''),
+		SELECT t.id_tracking, t.id_ritase, r.status,
+		       TO_CHAR(r.tanggal, 'YYYY-MM-DD'),
+		       TO_CHAR(r.jam_mulai, 'HH24:MI:SS'), TO_CHAR(r.jam_selesai, 'HH24:MI:SS'),
+		       t.id_kendaraan, COALESCE(k.plat_nomor,''),
 		       t.id_driver, COALESCE(d.nama_driver,''),
 		       t.latitude, t.longitude, t.kecepatan, t.arah, t.status,
 		       COALESCE(NULLIF(t.nama_lokasi, ''), re.nama_lokasi, ''),
@@ -438,6 +441,7 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 		       u.last_login, u.last_open
 		FROM armada_tracking t
 		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
+		LEFT JOIN ritase r ON r.id_ritase = t.id_ritase
 		LEFT JOIN driver d ON d.id_driver = t.id_driver
 		LEFT JOIN users u ON u.id_driver = d.id_driver
 		LEFT JOIN LATERAL (
@@ -457,7 +461,7 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 	var items []TrackingLive
 	for rows.Next() {
 		var t TrackingLive
-		if err := rows.Scan(&t.ID, &t.IDRitase, &t.IDKendaraan, &t.PlatNomor,
+		if err := rows.Scan(&t.ID, &t.IDRitase, &t.StatusRitase, &t.TanggalRitase, &t.JamMulai, &t.JamSelesai, &t.IDKendaraan, &t.PlatNomor,
 			&t.IDDriver, &t.NamaDriver,
 			&t.Latitude, &t.Longitude, &t.Kecepatan, &t.Arah, &t.Status, &t.NamaLokasi,
 			&t.JumlahKoli, &t.JumlahEcer, &t.JumlahHighValue,

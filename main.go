@@ -177,8 +177,6 @@ func main() {
 	v1.POST("/driver/reset-test-ritase", handler.ResetTestRitase, authMW)
 	v1.GET("/driver/history-ritase", handler.GetDriverHistoryRitase, authMW)
 	v1.GET("/driver/history-ritase/:id", handler.GetDriverHistoryDetail, authMW)
-	v1.GET("/driver/my-schedules", handler.GetMySchedules, authMW)
-	v1.GET("/driver/history", handler.GetHistory, authMW)
 
 	// GPS tracker hardware — sumber posisi cadangan saat HP mati.
 	// Tanpa JWT (device tidak login), dilindungi header X-Tracker-Key.
@@ -198,13 +196,25 @@ func main() {
 	v1.GET("/manifest-photos", handler.AdminGetManifestPhotos, authMW)
 	v1.GET("/ritase/generate/preview", handler.AdminPreviewGenerateDailyRitase, authMW)
 
-	// ── RITASE WRITE ENDPOINTS (admin + direktur + kapten) ──
-	ritaseWriteMW := []echo.MiddlewareFunc{authMW, appMiddleware.RequireRoles("admin", "direktur", "kapten")}
+	// ── RITASE WRITE ENDPOINTS (admin + direktur + tower_control) ──
+	ritaseWriteMW := []echo.MiddlewareFunc{authMW, appMiddleware.RequireRoles("admin", "direktur", "tower_control")}
 	ritaseWrite := v1.Group("/ritase", ritaseWriteMW...)
 	ritaseWrite.POST("/generate", handler.AdminGenerateDailyRitase)
 	ritaseWrite.POST("", handler.AdminCreateRitase)
 	ritaseWrite.PUT("/:id", handler.AdminUpdateRitase)
 	ritaseWrite.DELETE("/:id", handler.AdminDeleteRitase)
+
+	// ── JADWAL CONFIG ENDPOINTS (admin + direktur + tower_control) ──
+	jadwalConfig := v1.Group("/jadwal-config", ritaseWriteMW...)
+	jadwalConfig.GET("", handler.GetJadwalConfig)
+	jadwalConfig.POST("/jam", handler.CreateJamRitase)
+	jadwalConfig.PUT("/jam/:id", handler.UpdateJamRitase)
+	jadwalConfig.DELETE("/jam/:id", handler.DeleteJamRitase)
+	jadwalConfig.POST("/driver-jenis", handler.CreateDriverJenis)
+	jadwalConfig.DELETE("/driver-jenis/:id", handler.DeleteDriverJenis)
+	jadwalConfig.POST("/template", handler.CreateRouteTemplate)
+	jadwalConfig.PUT("/template/:id", handler.UpdateRouteTemplate)
+	jadwalConfig.DELETE("/template/:id", handler.DeleteRouteTemplate)
 
 	// Admin CRUD master data + user management (hanya admin)
 	admin := v1.Group("/admin", adminMW...)

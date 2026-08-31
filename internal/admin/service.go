@@ -66,6 +66,10 @@ func (s *Service) UpdateUserRole(ctx context.Context, id int64, role string) err
 	return s.repo.UpdateUserRole(ctx, id, role)
 }
 
+func (s *Service) UpdateUserStatus(ctx context.Context, id int64, status string) error {
+	return s.repo.UpdateUserStatus(ctx, id, status)
+}
+
 func (s *Service) ResetPassword(ctx context.Context, id int64, newPassword string) error {
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {

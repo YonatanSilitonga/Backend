@@ -92,6 +92,7 @@ type User struct {
 	Role       string  `json:"role"`
 	KaryawanID *int64  `json:"karyawan_id,omitempty"`
 	IsActive   bool    `json:"is_active"`
+	Status     string  `json:"status"`
 }
 
 type UserRequest struct {
@@ -100,6 +101,11 @@ type UserRequest struct {
 	Name       string `json:"name"`
 	Role       string `json:"role"`
 	KaryawanID *int64 `json:"karyawan_id,omitempty"`
+	Status     string `json:"status,omitempty"`
+}
+
+type UserStatusRequest struct {
+	Status string `json:"status"`
 }
 
 type ResetPasswordRequest struct {

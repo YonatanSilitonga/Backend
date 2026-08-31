@@ -9,7 +9,7 @@ import (
 )
 
 // RequireRoles membatasi akses hanya untuk role tertentu (diambil dari JWT).
-// Contoh: RequireRoles("direktur", "kapten") → role lain dapat 403.
+// Contoh: RequireRoles("direktur", "tower_control") → role lain dapat 403.
 func RequireRoles(roles ...string) echo.MiddlewareFunc {
 	allowed := make(map[string]bool, len(roles))
 	for _, r := range roles {

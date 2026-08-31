@@ -53,6 +53,7 @@ func (h *Handler) RegisterRoutes(g *echo.Group) {
 	g.GET("/users", h.ListUser)
 	g.POST("/users", h.CreateUser)
 	g.PUT("/users/:id/role", h.UpdateUserRole)
+	g.PUT("/users/:id/status", h.UpdateUserStatus)
 	g.POST("/users/:id/reset-password", h.ResetPassword)
 	g.DELETE("/users/:id", h.DeleteUser)
 }
@@ -364,6 +365,26 @@ func (h *Handler) UpdateUserRole(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "gagal update role")
 	}
 	return response.OK(c, map[string]string{"message": "role diperbarui"})
+}
+
+func (h *Handler) UpdateUserStatus(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "id tidak valid")
+	}
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := c.Bind(&req); err != nil || req.Status == "" {
+		return response.Error(c, http.StatusBadRequest, "status wajib diisi")
+	}
+	if req.Status != "aktif" && req.Status != "nonaktif" {
+		return response.Error(c, http.StatusBadRequest, "status harus 'aktif' atau 'nonaktif'")
+	}
+	if err := h.svc.UpdateUserStatus(c.Request().Context(), id, req.Status); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal update status")
+	}
+	return response.OK(c, map[string]string{"message": "status diperbarui"})
 }
 
 func (h *Handler) ResetPassword(c echo.Context) error {

@@ -70,8 +70,8 @@ func main() {
 	hashAdmin, _ := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
 	exec(ctx, "INSERT INTO users (username, password, role, karyawan_id) VALUES ('admin',$1,'admin',$2)", string(hashAdmin), idKaryawanAdmin)
 
-	hashKapten, _ := bcrypt.GenerateFromPassword([]byte("kapten123"), bcrypt.DefaultCost)
-	exec(ctx, "INSERT INTO users (username, password, role, karyawan_id) VALUES ('kapten',$1,'kapten',$2)", string(hashKapten), idKaryawanKapten)
+	hashTowerControl, _ := bcrypt.GenerateFromPassword([]byte("tower123"), bcrypt.DefaultCost)
+	exec(ctx, "INSERT INTO users (username, password, role, karyawan_id) VALUES ('tower_control',$1,'tower_control',$2)", string(hashTowerControl), idKaryawanKapten)
 
 	hashDir, _ := bcrypt.GenerateFromPassword([]byte("direktur123"), bcrypt.DefaultCost)
 	exec(ctx, "INSERT INTO users (username, password, role, karyawan_id) VALUES ('direktur',$1,'direktur',$2)", string(hashDir), idKaryawanDir)
@@ -124,7 +124,7 @@ func main() {
 	exec(ctx, "INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, last_update) VALUES ($1,$2,$3,-7.250000,112.750000,55,120,'berjalan',$4)", idRitase3, idVeh4, idDrvSlamet, time.Now())
 
 	fmt.Println("SEED DONE ✓")
-	fmt.Printf("Login: admin/admin123 (admin), kapten/kapten123 (kapten), direktur/direktur123 (direktur), driver/driver123 (driver)\n")
+	fmt.Printf("Login: admin/admin123 (admin), tower_control/tower123 (tower_control), direktur/direktur123 (direktur), driver/driver123 (driver)\n")
 }
 
 func addEvent(ctx context.Context, idRitase int64, status string, at time.Time) {

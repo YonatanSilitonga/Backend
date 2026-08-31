@@ -12,8 +12,8 @@ type Config struct {
 	Port        string
 	DatabaseURL string
 	JWTSecret   string
-	// Ambang offline armada (menit tanpa GPS terbaru). Default 15 menit —
-	// menoleransi heartbeat hemat baterai (3 mnt) + retry jaringan.
+	// Ambang offline armada (menit tanpa GPS terbaru). Default 3 menit —
+	// konsisten dengan threshold frontend (OFFLINE_MINUTES = 3).
 	TrackingOfflineMin int
 	// Ambang session online (jam sejak login tanpa aktivitas). Default 12 jam —
 	// anti "hantu online" kalau driver force-stop/off tanpa logout.

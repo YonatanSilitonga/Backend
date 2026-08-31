@@ -58,7 +58,7 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 	if err := r.db.QueryRow(ctx, `
         SELECT count(*),
                count(*) FILTER (WHERE LOWER(status_driver) IN ('aktif','bertugas','on_duty')),
-               count(*) FILTER (WHERE LOWER(status_driver) IN ('libur','off','cuti'))
+               count(*) FILTER (WHERE LOWER(status_driver) IN ('libur','off','cuti','nonaktif'))
         FROM driver
     `).Scan(&s.TotalDriver, &s.DriverAktif, &s.DriverLibur); err != nil {
 		return nil, err
