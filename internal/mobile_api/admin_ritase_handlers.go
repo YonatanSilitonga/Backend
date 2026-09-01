@@ -24,11 +24,14 @@ type FixedStop struct {
 }
 
 type FixedRoute struct {
+	ID          int64       `json:"id"` // ID dari ritase_route_template (0 kalau hardcoded)
 	IDDriver    int64       `json:"id_driver"`
 	IDKendaraan int64       `json:"id_kendaraan"`
 	IDDropPoint int64       `json:"id_drop_point"`
 	RitaseKe    int         `json:"ritase_ke"`
 	Jenis       string      `json:"jenis_ritase"` // "outgoing" atau "incoming"
+	JamMulai    string      `json:"jam_mulai"`
+	JamSelesai  string      `json:"jam_selesai"`
 	Stops       []FixedStop `json:"stops"`
 }
 
@@ -64,6 +67,21 @@ func ambilJadwal(jenis string, ritaseKe int) (jamMulai, jamSelesai interface{}) 
 		}
 	}
 	return nil, nil
+}
+
+// ambilJadwalDB — versi DB dari ambilJadwal. Query jadwal_ritase_config,
+// fallback ke hardcoded kalau DB kosong/error.
+func (h *APIHandler) ambilJadwalDB(ctx context.Context, jenis string, ritaseKe int) (jamMulai, jamSelesai interface{}) {
+	var jm, js string
+	err := h.DB.QueryRow(ctx,
+		"SELECT jam_mulai::text, jam_selesai::text FROM jadwal_ritase_config WHERE jenis = $1 AND ritase_ke = $2",
+		jenis, ritaseKe,
+	).Scan(&jm, &js)
+	if err != nil {
+		// Fallback ke hardcoded
+		return ambilJadwal(jenis, ritaseKe)
+	}
+	return jm, js
 }
 
 // Fixed Route Template Definitions for 1-Click Auto-Generate
@@ -198,6 +216,74 @@ func tentukanJenisRitase(idDriver int64, ritaseKe int) string {
 	return "outgoing"
 }
 
+// tentukanJenisRitaseDB — versi DB dari tentukanJenisRitase.
+// Query driver_ritase_jenis, fallback ke hardcoded kalau DB kosong/error.
+func (h *APIHandler) tentukanJenisRitaseDB(ctx context.Context, idDriver int64, ritaseKe int) string {
+	var jenis string
+	err := h.DB.QueryRow(ctx,
+		"SELECT jenis FROM driver_ritase_jenis WHERE id_driver = $1 AND ritase_ke = $2",
+		idDriver, ritaseKe,
+	).Scan(&jenis)
+	if err != nil {
+		// Fallback ke hardcoded
+		return tentukanJenisRitase(idDriver, ritaseKe)
+	}
+	return jenis
+}
+
+// muatRouteTemplateDB — load route templates dari DB, fallback ke hardcoded.
+func (h *APIHandler) muatRouteTemplateDB(ctx context.Context) ([]FixedRoute, error) {
+	rows, err := h.DB.Query(ctx, `
+		SELECT id, id_driver, id_kendaraan, id_drop_point, ritase_ke, COALESCE(jenis_ritase, 'outgoing')
+		FROM ritase_route_template
+		WHERE aktif = TRUE
+		ORDER BY id
+	`)
+	if err != nil {
+		// Fallback ke hardcoded
+		return defaultFixedRoutes, nil
+	}
+	defer rows.Close()
+
+	var routes []FixedRoute
+	for rows.Next() {
+		var r FixedRoute
+		if err := rows.Scan(&r.ID, &r.IDDriver, &r.IDKendaraan, &r.IDDropPoint, &r.RitaseKe, &r.Jenis); err != nil {
+			return defaultFixedRoutes, err
+		}
+
+		// Load stops untuk route ini
+		stopRows, err := h.DB.Query(ctx, `
+			SELECT urutan, jenis_stop, id_lokasi, kolom_lokasi, COALESCE(keterangan, '')
+			FROM ritase_stop_template
+			WHERE id_route_template = $1
+			ORDER BY urutan
+		`, r.ID)
+		if err != nil {
+			return defaultFixedRoutes, err
+		}
+
+		for stopRows.Next() {
+			var s FixedStop
+			if err := stopRows.Scan(&s.Urutan, &s.Jenis, &s.IDLokasi, &s.KolomLokasi, &s.Keterangan); err != nil {
+				stopRows.Close()
+				return defaultFixedRoutes, err
+			}
+			r.Stops = append(r.Stops, s)
+		}
+		stopRows.Close()
+
+		routes = append(routes, r)
+	}
+
+	if len(routes) == 0 {
+		// Fallback ke hardcoded
+		return defaultFixedRoutes, nil
+	}
+
+	return routes, nil
+}
+
 // AdminPreviewGenerateDailyRitase mengembalikan semua rute dari defaultFixedRoutes
 // dengan info tanggal (hari ini / besok) berdasarkan jam_mulai.
 func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
@@ -275,8 +361,8 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 	}
 	rowsDP.Close()
 
-	// 2. Selalu pakai defaultFixedRoutes
-	routesToUse := defaultFixedRoutes
+	// 2. Load route templates dari DB (fallback ke hardcoded)
+	routesToUse, _ := h.muatRouteTemplateDB(ctx)
 
 	// 3. Map Routes to Preview Format
 	var previewRoutes []PreviewRoute
@@ -296,9 +382,9 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 		// Hitung tanggal berdasarkan jam_mulai
 		jenisPasti := fr.Jenis
 		if jenisPasti == "" {
-			jenisPasti = tentukanJenisRitase(fr.IDDriver, fr.RitaseKe)
+			jenisPasti = h.tentukanJenisRitaseDB(ctx, fr.IDDriver, fr.RitaseKe)
 		}
-		jm, _ := ambilJadwal(jenisPasti, fr.RitaseKe)
+		jm, _ := h.ambilJadwalDB(ctx, jenisPasti, fr.RitaseKe)
 
 		var tanggalStr, tanggalLabel, jamMulaiStr string
 		if jms, ok := jm.(string); ok && len(jms) >= 2 {
@@ -388,6 +474,12 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 	targetRoutes := defaultFixedRoutes
 	if len(req.Routes) > 0 {
 		targetRoutes = req.Routes
+	} else {
+		// Load dari DB
+		dbRoutes, err := h.muatRouteTemplateDB(ctx)
+		if err == nil && len(dbRoutes) > 0 {
+			targetRoutes = dbRoutes
+		}
 	}
 
 	tx, err := h.DB.Begin(ctx)
@@ -433,6 +525,15 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 			route.IDDropPoint = 1
 		}
 
+		// Validasi status driver — skip driver nonaktif
+		var driverStatus string
+		_ = tx.QueryRow(ctx, "SELECT COALESCE(status_driver, 'on_duty') FROM driver WHERE id_driver = $1", route.IDDriver).Scan(&driverStatus)
+		if driverStatus == "nonaktif" {
+			log.Printf("⚠️ [SKIP] Driver %d nonaktif, dilewati", route.IDDriver)
+			countSkipped++
+			continue
+		}
+
 		baseKode := fmt.Sprintf("TR-%s-D%d-R%d", todayStr, route.IDDriver, route.RitaseKe)
 		kodeRitase := baseKode
 		counter := 1
@@ -449,9 +550,16 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 		finalDropPointID := getValidDropPointID(ctx, tx, route.IDDropPoint)
 
 		// ── FIX jadwal & penentuan jenis: Pastikan backend yang menentukan jenisnya ──
-		jenisPasti := tentukanJenisRitase(route.IDDriver, route.RitaseKe)
+		jenisPasti := h.tentukanJenisRitaseDB(ctx, route.IDDriver, route.RitaseKe)
 
-		jamMulai, jamSelesai := ambilJadwal(jenisPasti, route.RitaseKe)
+		// Prioritas: jam_mulai/jam_selesai explicit > auto dari ambilJadwal
+		var jamMulai, jamSelesai interface{}
+		if route.JamMulai != "" && route.JamSelesai != "" {
+			jamMulai = route.JamMulai
+			jamSelesai = route.JamSelesai
+		} else {
+			jamMulai, jamSelesai = h.ambilJadwalDB(ctx, jenisPasti, route.RitaseKe)
+		}
 
 		// ── HITUNG TANGGAL: jam_mulai < 07:00 → tanggal besok, else hari ini ──
 		tanggalRitase := hariIni
@@ -503,6 +611,10 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 			}
 			if stop.IDLokasi <= 0 {
 				return response.Error(c, http.StatusBadRequest, "ID lokasi stop wajib diisi")
+			}
+			// Validasi FK: pastikan ID lokasi benar-benar ada di tabel terkait
+			if err := validasiStopID(ctx, tx, stop.Jenis, stop.IDLokasi); err != nil {
+				return response.Error(c, http.StatusBadRequest, fmt.Sprintf("Stop D%d: %v", route.IDDriver, err))
 			}
 
 			query := fmt.Sprintf(`
@@ -702,6 +814,19 @@ func (h *APIHandler) AdminDeleteRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
+	// ── Cek status: hanya direncanakan yang boleh dihapus ──
+	var delStatus string
+	err = h.DB.QueryRow(ctx, "SELECT status FROM ritase WHERE id_ritase = $1", idRitase).Scan(&delStatus)
+	if err != nil {
+		return response.Error(c, http.StatusNotFound, "Ritase tidak ditemukan")
+	}
+	if delStatus == "berjalan" {
+		return response.Error(c, http.StatusBadRequest, "Ritase sedang berjalan. Tidak bisa dihapus.")
+	}
+	if delStatus == "selesai" {
+		return response.Error(c, http.StatusBadRequest, "Ritase sudah selesai. Tidak bisa dihapus.")
+	}
+
 	_, _ = h.DB.Exec(ctx, "UPDATE armada_tracking SET id_ritase = NULL WHERE id_ritase = $1", idRitase)
 	_, _ = h.DB.Exec(ctx, "DELETE FROM ritase_event WHERE id_ritase = $1", idRitase)
 	_, _ = h.DB.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase = $1", idRitase)
@@ -724,6 +849,8 @@ type UpdateRitaseRequest struct {
 	RitaseKe    int         `json:"ritase_ke"`
 	Status      string      `json:"status"`
 	JenisRitase string      `json:"jenis_ritase"`
+	JamMulai    string      `json:"jam_mulai"`
+	JamSelesai  string      `json:"jam_selesai"`
 	Stops       []FixedStop `json:"stops"`
 }
 
@@ -743,18 +870,65 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
 	defer cancel()
 
+	// ── Cek status ritase: berjalan/selesai ada batasan edit ──
+	var currentStatus string
+	err = h.DB.QueryRow(ctx, "SELECT status FROM ritase WHERE id_ritase = $1", idRitase).Scan(&currentStatus)
+	if err != nil {
+		return response.Error(c, http.StatusNotFound, "Ritase tidak ditemukan")
+	}
+
+	if currentStatus == "selesai" {
+		return response.Error(c, http.StatusBadRequest, "Ritase sudah selesai dan tidak bisa diubah")
+	}
+
+	if currentStatus == "berjalan" {
+		// Saat berjalan: hanya boleh update stops, driver/kendaraan/ritase_ke/status tidak boleh diubah
+		if req.IDDriver != 0 || req.IDKendaraan != 0 || req.RitaseKe != 0 || req.Status != "" || req.JenisRitase != "" {
+			return response.Error(c, http.StatusBadRequest, "Ritase sedang berjalan. Hanya stops yang bisa diubah.")
+		}
+	}
+
+	// ── Validasi status driver harus aktif (jika driver diganti) ──
+	if req.IDDriver != 0 {
+		var driverStatus string
+		err := h.DB.QueryRow(ctx, "SELECT COALESCE(status_driver, 'on_duty') FROM driver WHERE id_driver = $1", req.IDDriver).Scan(&driverStatus)
+		if err != nil {
+			return response.Error(c, http.StatusBadRequest, "Driver tidak ditemukan")
+		}
+		if driverStatus != "on_duty" && driverStatus != "aktif" && driverStatus != "bertugas" {
+			return response.Error(c, http.StatusBadRequest, fmt.Sprintf("Driver sedang tidak aktif (status: %s). Hanya driver aktif yang bisa ditugaskan.", driverStatus))
+		}
+	}
+
+	// ── Validasi status kendaraan harus tersedia (jika kendaraan diganti) ──
+	if req.IDKendaraan != 0 {
+		var vehicleStatus string
+		err := h.DB.QueryRow(ctx, "SELECT COALESCE(status_kendaraan, 'available') FROM kendaraan WHERE id_kendaraan = $1", req.IDKendaraan).Scan(&vehicleStatus)
+		if err != nil {
+			return response.Error(c, http.StatusBadRequest, "Kendaraan tidak ditemukan")
+		}
+		if vehicleStatus != "available" && vehicleStatus != "in_transit" && vehicleStatus != "tersedia" && vehicleStatus != "berjalan" && vehicleStatus != "aktif" {
+			return response.Error(c, http.StatusBadRequest, fmt.Sprintf("Kendaraan sedang tidak tersedia (status: %s). Hanya kendaraan available yang bisa ditugaskan.", vehicleStatus))
+		}
+	}
+
 	tx, err := h.DB.Begin(ctx)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal memulai transaksi: "+err.Error())
 	}
 	defer tx.Rollback(ctx)
 
-	// Kalau jenis_ritase atau ritase_ke berubah, hitung ulang jam_mulai/jam_selesai dari jadwal.
+	// Prioritas: jam_mulai/jam_selesai explicit > auto dari ambilJadwal > keep existing
 	var jamMulai, jamSelesai interface{}
-	hasJadwalBaru := req.JenisRitase != "" && req.RitaseKe != 0
-	if hasJadwalBaru {
-		jamMulai, jamSelesai = ambilJadwal(req.JenisRitase, req.RitaseKe)
+	if req.JamMulai != "" && req.JamSelesai != "" {
+		// Frontend kirim jam manual → pakai langsung
+		jamMulai = req.JamMulai
+		jamSelesai = req.JamSelesai
+	} else if req.JenisRitase != "" && req.RitaseKe != 0 {
+		// Frontend gak kirim jam tapi kirim jenis_ritase+ritase_ke → hitung otomatis
+		jamMulai, jamSelesai = h.ambilJadwalDB(ctx, req.JenisRitase, req.RitaseKe)
 	}
+	// else: both nil → COALESCE di SQL tetap pertahankan nilai lama
 
 	// Update Header Ritase
 	tag, err := tx.Exec(ctx, `
@@ -790,6 +964,10 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 			if stop.IDLokasi <= 0 {
 				return response.Error(c, http.StatusBadRequest, "ID lokasi stop wajib diisi")
 			}
+			// Validasi FK: pastikan ID lokasi benar-benar ada di tabel terkait
+			if err := validasiStopID(ctx, tx, stop.Jenis, stop.IDLokasi); err != nil {
+				return response.Error(c, http.StatusBadRequest, err.Error())
+			}
 
 			query := fmt.Sprintf(`
 				INSERT INTO ritase_stop (id_ritase, urutan, jenis_stop, %s, keterangan)
@@ -820,6 +998,8 @@ type CreateRitaseRequest struct {
 	IDDropPoint int64       `json:"id_drop_point"`
 	RitaseKe    int         `json:"ritase_ke"`
 	JenisRitase string      `json:"jenis_ritase"`
+	JamMulai    string      `json:"jam_mulai"`
+	JamSelesai  string      `json:"jam_selesai"`
 	Stops       []FixedStop `json:"stops"`
 }
 
@@ -834,6 +1014,40 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 		return response.Error(c, http.StatusBadRequest, "Driver, Kendaraan, dan Gateway wajib dipilih")
 	}
 
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
+	defer cancel()
+
+	// ── Validasi status driver harus aktif ──
+	var driverStatus string
+	err := h.DB.QueryRow(ctx, "SELECT COALESCE(status_driver, 'on_duty') FROM driver WHERE id_driver = $1", req.IDDriver).Scan(&driverStatus)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "Driver tidak ditemukan")
+	}
+	if driverStatus != "on_duty" && driverStatus != "aktif" && driverStatus != "bertugas" {
+		return response.Error(c, http.StatusBadRequest, fmt.Sprintf("Driver sedang tidak aktif (status: %s). Hanya driver aktif yang bisa ditugaskan.", driverStatus))
+	}
+
+	// ── Validasi status kendaraan harus tersedia ──
+	var vehicleStatus string
+	err = h.DB.QueryRow(ctx, "SELECT COALESCE(status_kendaraan, 'available') FROM kendaraan WHERE id_kendaraan = $1", req.IDKendaraan).Scan(&vehicleStatus)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "Kendaraan tidak ditemukan")
+	}
+	if vehicleStatus != "available" && vehicleStatus != "in_transit" && vehicleStatus != "tersedia" && vehicleStatus != "berjalan" && vehicleStatus != "aktif" {
+		return response.Error(c, http.StatusBadRequest, fmt.Sprintf("Kendaraan sedang tidak tersedia (status: %s). Hanya kendaraan available yang bisa ditugaskan.", vehicleStatus))
+	}
+
+	// ── Validasi duplikat: driver tidak boleh punya ritase ke-X di tanggal yang sama ──
+	var existingCount int
+	_ = h.DB.QueryRow(ctx, `
+		SELECT COUNT(*) FROM ritase
+		WHERE id_driver = $1 AND tanggal = $2::date AND ritase_ke = $3
+	`, req.IDDriver, req.Tanggal, req.RitaseKe).Scan(&existingCount)
+	if existingCount > 0 {
+		return response.Error(c, http.StatusConflict,
+			fmt.Sprintf("Driver sudah memiliki ritase ke-%d pada tanggal %s. Pilih driver lain atau ritase ke berbeda.", req.RitaseKe, req.Tanggal))
+	}
+
 	if req.Tanggal == "" {
 		loc, _ := time.LoadLocation("Asia/Jakarta")
 		if loc == nil {
@@ -844,9 +1058,6 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 	if req.RitaseKe == 0 {
 		req.RitaseKe = 1
 	}
-
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
-	defer cancel()
 
 	tx, err := h.DB.Begin(ctx)
 	if err != nil {
@@ -870,10 +1081,23 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 
 	finalDropPointID := getValidDropPointID(ctx, tx, req.IDDropPoint)
 
-	jamMulai, jamSelesai := ambilJadwal(req.JenisRitase, req.RitaseKe)
+	// Auto-tentukan jenis_ritase kalau frontend gak kirim
+	jenisRitase := req.JenisRitase
+	if jenisRitase == "" {
+		jenisRitase = h.tentukanJenisRitaseDB(ctx, req.IDDriver, req.RitaseKe)
+	}
+
+	// Prioritas: jam_mulai/jam_selesai explicit > auto dari ambilJadwal
+	var jamMulai, jamSelesai interface{}
+	if req.JamMulai != "" && req.JamSelesai != "" {
+		jamMulai = req.JamMulai
+		jamSelesai = req.JamSelesai
+	} else {
+		jamMulai, jamSelesai = h.ambilJadwalDB(ctx, jenisRitase, req.RitaseKe)
+	}
 	var jenisVal interface{}
-	if req.JenisRitase != "" {
-		jenisVal = req.JenisRitase
+	if jenisRitase != "" {
+		jenisVal = jenisRitase
 	}
 
 	var idRitase int64
@@ -897,6 +1121,10 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 		}
 		if stop.IDLokasi <= 0 {
 			return response.Error(c, http.StatusBadRequest, "ID lokasi stop wajib diisi")
+		}
+		// Validasi FK: pastikan ID lokasi benar-benar ada di tabel terkait
+		if err := validasiStopID(ctx, tx, stop.Jenis, stop.IDLokasi); err != nil {
+			return response.Error(c, http.StatusBadRequest, err.Error())
 		}
 
 		query := fmt.Sprintf(`
@@ -945,34 +1173,58 @@ func lokasiKolom(jenis string) (string, error) {
 	return "", fmt.Errorf("jenis_stop tidak dikenal: %q", jenis)
 }
 
+// validasiStopID memastikan ID lokasi pada stop benar-benar ada di tabel terkait sebelum INSERT.
+func validasiStopID(ctx context.Context, tx pgx.Tx, jenis string, idLokasi int64) error {
+	var exists bool
+	var table, column string
+	switch jenis {
+	case "gudang":
+		table, column = "gudang", "id_gudang"
+	case "seller":
+		table, column = "seller", "id_seller"
+	case "gateway", "drop_point":
+		table, column = "drop_point", "id_drop_point"
+	default:
+		return fmt.Errorf("jenis_stop tidak dikenal: %q", jenis)
+	}
+	query := fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE %s = $1)", table, column)
+	if err := tx.QueryRow(ctx, query, idLokasi).Scan(&exists); err != nil {
+		return fmt.Errorf("gagal validasi %s ID %d: %v", jenis, idLokasi, err)
+	}
+	if !exists {
+		return fmt.Errorf("%s ID %d tidak ditemukan di database", jenis, idLokasi)
+	}
+	return nil
+}
+
 // AdminGetMasterOptions Ambil opsi master data (drivers, kendaraan, drop_points, sellers, gudangs)
 func (h *APIHandler) AdminGetMasterOptions(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
 	defer cancel()
 
-	// 1. Drivers
+	// 1. Drivers (hanya aktif — filter nonaktif di backend)
 	drivers := make([]map[string]interface{}, 0)
-	dRows, _ := h.DB.Query(ctx, "SELECT id_driver, nama_driver, COALESCE(jabatan, 'TRANSPORTER') FROM driver ORDER BY id_driver ASC")
+	dRows, _ := h.DB.Query(ctx, "SELECT id_driver, nama_driver, COALESCE(jabatan, 'TRANSPORTER'), COALESCE(status_driver, 'on_duty') FROM driver WHERE LOWER(COALESCE(status_driver, 'on_duty')) != 'nonaktif' ORDER BY id_driver ASC")
 	if dRows != nil {
 		for dRows.Next() {
 			var id int64
-			var nama, jabatan string
-			if err := dRows.Scan(&id, &nama, &jabatan); err == nil {
-				drivers = append(drivers, map[string]interface{}{"id_driver": id, "nama_driver": nama, "jabatan": jabatan})
+			var nama, jabatan, status string
+			if err := dRows.Scan(&id, &nama, &jabatan, &status); err == nil {
+				drivers = append(drivers, map[string]interface{}{"id_driver": id, "nama_driver": nama, "jabatan": jabatan, "status_driver": status})
 			}
 		}
 		dRows.Close()
 	}
 
-	// 2. Kendaraan
+	// 2. Kendaraan (termasuk status untuk filter frontend)
 	kendaraans := make([]map[string]interface{}, 0)
-	kRows, _ := h.DB.Query(ctx, "SELECT id_kendaraan, plat_nomor, jenis_kendaraan FROM kendaraan ORDER BY id_kendaraan ASC")
+	kRows, _ := h.DB.Query(ctx, "SELECT id_kendaraan, plat_nomor, jenis_kendaraan, COALESCE(status_kendaraan, 'available') FROM kendaraan ORDER BY id_kendaraan ASC")
 	if kRows != nil {
 		for kRows.Next() {
 			var id int64
-			var plat, jenis string
-			if err := kRows.Scan(&id, &plat, &jenis); err == nil {
-				kendaraans = append(kendaraans, map[string]interface{}{"id_kendaraan": id, "plat_nomor": plat, "jenis_kendaraan": jenis})
+			var plat, jenis, status string
+			if err := kRows.Scan(&id, &plat, &jenis, &status); err == nil {
+				kendaraans = append(kendaraans, map[string]interface{}{"id_kendaraan": id, "plat_nomor": plat, "jenis_kendaraan": jenis, "status_kendaraan": status})
 			}
 		}
 		kRows.Close()
@@ -1023,12 +1275,43 @@ func (h *APIHandler) AdminGetMasterOptions(c echo.Context) error {
 		gRows.Close()
 	}
 
+	// 6. Driver Jenis (mapping driver → jenis ritase per ritase_ke)
+	driverJenis := make([]map[string]interface{}, 0)
+	djRows, _ := h.DB.Query(ctx, "SELECT id_driver, ritase_ke, jenis FROM driver_ritase_jenis ORDER BY id_driver, ritase_ke")
+	if djRows != nil {
+		for djRows.Next() {
+			var idDriver, ritaseKe int64
+			var jenis string
+			if err := djRows.Scan(&idDriver, &ritaseKe, &jenis); err == nil {
+				driverJenis = append(driverJenis, map[string]interface{}{"id_driver": idDriver, "ritase_ke": ritaseKe, "jenis": jenis})
+			}
+		}
+		djRows.Close()
+	}
+
+	// 7. Jam Ritase Config (jam mulai/selesai per jenis + ritase_ke)
+	jamRitase := make([]map[string]interface{}, 0)
+	jrRows, _ := h.DB.Query(ctx, "SELECT jenis, ritase_ke, jam_mulai::text, jam_selesai::text FROM jadwal_ritase_config ORDER BY jenis, ritase_ke")
+	if jrRows != nil {
+		for jrRows.Next() {
+			var jenis string
+			var ritaseKe int64
+			var jamMulai, jamSelesai string
+			if err := jrRows.Scan(&jenis, &ritaseKe, &jamMulai, &jamSelesai); err == nil {
+				jamRitase = append(jamRitase, map[string]interface{}{"jenis": jenis, "ritase_ke": ritaseKe, "jam_mulai": jamMulai, "jam_selesai": jamSelesai})
+			}
+		}
+		jrRows.Close()
+	}
+
 	return response.OK(c, map[string]interface{}{
-		"drivers":     drivers,
-		"kendaraan":   kendaraans,
-		"drop_points": dropPoints,
-		"sellers":     sellers,
-		"gudangs":     gudangs,
+		"drivers":      drivers,
+		"kendaraan":    kendaraans,
+		"drop_points":  dropPoints,
+		"sellers":      sellers,
+		"gudangs":      gudangs,
+		"driver_jenis": driverJenis,
+		"jam_ritase":   jamRitase,
 	})
 }
 
