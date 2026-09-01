@@ -470,8 +470,8 @@ func (r *Repository) GetAnalyticsSellers(ctx context.Context, from, to string) (
 		WITH loc_dur AS (
 			SELECT e1.id_ritase, avg(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at))) AS dur
 			FROM ritase_event e1
-			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'berangkat_seller'
-			WHERE e1.status = 'sampai_seller' AND e2.created_at > e1.created_at
+			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'Sedang Menuju'
+			WHERE e1.status = 'Tiba' AND e2.created_at > e1.created_at
 			GROUP BY e1.id_ritase
 		), muatan AS (
 			SELECT ev.id_ritase,

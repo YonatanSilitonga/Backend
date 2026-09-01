@@ -774,6 +774,18 @@ func (h *APIHandler) FinishRitase(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "Gagal menyelesaikan ritase")
 	}
 
+	// Close durasi event terakhir supaya gak 0 detik
+	_, _ = h.DB.Exec(ctx, `
+		UPDATE ritase_event
+		SET durasi_detik = EXTRACT(EPOCH FROM (now() - created_at))::int
+		WHERE id_event = (
+			SELECT id_event FROM ritase_event
+			WHERE id_ritase = $1
+			ORDER BY created_at DESC, id_event DESC
+			LIMIT 1
+		)
+	`, req.IdRitase)
+
 	h.bus.Publish("force_refresh", "mobile_finish_ritase")
 	return response.OK(c, "success")
 }
@@ -827,7 +839,11 @@ func (h *APIHandler) GetDriverHistoryRitase(c echo.Context) error {
 			COALESCE(k.plat_nomor, '-'), COALESCE(k.jenis_kendaraan, '-'),
 			COALESCE(TO_CHAR(r.jam_mulai, 'HH24:MI'), ''),
 			COALESCE(TO_CHAR(r.jam_selesai, 'HH24:MI'), ''),
-			COALESCE(EXTRACT(EPOCH FROM (r.jam_selesai - r.jam_mulai))::int, 0),
+			COALESCE((
+				SELECT EXTRACT(EPOCH FROM (MAX(created_at) - MIN(created_at)))::int
+				FROM ritase_event
+				WHERE id_ritase = r.id_ritase
+			), 0),
 			COALESCE(sub_ev.total_koli, 0),
 			COALESCE(sub_ev.total_ecer, 0),
 			COALESCE(sub_ev.total_hv, 0),
