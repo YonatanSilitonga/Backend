@@ -157,10 +157,10 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 }
 
 // GetDurasiAnalisis menghitung rata-rata durasi proses dari timeline event.
+// Hanya menghitung ritase yang benar-benar dijalankan (status selesai/berjalan).
 // Pakai pasangan status stored di DB:
 // loading (bongkar muat) = Tiba -> Sedang Menuju (waktu di lokasi)
 // perjalanan = Sedang Menuju -> Tiba (waktu perjalanan)
-// unloading tidak dipakai karena tidak ada event unloading di data.
 func (r *Repository) GetDurasiAnalisis(ctx context.Context) (*DurasiAnalisis, error) {
 	d := &DurasiAnalisis{}
 
@@ -176,10 +176,17 @@ func (r *Repository) GetDurasiAnalisis(ctx context.Context) (*DurasiAnalisis, er
 	for _, p := range pairs {
 		var avgSeconds *float64
 		err := r.db.QueryRow(ctx, `
-			SELECT avg(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at)))
-			FROM ritase_event e1
-			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = $2
-			WHERE e1.status = $1 AND e2.created_at > e1.created_at
+			SELECT avg(seg.dur)
+			FROM (
+				SELECT e1.id_ritase,
+				       SUM(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at))) AS dur
+				FROM ritase_event e1
+				JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = $2
+				JOIN ritase r ON r.id_ritase = e1.id_ritase
+				WHERE e1.status = $1 AND e2.created_at > e1.created_at
+				  AND r.status IN ('selesai', 'berjalan')
+				GROUP BY e1.id_ritase
+			) seg
 		`, p.start, p.end).Scan(&avgSeconds)
 		if err != nil {
 			return nil, err
@@ -192,8 +199,10 @@ func (r *Repository) GetDurasiAnalisis(ctx context.Context) (*DurasiAnalisis, er
 	}
 
 	if err := r.db.QueryRow(ctx, `
-		SELECT count(DISTINCT id_ritase) FROM ritase_event
-		WHERE status IN ('Tiba','Sedang Menuju')
+		SELECT count(DISTINCT e.id_ritase) FROM ritase_event e
+		JOIN ritase r ON r.id_ritase = e.id_ritase
+		WHERE e.status IN ('Tiba','Sedang Menuju')
+		  AND r.status IN ('selesai', 'berjalan')
 	`).Scan(&d.TotalRitaseDihitung); err != nil {
 		return nil, err
 	}
@@ -379,27 +388,35 @@ func (r *Repository) GetAnalyticsTrend(ctx context.Context, from, to string) ([]
 
 // GetAnalyticsDrivers menghitung performa per driver dalam periode.
 // Durasi (detik) dihitung per ritase via CTE pairing event, lalu dirata-rata per driver.
+// Hanya ritase yang benar-benar dijalankan (status selesai/berjalan) yang dihitung.
 func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) ([]DriverPerf, error) {
 	from, to = defaultRange(from, to)
 
 	rows, err := r.db.Query(ctx, `
-		WITH loading AS (
+		WITH active_ritase AS (
+			SELECT id_ritase FROM ritase
+			WHERE tanggal BETWEEN $1 AND $2
+			  AND status IN ('selesai', 'berjalan')
+		), loading AS (
 			SELECT e1.id_ritase, avg(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at))) AS dur
 			FROM ritase_event e1
 			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'Sedang Menuju'
 			WHERE e1.status = 'Tiba' AND e2.created_at > e1.created_at
+			  AND e1.id_ritase IN (SELECT id_ritase FROM active_ritase)
 			GROUP BY e1.id_ritase
 		), perjalanan AS (
 			SELECT e1.id_ritase, avg(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at))) AS dur
 			FROM ritase_event e1
 			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'Tiba'
 			WHERE e1.status = 'Sedang Menuju' AND e2.created_at > e1.created_at
+			  AND e1.id_ritase IN (SELECT id_ritase FROM active_ritase)
 			GROUP BY e1.id_ritase
 		), unloading AS (
 			SELECT e1.id_ritase, avg(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at))) AS dur
 			FROM ritase_event e1
 			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'Selesai'
 			WHERE e1.status = 'Bongkar Muat Barang' AND e2.created_at > e1.created_at
+			  AND e1.id_ritase IN (SELECT id_ritase FROM active_ritase)
 			GROUP BY e1.id_ritase
 		), muatan AS (
 			SELECT ev.id_ritase,
@@ -415,9 +432,7 @@ func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) (
 		       count(DISTINCT r.id_ritase),
 		       count(DISTINCT r.id_ritase) FILTER (WHERE LOWER(r.status) IN ('selesai','completed','done')),
 		       COALESCE(sum(r.total_awb),0),
-		       COALESCE(sum(m.koli),0),
-		       COALESCE(sum(m.hv),0),
-		       COALESCE(sum(m.ecer),0),
+		       COALESCE(sum(m.koli),0), COALESCE(sum(m.hv),0), COALESCE(sum(m.ecer),0),
 		       count(*) FILTER (WHERE `+arahSQL+` = 'outgoing'),
 		       count(*) FILTER (WHERE `+arahSQL+` = 'incoming'),
 		       avg(l.dur), avg(p.dur), avg(u.dur)
@@ -429,6 +444,7 @@ func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) (
 		LEFT JOIN unloading u ON u.id_ritase = r.id_ritase
 		LEFT JOIN muatan m ON m.id_ritase = r.id_ritase
 		WHERE r.tanggal BETWEEN $1 AND $2
+		  AND r.status IN ('selesai', 'berjalan')
 		GROUP BY d.id_driver, d.nama_driver
 		ORDER BY count(DISTINCT r.id_ritase) DESC
 	`, from, to)
@@ -462,7 +478,7 @@ func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) (
 }
 
 // GetAnalyticsSellers menghitung analitik per seller dalam periode.
-// RataBongkar = rata-rata durasi di lokasi (sampai_seller → berangkat_seller) per ritase.
+// RataBongkar = rata-rata durasi di lokasi (Tiba -> Sedang Menuju) per ritase yang dijalankan.
 func (r *Repository) GetAnalyticsSellers(ctx context.Context, from, to string) ([]SellerAnalytics, error) {
 	from, to = defaultRange(from, to)
 
@@ -471,7 +487,9 @@ func (r *Repository) GetAnalyticsSellers(ctx context.Context, from, to string) (
 			SELECT e1.id_ritase, avg(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at))) AS dur
 			FROM ritase_event e1
 			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'Sedang Menuju'
+			JOIN ritase r ON r.id_ritase = e1.id_ritase
 			WHERE e1.status = 'Tiba' AND e2.created_at > e1.created_at
+			  AND r.status IN ('selesai', 'berjalan')
 			GROUP BY e1.id_ritase
 		), muatan AS (
 			SELECT ev.id_ritase,
@@ -498,6 +516,7 @@ func (r *Repository) GetAnalyticsSellers(ctx context.Context, from, to string) (
 		LEFT JOIN loc_dur ld ON ld.id_ritase = r.id_ritase
 		LEFT JOIN muatan m ON m.id_ritase = r.id_ritase
 		WHERE r.tanggal BETWEEN $1 AND $2
+		  AND r.status IN ('selesai', 'berjalan')
 		GROUP BY s.id_seller, s.kode_seller, s.nama_seller, s.kota, s.jarak_tempuh_km, s.jarak_dc_km
 		ORDER BY count(DISTINCT r.id_ritase) DESC
 	`, from, to)
