@@ -51,8 +51,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*AuthResponse, e
 		return nil, err
 	}
 
-	// Tandai session online (dipakai web: driver "Online" selama belum logout,
-	// walau GPS-nya stale karena background/layar mati).
+	// Tandai session online
 	_ = s.repo.SetLastLogin(ctx, user.ID)
 
 	return &AuthResponse{User: *user, Token: token}, nil
