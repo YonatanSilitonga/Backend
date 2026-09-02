@@ -89,7 +89,7 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 			       sum(ev.jumlah_high_value) AS hv,
 			       sum(ev.jumlah_ecer) AS ecer
 			FROM ritase_event ev
-			WHERE ev.created_at::date = $1 AND ev.status = 'Bongkar Muat Barang'
+			WHERE (ev.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $1 AND ev.status = 'Bongkar Muat Barang'
 			GROUP BY ev.id_ritase
 		) latest
 	`, today).Scan(&s.TotalKoliToday, &s.TotalHighValueToday, &s.TotalEceranToday); err != nil {
@@ -346,7 +346,7 @@ func (r *Repository) GetAnalyticsTrend(ctx context.Context, from, to string) ([]
 			       sum(ev.jumlah_ecer) AS ecer
 			FROM ritase_event ev
 			WHERE ev.status = 'Bongkar Muat Barang'
-			  AND ev.created_at::date BETWEEN $1 AND $2
+			  AND (ev.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date BETWEEN $1 AND $2
 			GROUP BY ev.id_ritase
 		)
 		SELECT r.tanggal::text,
@@ -425,7 +425,7 @@ func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) (
 			       sum(ev.jumlah_ecer) AS ecer
 			FROM ritase_event ev
 			WHERE ev.status = 'Bongkar Muat Barang'
-			  AND ev.created_at::date BETWEEN $1 AND $2
+			  AND (ev.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date BETWEEN $1 AND $2
 			GROUP BY ev.id_ritase
 		)
 		SELECT d.id_driver, d.nama_driver,
@@ -498,7 +498,7 @@ func (r *Repository) GetAnalyticsSellers(ctx context.Context, from, to string) (
 			       sum(ev.jumlah_ecer) AS ecer
 			FROM ritase_event ev
 			WHERE ev.status = 'Bongkar Muat Barang'
-			  AND ev.created_at::date BETWEEN $1 AND $2
+			  AND (ev.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date BETWEEN $1 AND $2
 			GROUP BY ev.id_ritase
 		)
 		SELECT s.id_seller, COALESCE(s.kode_seller,''), COALESCE(s.nama_seller,''), COALESCE(s.kota,''),
