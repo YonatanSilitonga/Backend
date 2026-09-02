@@ -1,0 +1,31 @@
+-- Rollback audit fields
+
+ALTER TABLE driver DROP COLUMN IF EXISTS created_at;
+ALTER TABLE driver DROP COLUMN IF EXISTS created_by;
+ALTER TABLE driver DROP COLUMN IF EXISTS updated_at;
+ALTER TABLE driver DROP COLUMN IF EXISTS updated_by;
+
+ALTER TABLE kendaraan DROP COLUMN IF EXISTS created_at;
+ALTER TABLE kendaraan DROP COLUMN IF EXISTS created_by;
+ALTER TABLE kendaraan DROP COLUMN IF EXISTS updated_at;
+ALTER TABLE kendaraan DROP COLUMN IF EXISTS updated_by;
+
+ALTER TABLE seller DROP COLUMN IF EXISTS created_at;
+ALTER TABLE seller DROP COLUMN IF EXISTS created_by;
+ALTER TABLE seller DROP COLUMN IF EXISTS updated_at;
+ALTER TABLE seller DROP COLUMN IF EXISTS updated_by;
+
+ALTER TABLE gudang DROP COLUMN IF EXISTS created_at;
+ALTER TABLE gudang DROP COLUMN IF EXISTS created_by;
+ALTER TABLE gudang DROP COLUMN IF EXISTS updated_at;
+ALTER TABLE gudang DROP COLUMN IF EXISTS updated_by;
+
+ALTER TABLE drop_point DROP COLUMN IF EXISTS created_at;
+ALTER TABLE drop_point DROP COLUMN IF EXISTS created_by;
+ALTER TABLE drop_point DROP COLUMN IF EXISTS updated_at;
+ALTER TABLE drop_point DROP COLUMN IF EXISTS updated_by;
+
+ALTER TABLE users DROP COLUMN IF EXISTS created_at;
+ALTER TABLE users DROP COLUMN IF EXISTS created_by;
+ALTER TABLE users DROP COLUMN IF EXISTS updated_at;
+ALTER TABLE users DROP COLUMN IF EXISTS updated_by;

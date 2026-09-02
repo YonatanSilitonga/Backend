@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"backend/internal/pkg/middleware"
 	"backend/internal/pkg/response"
 )
 
@@ -76,7 +77,8 @@ func (h *Handler) CreateDriver(c echo.Context) error {
 	if req.NamaDriver == "" || req.StatusDriver == "" {
 		return response.Error(c, http.StatusBadRequest, "nama_driver dan status_driver wajib diisi")
 	}
-	id, err := h.svc.CreateDriver(c.Request().Context(), req)
+	createdBy := c.Get(middleware.CtxUserID).(int64)
+	id, err := h.svc.CreateDriver(c.Request().Context(), req, createdBy)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal membuat driver")
 	}
@@ -92,7 +94,8 @@ func (h *Handler) UpdateDriver(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
 	}
-	if err := h.svc.UpdateDriver(c.Request().Context(), id, req); err != nil {
+	updatedBy := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.UpdateDriver(c.Request().Context(), id, req, updatedBy); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal update driver")
 	}
 	return response.OK(c, map[string]string{"message": "driver diperbarui"})
@@ -127,7 +130,8 @@ func (h *Handler) CreateKendaraan(c echo.Context) error {
 	if req.PlatNomor == "" || req.StatusKendaraan == "" {
 		return response.Error(c, http.StatusBadRequest, "plat_nomor dan status_kendaraan wajib diisi")
 	}
-	id, err := h.svc.CreateKendaraan(c.Request().Context(), req)
+	createdBy := c.Get(middleware.CtxUserID).(int64)
+	id, err := h.svc.CreateKendaraan(c.Request().Context(), req, createdBy)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal membuat kendaraan")
 	}
@@ -143,7 +147,8 @@ func (h *Handler) UpdateKendaraan(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
 	}
-	if err := h.svc.UpdateKendaraan(c.Request().Context(), id, req); err != nil {
+	updatedBy := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.UpdateKendaraan(c.Request().Context(), id, req, updatedBy); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal update kendaraan")
 	}
 	return response.OK(c, map[string]string{"message": "kendaraan diperbarui"})
@@ -181,7 +186,8 @@ func (h *Handler) CreateSeller(c echo.Context) error {
 	if req.Status == "" {
 		req.Status = "aktif"
 	}
-	id, err := h.svc.CreateSeller(c.Request().Context(), req)
+	createdBy := c.Get(middleware.CtxUserID).(int64)
+	id, err := h.svc.CreateSeller(c.Request().Context(), req, createdBy)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal membuat seller")
 	}
@@ -197,7 +203,8 @@ func (h *Handler) UpdateSeller(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
 	}
-	if err := h.svc.UpdateSeller(c.Request().Context(), id, req); err != nil {
+	updatedBy := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.UpdateSeller(c.Request().Context(), id, req, updatedBy); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal update seller")
 	}
 	return response.OK(c, map[string]string{"message": "seller diperbarui"})
@@ -235,7 +242,8 @@ func (h *Handler) CreateGudang(c echo.Context) error {
 	if req.Status == "" {
 		req.Status = "aktif"
 	}
-	id, err := h.svc.CreateGudang(c.Request().Context(), req)
+	createdBy := c.Get(middleware.CtxUserID).(int64)
+	id, err := h.svc.CreateGudang(c.Request().Context(), req, createdBy)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal membuat gudang")
 	}
@@ -251,7 +259,8 @@ func (h *Handler) UpdateGudang(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
 	}
-	if err := h.svc.UpdateGudang(c.Request().Context(), id, req); err != nil {
+	updatedBy := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.UpdateGudang(c.Request().Context(), id, req, updatedBy); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal update gudang")
 	}
 	return response.OK(c, map[string]string{"message": "gudang diperbarui"})
@@ -289,7 +298,8 @@ func (h *Handler) CreateDropPoint(c echo.Context) error {
 	if req.Status == "" {
 		req.Status = "aktif"
 	}
-	id, err := h.svc.CreateDropPoint(c.Request().Context(), req)
+	createdBy := c.Get(middleware.CtxUserID).(int64)
+	id, err := h.svc.CreateDropPoint(c.Request().Context(), req, createdBy)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal membuat drop point")
 	}
@@ -305,7 +315,8 @@ func (h *Handler) UpdateDropPoint(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
 	}
-	if err := h.svc.UpdateDropPoint(c.Request().Context(), id, req); err != nil {
+	updatedBy := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.UpdateDropPoint(c.Request().Context(), id, req, updatedBy); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal update drop point")
 	}
 	return response.OK(c, map[string]string{"message": "drop point diperbarui"})
@@ -340,7 +351,8 @@ func (h *Handler) CreateUser(c echo.Context) error {
 	if req.Username == "" || req.Password == "" || req.Role == "" {
 		return response.Error(c, http.StatusBadRequest, "username, password, dan role wajib diisi")
 	}
-	id, err := h.svc.CreateUser(c.Request().Context(), req)
+	createdBy := c.Get(middleware.CtxUserID).(int64)
+	id, err := h.svc.CreateUser(c.Request().Context(), req, createdBy)
 	if err != nil {
 		if errors.Is(err, ErrUsernameExists) {
 			return response.Error(c, http.StatusConflict, "username sudah digunakan")
@@ -361,7 +373,8 @@ func (h *Handler) UpdateUserRole(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.Role == "" {
 		return response.Error(c, http.StatusBadRequest, "role wajib diisi")
 	}
-	if err := h.svc.UpdateUserRole(c.Request().Context(), id, req.Role); err != nil {
+	updatedBy := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.UpdateUserRole(c.Request().Context(), id, req.Role, updatedBy); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal update role")
 	}
 	return response.OK(c, map[string]string{"message": "role diperbarui"})
@@ -381,7 +394,8 @@ func (h *Handler) UpdateUserStatus(c echo.Context) error {
 	if req.Status != "aktif" && req.Status != "nonaktif" {
 		return response.Error(c, http.StatusBadRequest, "status harus 'aktif' atau 'nonaktif'")
 	}
-	if err := h.svc.UpdateUserStatus(c.Request().Context(), id, req.Status); err != nil {
+	updatedBy := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.UpdateUserStatus(c.Request().Context(), id, req.Status, updatedBy); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal update status")
 	}
 	return response.OK(c, map[string]string{"message": "status diperbarui"})
@@ -399,7 +413,8 @@ func (h *Handler) ResetPassword(c echo.Context) error {
 	if len(req.NewPassword) < 6 {
 		return response.Error(c, http.StatusBadRequest, "password minimal 6 karakter")
 	}
-	if err := h.svc.ResetPassword(c.Request().Context(), id, req.NewPassword); err != nil {
+	updatedBy := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.ResetPassword(c.Request().Context(), id, req.NewPassword, updatedBy); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal reset password")
 	}
 	return response.OK(c, map[string]string{"message": "password berhasil direset"})

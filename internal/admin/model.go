@@ -8,6 +8,10 @@ type Driver struct {
 	NoSIM        *string `json:"no_sim,omitempty"`
 	JenisSIM     *string `json:"jenis_sim,omitempty"`
 	StatusDriver string  `json:"status_driver"`
+	CreatedAt    *string `json:"created_at,omitempty"`
+	CreatedBy    *int64  `json:"created_by,omitempty"`
+	UpdatedAt    *string `json:"updated_at,omitempty"`
+	UpdatedBy    *int64  `json:"updated_by,omitempty"`
 }
 
 type DriverRequest struct {
@@ -25,6 +29,10 @@ type Kendaraan struct {
 	JenisKendaraan  *string `json:"jenis_kendaraan,omitempty"`
 	KapasitasKg     *int64  `json:"kapasitas_kg,omitempty"`
 	StatusKendaraan string  `json:"status_kendaraan"`
+	CreatedAt       *string `json:"created_at,omitempty"`
+	CreatedBy       *int64  `json:"created_by,omitempty"`
+	UpdatedAt       *string `json:"updated_at,omitempty"`
+	UpdatedBy       *int64  `json:"updated_by,omitempty"`
 }
 
 type KendaraanRequest struct {
@@ -36,43 +44,51 @@ type KendaraanRequest struct {
 
 // Seller — admin CRUD.
 type Seller struct {
-	ID              int64   `json:"id_seller"`
-	KodeSeller      string  `json:"kode_seller"`
-	NamaSeller      string  `json:"nama_seller"`
-	Alamat          *string `json:"alamat,omitempty"`
-	Kota            *string `json:"kota,omitempty"`
-	Area            *string `json:"area,omitempty"`
-	Pic             *string `json:"pic,omitempty"`
-	NoHP            *string `json:"no_hp,omitempty"`
-	ForecastHarian  *int64  `json:"forecast_harian,omitempty"`
-	Status          string  `json:"status"`
-	Latitude        *float64 `json:"latitude,omitempty"`
-	Longitude       *float64 `json:"longitude,omitempty"`
+	ID             int64    `json:"id_seller"`
+	KodeSeller     string   `json:"kode_seller"`
+	NamaSeller     string   `json:"nama_seller"`
+	Alamat         *string  `json:"alamat,omitempty"`
+	Kota           *string  `json:"kota,omitempty"`
+	Area           *string  `json:"area,omitempty"`
+	Pic            *string  `json:"pic,omitempty"`
+	NoHP           *string  `json:"no_hp,omitempty"`
+	ForecastHarian *int64   `json:"forecast_harian,omitempty"`
+	Status         string   `json:"status"`
+	Latitude       *float64 `json:"latitude,omitempty"`
+	Longitude      *float64 `json:"longitude,omitempty"`
+	CreatedAt      *string  `json:"created_at,omitempty"`
+	CreatedBy      *int64   `json:"created_by,omitempty"`
+	UpdatedAt      *string  `json:"updated_at,omitempty"`
+	UpdatedBy      *int64   `json:"updated_by,omitempty"`
 }
 
 type SellerRequest struct {
-	KodeSeller      string   `json:"kode_seller"`
-	NamaSeller      string   `json:"nama_seller"`
-	Alamat          *string  `json:"alamat,omitempty"`
-	Kota            *string  `json:"kota,omitempty"`
-	Area            *string  `json:"area,omitempty"`
-	Pic             *string  `json:"pic,omitempty"`
-	NoHP            *string  `json:"no_hp,omitempty"`
-	ForecastHarian  *int64   `json:"forecast_harian,omitempty"`
-	Status          string   `json:"status"`
-	Latitude        *float64 `json:"latitude,omitempty"`
-	Longitude       *float64 `json:"longitude,omitempty"`
+	KodeSeller     string   `json:"kode_seller"`
+	NamaSeller     string   `json:"nama_seller"`
+	Alamat         *string  `json:"alamat,omitempty"`
+	Kota           *string  `json:"kota,omitempty"`
+	Area           *string  `json:"area,omitempty"`
+	Pic            *string  `json:"pic,omitempty"`
+	NoHP           *string  `json:"no_hp,omitempty"`
+	ForecastHarian *int64   `json:"forecast_harian,omitempty"`
+	Status         string   `json:"status"`
+	Latitude       *float64 `json:"latitude,omitempty"`
+	Longitude      *float64 `json:"longitude,omitempty"`
 }
 
 // Gudang — admin CRUD.
 type Gudang struct {
-	ID         int64   `json:"id_gudang"`
+	ID        int64    `json:"id_gudang"`
 	NamaGudang string  `json:"nama_gudang"`
-	Alamat     *string `json:"alamat,omitempty"`
-	Kota       *string `json:"kota,omitempty"`
-	Latitude   *float64 `json:"latitude,omitempty"`
-	Longitude  *float64 `json:"longitude,omitempty"`
-	Status     string  `json:"status"`
+	Alamat    *string  `json:"alamat,omitempty"`
+	Kota      *string  `json:"kota,omitempty"`
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
+	Status    string   `json:"status"`
+	CreatedAt *string  `json:"created_at,omitempty"`
+	CreatedBy *int64   `json:"created_by,omitempty"`
+	UpdatedAt *string  `json:"updated_at,omitempty"`
+	UpdatedBy *int64   `json:"updated_by,omitempty"`
 }
 
 type GudangRequest struct {
@@ -93,6 +109,10 @@ type User struct {
 	KaryawanID *int64  `json:"karyawan_id,omitempty"`
 	IsActive   bool    `json:"is_active"`
 	Status     string  `json:"status"`
+	CreatedAt  *string `json:"created_at,omitempty"`
+	CreatedBy  *int64  `json:"created_by,omitempty"`
+	UpdatedAt  *string `json:"updated_at,omitempty"`
+	UpdatedBy  *int64  `json:"updated_by,omitempty"`
 }
 
 type UserRequest struct {
