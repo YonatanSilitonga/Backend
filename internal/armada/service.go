@@ -31,8 +31,8 @@ func (s *Service) ListDriver(ctx context.Context) ([]Driver, error) {
 	return s.repo.ListDriver(ctx)
 }
 
-func (s *Service) ListRitase(ctx context.Context, idDriver int64, tanggal string) ([]Ritase, error) {
-	return s.repo.ListRitase(ctx, idDriver, tanggal)
+func (s *Service) ListRitase(ctx context.Context, idDriver int64, startDate string, endDate string) ([]Ritase, error) {
+	return s.repo.ListRitase(ctx, idDriver, startDate, endDate)
 }
 
 func (s *Service) GetRitase(ctx context.Context, id int64) (*RitaseDetail, error) {

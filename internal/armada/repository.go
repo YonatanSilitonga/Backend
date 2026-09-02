@@ -136,7 +136,7 @@ func scanRitase(row pgx.Row) (*Ritase, error) {
 }
 
 // ListRitase mengambil semua penugasan, opsional filter driver/tanggal.
-func (r *Repository) ListRitase(ctx context.Context, idDriver int64, tanggal string) ([]Ritase, error) {
+func (r *Repository) ListRitase(ctx context.Context, idDriver int64, startDate, endDate string) ([]Ritase, error) {
 	query := ritaseSelect + `
 		WHERE 1=1
 	`
@@ -145,9 +145,16 @@ func (r *Repository) ListRitase(ctx context.Context, idDriver int64, tanggal str
 		args = append(args, idDriver)
 		query += " AND r.id_driver = $" + fmt.Sprint(len(args))
 	}
-	if tanggal != "" {
-		args = append(args, tanggal)
+	if startDate != "" && endDate != "" {
+		args = append(args, startDate)
+		query += " AND r.tanggal >= $" + fmt.Sprint(len(args))
+		args = append(args, endDate)
+		query += " AND r.tanggal <= $" + fmt.Sprint(len(args))
+	} else if startDate != "" {
+		args = append(args, startDate)
 		query += " AND r.tanggal = $" + fmt.Sprint(len(args))
+	} else {
+		query += " AND r.tanggal >= current_date - interval '30 days'"
 	}
 	query += " ORDER BY r.tanggal DESC, r.ritase_ke, r.id_ritase DESC"
 

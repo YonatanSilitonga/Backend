@@ -48,7 +48,12 @@ func (h *Handler) ListDriver(c echo.Context) error {
 // Driver (role=driver) hanya melihat ritase miliknya sendiri (scoping dari JWT).
 func (h *Handler) ListRitase(c echo.Context) error {
 	driverID, _ := strconv.ParseInt(c.QueryParam("driver_id"), 10, 64)
+	startDate := c.QueryParam("start_date")
+	endDate := c.QueryParam("end_date")
 	tanggal := c.QueryParam("tanggal")
+	if tanggal != "" && startDate == "" {
+		startDate = tanggal // fallback for old frontend calls
+	}
 
 	if role, ok := c.Get(appMiddleware.CtxRole).(string); ok && role == "driver" {
 		if did, ok := c.Get(appMiddleware.CtxDriverID).(int64); ok && did > 0 {
@@ -56,7 +61,7 @@ func (h *Handler) ListRitase(c echo.Context) error {
 		}
 	}
 
-	data, err := h.svc.ListRitase(c.Request().Context(), driverID, tanggal)
+	data, err := h.svc.ListRitase(c.Request().Context(), driverID, startDate, endDate)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data ritase")
 	}
