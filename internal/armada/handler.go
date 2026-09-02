@@ -92,7 +92,8 @@ func (h *Handler) CreateRitase(c echo.Context) error {
 		return response.Error(c, http.StatusBadRequest, "kode_ritase, id_driver, id_kendaraan wajib diisi")
 	}
 
-	data, err := h.svc.CreateRitase(c.Request().Context(), req)
+	createdBy, _ := c.Get(appMiddleware.CtxUserID).(int64)
+	data, err := h.svc.CreateRitase(c.Request().Context(), req, createdBy)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal membuat ritase")
 	}

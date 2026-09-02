@@ -105,7 +105,10 @@ func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 	       COALESCE(r.paket_tertinggal, 0), COALESCE(r.alasan_tertinggal, ''),
 	       COALESCE(r.jam_berangkat::text, ''), COALESCE(r.jam_tiba::text, ''),
 	       TO_CHAR(r.jam_mulai, 'HH24:MI'), TO_CHAR(r.jam_selesai, 'HH24:MI'),
-	       COALESCE(r.status, 'direncanakan'), COALESCE(r.created_at, now())
+		COALESCE(r.status, 'direncanakan'),
+		COALESCE(r.created_at::text, ''),
+		COALESCE(r.updated_at::text, ''),
+		r.created_by, r.updated_by
 	FROM ritase r
 	LEFT JOIN driver d ON d.id_driver = r.id_driver
 	LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
@@ -125,7 +128,7 @@ func scanRitase(row pgx.Row) (*Ritase, error) {
 		&r.PaketTertinggal, &r.AlasanTertinggal,
 		&r.JamBerangkat, &r.JamTiba,
 		&r.JamMulai, &r.JamSelesai,
-		&r.Status, &r.CreatedAt)
+		&r.Status, &r.CreatedAt, &r.UpdatedAt, &r.CreatedBy, &r.UpdatedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -266,14 +269,14 @@ func (r *Repository) GetRitase(ctx context.Context, id int64) (*RitaseDetail, er
 }
 
 // CreateRitase membuat penugasan baru.
-func (r *Repository) CreateRitase(ctx context.Context, req CreateRitaseRequest) (*Ritase, error) {
+func (r *Repository) CreateRitase(ctx context.Context, req CreateRitaseRequest, createdBy int64) (*Ritase, error) {
 	var newID int64
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO ritase (kode_ritase, tanggal, id_driver, id_kendaraan, id_seller, id_drop_point, ritase_ke, total_awb, total_koli, status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'direncanakan')
+		INSERT INTO ritase (kode_ritase, tanggal, id_driver, id_kendaraan, id_seller, id_drop_point, ritase_ke, total_awb, total_koli, status, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'direncanakan',$10)
 		RETURNING id_ritase
 	`, req.KodeRitase, req.Tanggal, req.IDDriver, req.IDKendaraan, req.IDSeller, req.IDDropPoint,
-		req.RitaseKe, req.TotalAWB, req.TotalKoli).Scan(&newID)
+		req.RitaseKe, req.TotalAWB, req.TotalKoli, createdBy).Scan(&newID)
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +307,7 @@ func (r *Repository) AddEvent(ctx context.Context, idRitase int64, req UpdateSta
 		return nil, err
 	}
 
-	if _, err := tx.Exec(ctx, "UPDATE ritase SET status = $1 WHERE id_ritase = $2", req.Status, idRitase); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE ritase SET status = $1, updated_at = NOW() WHERE id_ritase = $2", req.Status, idRitase); err != nil {
 		return nil, err
 	}
 
@@ -321,7 +324,8 @@ func (r *Repository) UpdateMuatan(ctx context.Context, idRitase int64, req Updat
 		SET total_awb = COALESCE($1, total_awb),
 		    total_koli = COALESCE($2, total_koli),
 		    paket_tertinggal = COALESCE($3, paket_tertinggal),
-		    alasan_tertinggal = COALESCE($4, alasan_tertinggal)
+		    alasan_tertinggal = COALESCE($4, alasan_tertinggal),
+		    updated_at = NOW()
 		WHERE id_ritase = $5
 	`, req.TotalAWB, req.TotalKoli, req.PaketTertinggal, req.AlasanTertinggal, idRitase); err != nil {
 		return nil, err

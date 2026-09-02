@@ -768,7 +768,7 @@ func (h *APIHandler) FinishRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
-	_, err := h.DB.Exec(ctx, `UPDATE ritase SET status = 'selesai' WHERE id_ritase = $1`, req.IdRitase)
+	_, err := h.DB.Exec(ctx, `UPDATE ritase SET status = 'selesai', updated_at = NOW() WHERE id_ritase = $1`, req.IdRitase)
 	if err != nil {
 		log.Printf("Failed to update ritase status: %v", err)
 		return response.Error(c, http.StatusInternalServerError, "Gagal menyelesaikan ritase")
@@ -805,7 +805,7 @@ func (h *APIHandler) ResetTestRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
-	_, err := h.DB.Exec(ctx, `UPDATE ritase SET status = 'direncanakan' WHERE id_driver = $1 AND (tanggal = (now() AT TIME ZONE 'Asia/Jakarta')::date OR tanggal IS NULL)`, req.IdDriver)
+	_, err := h.DB.Exec(ctx, `UPDATE ritase SET status = 'direncanakan', updated_at = NOW() WHERE id_driver = $1 AND (tanggal = (now() AT TIME ZONE 'Asia/Jakarta')::date OR tanggal IS NULL)`, req.IdDriver)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal mereset ritase test")
 	}
@@ -1095,9 +1095,9 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 
 	// Update status ritase di tabel ritase ke 'berjalan' jika belum selesai
 	if req.Status == "Selesai" {
-		_, _ = h.DB.Exec(ctx, `UPDATE ritase SET status = 'selesai' WHERE id_ritase = $1`, idRitase)
+		_, _ = h.DB.Exec(ctx, `UPDATE ritase SET status = 'selesai', updated_at = NOW() WHERE id_ritase = $1`, idRitase)
 	} else {
-		_, _ = h.DB.Exec(ctx, `UPDATE ritase SET status = 'berjalan' WHERE id_ritase = $1 AND status != 'selesai'`, idRitase)
+		_, _ = h.DB.Exec(ctx, `UPDATE ritase SET status = 'berjalan', updated_at = NOW() WHERE id_ritase = $1 AND status != 'selesai'`, idRitase)
 	}
 
 	// 2. Hitung total akumulasi muatan yang sedang dibawa di ritase ini (SUM dari semua event Bongkar Muat Barang)
