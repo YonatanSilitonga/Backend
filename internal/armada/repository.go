@@ -562,7 +562,7 @@ func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan int64,
 	var args []interface{} = []interface{}{idKendaraan}
 	if tanggal != "" {
 		args = append(args, tanggal)
-		query += " AND e.created_at::date = $" + fmt.Sprint(len(args))
+		query += " AND (e.created_at AT TIME ZONE 'Asia/Jakarta')::date = $" + fmt.Sprint(len(args))
 	}
 	query += " ORDER BY e.created_at DESC, e.id_event DESC"
 
