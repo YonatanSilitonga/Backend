@@ -33,8 +33,6 @@ func NewRepository(db *pgxpool.Pool, offlineMin int, sessionHours int, sessionRe
 
 // GetSummary menghitung ringkasan KPI dari tabel-tabel existing.
 // Query DIKONSOLIDASI (GROUP BY / FILTER) biar gak 24x roundtrip ke DB.
-// GetSummary menghitung ringkasan KPI dari tabel-tabel existing.
-// Query DIKONSOLIDASI (GROUP BY / FILTER) biar gak 24x roundtrip ke DB.
 func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 	s := &Summary{}
 	loc, _ := time.LoadLocation("Asia/Jakarta")
@@ -157,62 +155,50 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 }
 
 // GetDurasiAnalisis menghitung rata-rata durasi proses dari timeline event.
-// Hanya menghitung ritase yang benar-benar dijalankan (status selesai/berjalan).
-// Pakai pasangan status stored di DB:
-// loading (bongkar muat) = Tiba -> Sedang Menuju (waktu di lokasi)
-// perjalanan = Sedang Menuju -> Tiba (waktu perjalanan)
+// Dioptimasi menggunakan Window Function LEAD() — 1 Single Pass scan tanpa perbandingan kuadratik.
 func (r *Repository) GetDurasiAnalisis(ctx context.Context) (*DurasiAnalisis, error) {
 	d := &DurasiAnalisis{}
 
-	pairs := []struct {
-		start string
-		end   string
-		dst   *string
-	}{
-		{"Tiba", "Sedang Menuju", &d.RataRataLoading},
-		{"Sedang Menuju", "Tiba", &d.RataRataPerjalanan},
-	}
+	var avgLoading, avgJalan *float64
+	var totalDihitung int64
 
-	for _, p := range pairs {
-		var avgSeconds *float64
-		err := r.db.QueryRow(ctx, `
-			SELECT avg(seg.dur)
-			FROM (
-				SELECT e1.id_ritase,
-				       SUM(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at))) AS dur
-				FROM ritase_event e1
-				JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = $2
-				JOIN ritase r ON r.id_ritase = e1.id_ritase
-				WHERE e1.status = $1 AND e2.created_at > e1.created_at
-				  AND r.status IN ('selesai', 'berjalan')
-				GROUP BY e1.id_ritase
-			) seg
-		`, p.start, p.end).Scan(&avgSeconds)
-		if err != nil {
-			return nil, err
-		}
-		if avgSeconds != nil {
-			*p.dst = formatJamMenit(time.Duration(*avgSeconds) * time.Second)
-		} else {
-			*p.dst = "belum ada data"
-		}
-	}
+	err := r.db.QueryRow(ctx, `
+		WITH stepped AS (
+			SELECT e.id_ritase, e.status, e.created_at,
+			       LEAD(e.status) OVER (PARTITION BY e.id_ritase ORDER BY e.created_at) AS next_status,
+			       LEAD(e.created_at) OVER (PARTITION BY e.id_ritase ORDER BY e.created_at) AS next_time
+			FROM ritase_event e
+			JOIN ritase r ON r.id_ritase = e.id_ritase
+			WHERE r.status IN ('selesai', 'berjalan')
+		)
+		SELECT 
+			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Tiba' AND next_status = 'Sedang Menuju'),
+			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Sedang Menuju' AND next_status = 'Tiba'),
+			count(DISTINCT id_ritase)
+		FROM stepped;
+	`).Scan(&avgLoading, &avgJalan, &totalDihitung)
 
-	if err := r.db.QueryRow(ctx, `
-		SELECT count(DISTINCT e.id_ritase) FROM ritase_event e
-		JOIN ritase r ON r.id_ritase = e.id_ritase
-		WHERE e.status IN ('Tiba','Sedang Menuju')
-		  AND r.status IN ('selesai', 'berjalan')
-	`).Scan(&d.TotalRitaseDihitung); err != nil {
+	if err != nil {
 		return nil, err
 	}
 
+	if avgLoading != nil {
+		d.RataRataLoading = formatJamMenit(time.Duration(*avgLoading) * time.Second)
+	} else {
+		d.RataRataLoading = "belum ada data"
+	}
+
+	if avgJalan != nil {
+		d.RataRataPerjalanan = formatJamMenit(time.Duration(*avgJalan) * time.Second)
+	} else {
+		d.RataRataPerjalanan = "belum ada data"
+	}
+
+	d.TotalRitaseDihitung = totalDihitung
 	return d, nil
 }
 
 // GetBottleneck mendeteksi titik-titik hambatan dari data existing.
-// Saat ini belum ada bottleneck yang cukup signifikan untuk ditampilkan.
-// Alert (kendaraan berhenti lama, perjalanan terlalu lama) sudah cover fungsi ini.
 func (r *Repository) GetBottleneck(ctx context.Context) ([]Bottleneck, error) {
 	return nil, nil
 }
@@ -248,7 +234,7 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 			Tingkat:     "warning",
 			Kategori:    "kendaraan_berhenti",
 			Pesan:       fmt.Sprintf("Driver %s berhenti lebih dari %s tanpa update", namaDriver, formatJamMenit(dur)),
-			Waktu:       lastEvent, // waktu kejadian asli (update GPS terakhir), bukan waktu query
+			Waktu:       lastEvent,
 			Deskripsi:   "Kendaraan tidak mengirim update GPS lebih dari 3 jam padahal ritase belum selesai berpotensi berhenti di jalan, HP mati, atau kendala armada.",
 			Rekomendasi: "Hubungi driver segera, cek posisi terakhir, dan pastikan kondisi armada serta keselamatan muatan.",
 		})
@@ -280,7 +266,7 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 			Tingkat:     "critical",
 			Kategori:    "perjalanan_terlalu_lama",
 			Pesan:       fmt.Sprintf("Ritase %s perjalanan melebihi 8 jam", kode),
-			Waktu:       lastEvent, // waktu kejadian asli (tiba gudang yang telat), bukan waktu query
+			Waktu:       lastEvent,
 			Deskripsi:   "Durasi berangkat gudang → tiba melebihi 8 jam — di luar batas wajar rute operasional, bisa menandakan kemacetan parah, menyimpang dari rute, atau kendala di jalan.",
 			Rekomendasi: "Telaah ulang rute/jadwal ritase, konfirmasi ke driver penyebab keterlambatan, dan catat untuk evaluasi performa.",
 		})
@@ -324,29 +310,32 @@ const arahSQL = `CASE
 	ELSE 'lainnya'
 END`
 
-// GetAnalyticsTrend menghitung trend harian (GROUP BY ritase.tanggal — tanggal jadwal,
-// bukan created_at, biar shift yang nyebrang tengah malam gak kepotong 2 hari).
+// GetAnalyticsTrend menghitung trend harian dengan scoped muatan CTE.
 func (r *Repository) GetAnalyticsTrend(ctx context.Context, from, to string) ([]TrendPoint, error) {
 	from, to = defaultRange(from, to)
 
-	// Seller terlayani per tanggal (CTE terpisah biar JOIN stop gak menduplikasi baris ritase).
 	rows, err := r.db.Query(ctx, `
-		WITH seller_day AS (
+		WITH active_ritase AS (
+			SELECT id_ritase, tanggal, status, total_awb, id_drop_point
+			FROM ritase
+			WHERE tanggal BETWEEN $1 AND $2
+		),
+		seller_day AS (
 			SELECT r.tanggal, count(DISTINCT rs.id_seller) AS n
-			FROM ritase r
+			FROM active_ritase r
 			JOIN ritase_stop rs ON rs.id_ritase = r.id_ritase
 			WHERE rs.jenis_stop = 'seller'
 			  AND LOWER(r.status) IN ('selesai','completed','done')
-			  AND r.tanggal BETWEEN $1 AND $2
 			GROUP BY r.tanggal
-		), muatan AS (
+		), 
+		muatan AS (
 			SELECT ev.id_ritase,
 			       sum(ev.jumlah_koli) AS koli,
 			       sum(ev.jumlah_high_value) AS hv,
 			       sum(ev.jumlah_ecer) AS ecer
 			FROM ritase_event ev
 			WHERE ev.status = 'Bongkar Muat Barang'
-			  AND (ev.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date BETWEEN $1 AND $2
+			  AND ev.id_ritase IN (SELECT id_ritase FROM active_ritase)
 			GROUP BY ev.id_ritase
 		)
 		SELECT r.tanggal::text,
@@ -360,11 +349,10 @@ func (r *Repository) GetAnalyticsTrend(ctx context.Context, from, to string) ([]
 		       COALESCE(sd.n,0),
 		       count(*) FILTER (WHERE `+arahSQL+` = 'outgoing'),
 		       count(*) FILTER (WHERE `+arahSQL+` = 'incoming')
-		FROM ritase r
+		FROM active_ritase r
 		LEFT JOIN drop_point dp ON dp.id_drop_point = r.id_drop_point
 		LEFT JOIN seller_day sd ON sd.tanggal = r.tanggal
 		LEFT JOIN muatan m ON m.id_ritase = r.id_ritase
-		WHERE r.tanggal BETWEEN $1 AND $2
 		GROUP BY r.tanggal, sd.n
 		ORDER BY r.tanggal
 	`, from, to)
@@ -387,45 +375,40 @@ func (r *Repository) GetAnalyticsTrend(ctx context.Context, from, to string) ([]
 }
 
 // GetAnalyticsDrivers menghitung performa per driver dalam periode.
-// Durasi (detik) dihitung per ritase via CTE pairing event, lalu dirata-rata per driver.
-// Hanya ritase yang benar-benar dijalankan (status selesai/berjalan) yang dihitung.
+// Dioptimasi dengan Window Function LEAD() untuk eliminasi 3x self-join yang lambat.
 func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) ([]DriverPerf, error) {
 	from, to = defaultRange(from, to)
 
 	rows, err := r.db.Query(ctx, `
 		WITH active_ritase AS (
-			SELECT id_ritase FROM ritase
+			SELECT id_ritase, id_driver, id_drop_point, tanggal, status, total_awb
+			FROM ritase
 			WHERE tanggal BETWEEN $1 AND $2
 			  AND status IN ('selesai', 'berjalan')
-		), loading AS (
-			SELECT e1.id_ritase, avg(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at))) AS dur
-			FROM ritase_event e1
-			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'Sedang Menuju'
-			WHERE e1.status = 'Tiba' AND e2.created_at > e1.created_at
-			  AND e1.id_ritase IN (SELECT id_ritase FROM active_ritase)
-			GROUP BY e1.id_ritase
-		), perjalanan AS (
-			SELECT e1.id_ritase, avg(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at))) AS dur
-			FROM ritase_event e1
-			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'Tiba'
-			WHERE e1.status = 'Sedang Menuju' AND e2.created_at > e1.created_at
-			  AND e1.id_ritase IN (SELECT id_ritase FROM active_ritase)
-			GROUP BY e1.id_ritase
-		), unloading AS (
-			SELECT e1.id_ritase, avg(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at))) AS dur
-			FROM ritase_event e1
-			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'Selesai'
-			WHERE e1.status = 'Bongkar Muat Barang' AND e2.created_at > e1.created_at
-			  AND e1.id_ritase IN (SELECT id_ritase FROM active_ritase)
-			GROUP BY e1.id_ritase
-		), muatan AS (
+		),
+		stepped_events AS (
+			SELECT id_ritase, status, created_at,
+			       LEAD(status) OVER (PARTITION BY id_ritase ORDER BY created_at) AS next_status,
+			       LEAD(created_at) OVER (PARTITION BY id_ritase ORDER BY created_at) AS next_time
+			FROM ritase_event
+			WHERE id_ritase IN (SELECT id_ritase FROM active_ritase)
+		),
+		durasi_per_ritase AS (
+			SELECT id_ritase,
+			       avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Tiba' AND next_status = 'Sedang Menuju') AS loading_dur,
+			       avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Sedang Menuju' AND next_status = 'Tiba') AS jalan_dur,
+			       avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Bongkar Muat Barang' AND next_status = 'Selesai') AS unloading_dur
+			FROM stepped_events
+			GROUP BY id_ritase
+		),
+		muatan AS (
 			SELECT ev.id_ritase,
 			       sum(ev.jumlah_koli) AS koli,
 			       sum(ev.jumlah_high_value) AS hv,
 			       sum(ev.jumlah_ecer) AS ecer
 			FROM ritase_event ev
 			WHERE ev.status = 'Bongkar Muat Barang'
-			  AND (ev.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date BETWEEN $1 AND $2
+			  AND ev.id_ritase IN (SELECT id_ritase FROM active_ritase)
 			GROUP BY ev.id_ritase
 		)
 		SELECT d.id_driver, d.nama_driver,
@@ -435,16 +418,12 @@ func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) (
 		       COALESCE(sum(m.koli),0), COALESCE(sum(m.hv),0), COALESCE(sum(m.ecer),0),
 		       count(*) FILTER (WHERE `+arahSQL+` = 'outgoing'),
 		       count(*) FILTER (WHERE `+arahSQL+` = 'incoming'),
-		       avg(l.dur), avg(p.dur), avg(u.dur)
-		FROM ritase r
+		       avg(dur.loading_dur), avg(dur.jalan_dur), avg(dur.unloading_dur)
+		FROM active_ritase r
 		JOIN driver d ON d.id_driver = r.id_driver
 		LEFT JOIN drop_point dp ON dp.id_drop_point = r.id_drop_point
-		LEFT JOIN loading l ON l.id_ritase = r.id_ritase
-		LEFT JOIN perjalanan p ON p.id_ritase = r.id_ritase
-		LEFT JOIN unloading u ON u.id_ritase = r.id_ritase
+		LEFT JOIN durasi_per_ritase dur ON dur.id_ritase = r.id_ritase
 		LEFT JOIN muatan m ON m.id_ritase = r.id_ritase
-		WHERE r.tanggal BETWEEN $1 AND $2
-		  AND r.status IN ('selesai', 'berjalan')
 		GROUP BY d.id_driver, d.nama_driver
 		ORDER BY count(DISTINCT r.id_ritase) DESC
 	`, from, to)
@@ -478,27 +457,38 @@ func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) (
 }
 
 // GetAnalyticsSellers menghitung analitik per seller dalam periode.
-// RataBongkar = rata-rata durasi di lokasi (Tiba -> Sedang Menuju) per ritase yang dijalankan.
+// Dioptimasi dengan Window Function LEAD() & scoped active_ritase.
 func (r *Repository) GetAnalyticsSellers(ctx context.Context, from, to string) ([]SellerAnalytics, error) {
 	from, to = defaultRange(from, to)
 
 	rows, err := r.db.Query(ctx, `
-		WITH loc_dur AS (
-			SELECT e1.id_ritase, avg(EXTRACT(EPOCH FROM (e2.created_at - e1.created_at))) AS dur
-			FROM ritase_event e1
-			JOIN ritase_event e2 ON e2.id_ritase = e1.id_ritase AND e2.status = 'Sedang Menuju'
-			JOIN ritase r ON r.id_ritase = e1.id_ritase
-			WHERE e1.status = 'Tiba' AND e2.created_at > e1.created_at
-			  AND r.status IN ('selesai', 'berjalan')
-			GROUP BY e1.id_ritase
-		), muatan AS (
+		WITH active_ritase AS (
+			SELECT id_ritase, tanggal, status, total_awb
+			FROM ritase
+			WHERE tanggal BETWEEN $1 AND $2
+			  AND status IN ('selesai', 'berjalan')
+		),
+		stepped_events AS (
+			SELECT id_ritase, status, created_at,
+			       LEAD(status) OVER (PARTITION BY id_ritase ORDER BY created_at) AS next_status,
+			       LEAD(created_at) OVER (PARTITION BY id_ritase ORDER BY created_at) AS next_time
+			FROM ritase_event
+			WHERE id_ritase IN (SELECT id_ritase FROM active_ritase)
+		),
+		loc_dur AS (
+			SELECT id_ritase,
+			       avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Tiba' AND next_status = 'Sedang Menuju') AS dur
+			FROM stepped_events
+			GROUP BY id_ritase
+		),
+		muatan AS (
 			SELECT ev.id_ritase,
 			       sum(ev.jumlah_koli) AS koli,
 			       sum(ev.jumlah_high_value) AS hv,
 			       sum(ev.jumlah_ecer) AS ecer
 			FROM ritase_event ev
 			WHERE ev.status = 'Bongkar Muat Barang'
-			  AND (ev.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date BETWEEN $1 AND $2
+			  AND ev.id_ritase IN (SELECT id_ritase FROM active_ritase)
 			GROUP BY ev.id_ritase
 		)
 		SELECT s.id_seller, COALESCE(s.kode_seller,''), COALESCE(s.nama_seller,''), COALESCE(s.kota,''),
@@ -512,11 +502,9 @@ func (r *Repository) GetAnalyticsSellers(ctx context.Context, from, to string) (
 		       avg(ld.dur)
 		FROM seller s
 		JOIN ritase_stop rs ON rs.id_seller = s.id_seller AND rs.jenis_stop = 'seller'
-		JOIN ritase r ON r.id_ritase = rs.id_ritase
+		JOIN active_ritase r ON r.id_ritase = rs.id_ritase
 		LEFT JOIN loc_dur ld ON ld.id_ritase = r.id_ritase
 		LEFT JOIN muatan m ON m.id_ritase = r.id_ritase
-		WHERE r.tanggal BETWEEN $1 AND $2
-		  AND r.status IN ('selesai', 'berjalan')
 		GROUP BY s.id_seller, s.kode_seller, s.nama_seller, s.kota, s.jarak_tempuh_km, s.jarak_dc_km
 		ORDER BY count(DISTINCT r.id_ritase) DESC
 	`, from, to)
