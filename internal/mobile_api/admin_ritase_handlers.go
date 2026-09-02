@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"backend/internal/pkg/middleware"
 	"backend/internal/pkg/response"
 
 	"github.com/jackc/pgx/v5"
@@ -488,6 +489,9 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 	}
 	defer tx.Rollback(ctx)
 
+	// Extract user ID for audit
+	userID, _ := c.Get(middleware.CtxUserID).(int64)
+
 	// ── FIX ZONA WAKTU GOLANG ──
 	// Paksa Golang membaca waktu Jakarta untuk variabel string hari ini
 	loc, _ := time.LoadLocation("Asia/Jakarta")
@@ -586,11 +590,11 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 		err := tx.QueryRow(ctx, `
             INSERT INTO ritase (
                 kode_ritase, tanggal, id_driver, id_kendaraan, id_drop_point, ritase_ke, status,
-                jenis_ritase, jam_mulai, jam_selesai
+                jenis_ritase, jam_mulai, jam_selesai, created_by
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, 'direncanakan', $7, $8, $9
+                $1, $2, $3, $4, $5, $6, 'direncanakan', $7, $8, $9, $10
             ) RETURNING id_ritase
-        `, kodeRitase, tanggalRitase, route.IDDriver, route.IDKendaraan, finalDropPointID, route.RitaseKe, jenisPasti, jamMulai, jamSelesai).Scan(&idRitase)
+        `, kodeRitase, tanggalRitase, route.IDDriver, route.IDKendaraan, finalDropPointID, route.RitaseKe, jenisPasti, jamMulai, jamSelesai, userID).Scan(&idRitase)
 
 		if err != nil {
 			return response.Error(c, http.StatusInternalServerError, fmt.Sprintf("Gagal generate ritase D%d: %v", route.IDDriver, err))
@@ -674,7 +678,9 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			r.id_drop_point, COALESCE(dp.nama_drop_point, 'Gateway #' || r.id_drop_point) AS nama_drop_point,
 			r.ritase_ke, r.status, COALESCE(r.jenis_ritase, ''),
 			TO_CHAR(r.jam_mulai, 'HH24:MI'), TO_CHAR(r.jam_selesai, 'HH24:MI'),
-			COALESCE(m.koli, 0), COALESCE(m.ecer, 0), COALESCE(m.hv, 0)
+			COALESCE(m.koli, 0), COALESCE(m.ecer, 0), COALESCE(m.hv, 0),
+			COALESCE(r.created_at::text, ''), COALESCE(r.updated_at::text, ''),
+			r.created_by, r.updated_by
 		FROM ritase r
 		LEFT JOIN driver d ON d.id_driver = r.id_driver
 		LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
@@ -697,8 +703,10 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 		var ritaseKe int
 		var jamMulai, jamSelesai *string
 		var totalKoli, totalEcer, totalHV int
+		var createdAt, updatedAt *string
+		var createdBy, updatedBy *int64
 
-		if err := rows.Scan(&idRitase, &kodeRitase, &tanggal, &idDriver, &namaDriver, &jabatanDriver, &idKendaraan, &nopol, &idDropPoint, &namaDropPoint, &ritaseKe, &status, &jenisRitase, &jamMulai, &jamSelesai, &totalKoli, &totalEcer, &totalHV); err != nil {
+		if err := rows.Scan(&idRitase, &kodeRitase, &tanggal, &idDriver, &namaDriver, &jabatanDriver, &idKendaraan, &nopol, &idDropPoint, &namaDropPoint, &ritaseKe, &status, &jenisRitase, &jamMulai, &jamSelesai, &totalKoli, &totalEcer, &totalHV, &createdAt, &updatedAt, &createdBy, &updatedBy); err != nil {
 			continue
 		}
 
@@ -796,6 +804,10 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			"total_koli":      totalKoli,
 			"total_eceran":    totalEcer,
 			"total_high_value": totalHV,
+			"created_at":      createdAt,
+			"updated_at":      updatedAt,
+			"created_by":      createdBy,
+			"updated_by":      updatedBy,
 			"stops":           stops,
 		})
 	}
@@ -930,6 +942,9 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 	}
 	// else: both nil → COALESCE di SQL tetap pertahankan nilai lama
 
+	// Extract user ID for audit
+	userID, _ := c.Get(middleware.CtxUserID).(int64)
+
 	// Update Header Ritase
 	tag, err := tx.Exec(ctx, `
 		UPDATE ritase
@@ -940,9 +955,11 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 		    status = COALESCE(NULLIF($5, ''), status),
 		    jenis_ritase = COALESCE(NULLIF($6, ''), jenis_ritase),
 		    jam_mulai = COALESCE($7, jam_mulai),
-		    jam_selesai = COALESCE($8, jam_selesai)
+		    jam_selesai = COALESCE($8, jam_selesai),
+		    updated_at = NOW(),
+		    updated_by = $10
 		WHERE id_ritase = $9
-	`, req.IDDriver, req.IDKendaraan, req.IDDropPoint, req.RitaseKe, req.Status, req.JenisRitase, jamMulai, jamSelesai, idRitase)
+	`, req.IDDriver, req.IDKendaraan, req.IDDropPoint, req.RitaseKe, req.Status, req.JenisRitase, jamMulai, jamSelesai, idRitase, userID)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal mengupdate ritase: "+err.Error())
 	}
@@ -1065,6 +1082,9 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 	}
 	defer tx.Rollback(ctx)
 
+	// Extract user ID for audit
+	userID, _ := c.Get(middleware.CtxUserID).(int64)
+
 	todayClean := strings.ReplaceAll(req.Tanggal, "-", "")
 	baseKode := fmt.Sprintf("TR-%s-D%d-R%d", todayClean, req.IDDriver, req.RitaseKe)
 	kodeRitase := baseKode
@@ -1104,11 +1124,11 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 	err = tx.QueryRow(ctx, `
 		INSERT INTO ritase (
 			kode_ritase, tanggal, id_driver, id_kendaraan, id_drop_point, ritase_ke, status,
-			jenis_ritase, jam_mulai, jam_selesai
+			jenis_ritase, jam_mulai, jam_selesai, created_by
 		) VALUES (
-			$1, $2::date, $3, $4, $5, $6, 'direncanakan', $7, $8, $9
+			$1, $2::date, $3, $4, $5, $6, 'direncanakan', $7, $8, $9, $10
 		) RETURNING id_ritase
-	`, kodeRitase, req.Tanggal, req.IDDriver, req.IDKendaraan, finalDropPointID, req.RitaseKe, jenisVal, jamMulai, jamSelesai).Scan(&idRitase)
+	`, kodeRitase, req.Tanggal, req.IDDriver, req.IDKendaraan, finalDropPointID, req.RitaseKe, jenisVal, jamMulai, jamSelesai, userID).Scan(&idRitase)
 
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "Gagal membuat ritase: "+err.Error())

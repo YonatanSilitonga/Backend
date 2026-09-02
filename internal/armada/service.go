@@ -39,8 +39,8 @@ func (s *Service) GetRitase(ctx context.Context, id int64) (*RitaseDetail, error
 	return s.repo.GetRitase(ctx, id)
 }
 
-func (s *Service) CreateRitase(ctx context.Context, req CreateRitaseRequest) (*Ritase, error) {
-	return s.repo.CreateRitase(ctx, req)
+func (s *Service) CreateRitase(ctx context.Context, req CreateRitaseRequest, createdBy int64) (*Ritase, error) {
+	return s.repo.CreateRitase(ctx, req, createdBy)
 }
 
 func (s *Service) UpdateStatus(ctx context.Context, idRitase int64, req UpdateStatusRequest) (*RitaseEvent, error) {
