@@ -355,7 +355,7 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 
 // hitungWindowMenit menghitung rentang menit [startMin, endMin] (0-1439, endMin bisa > 1440
 // kalau window melewati tengah malam) untuk sebuah jadwal ritase, SUDAH TERMASUK toleransi
-// mulai 2 jam lebih awal dari jam_mulai resmi.
+// mulai 1 jam lebih awal dari jam_mulai resmi.
 func hitungWindowMenit(jamMulaiStr, jamSelesaiStr string) (startMin, endMin int, err error) {
 	mulai, err := time.Parse("15:04:05", jamMulaiStr)
 	if err != nil {
@@ -369,7 +369,7 @@ func hitungWindowMenit(jamMulaiStr, jamSelesaiStr string) (startMin, endMin int,
 	mulaiMin := mulai.Hour()*60 + mulai.Minute()
 	selesaiMin := selesai.Hour()*60 + selesai.Minute()
 
-	startMin = mulaiMin - 120 // toleransi 2 jam lebih awal
+	startMin = mulaiMin - 60 // toleransi 1 jam lebih awal
 	if startMin < 0 {
 		startMin += 1440
 	}
@@ -395,13 +395,13 @@ func cocokDenganSekarang(nowMin, startMin, endMin int) bool {
 	return n >= startMin && n <= endMin
 }
 
-// hitungJamBoleh mengembalikan jam (HH:MM) paling awal driver boleh mulai (2 jam sebelum jam_mulai resmi).
+// hitungJamBoleh mengembalikan jam (HH:MM) paling awal driver boleh mulai (1 jam sebelum jam_mulai resmi).
 func hitungJamBoleh(jamMulaiStr string) string {
 	mulai, err := time.Parse("15:04:05", jamMulaiStr)
 	if err != nil {
 		return jamMulaiStr
 	}
-	boleh := mulai.Add(-2 * time.Hour)
+	boleh := mulai.Add(-1 * time.Hour)
 	return boleh.Format("15:04")
 }
 
@@ -506,6 +506,13 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 	for i := range candidates {
 		cand := &candidates[i]
 
+		// Jika ritase sudah dalam status 'berjalan', selalu prioritaskan tanpa cek jam
+		if cand.Status == "berjalan" {
+			picked = cand
+			isEarly = false
+			break
+		}
+
 		if cand.JamMulai == nil || cand.JamSelesai == nil {
 			if picked == nil {
 				picked = cand
@@ -526,7 +533,7 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 				if n < startMin {
 					n += 1440
 				}
-				mulaiMinAdj := startMin + 120
+				mulaiMinAdj := startMin + 60
 				isEarly = n < mulaiMinAdj
 			}
 		} else if picked == nil {
@@ -672,7 +679,7 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 
 	if isEarly && picked.JamMulai != nil {
 		resp["schedule_warning"] = fmt.Sprintf(
-			"Anda memulai Ritase %d lebih awal dari jadwal resmi (jam %s). Diperbolehkan mulai maksimal 2 jam sebelumnya.",
+			"Anda memulai Ritase %d lebih awal dari jadwal resmi (jam %s). Diperbolehkan mulai maksimal 1 jam sebelumnya.",
 			picked.RitaseKe, (*picked.JamMulai)[0:5],
 		)
 	}
