@@ -737,7 +737,18 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 					COALESCE(MAX(ev.jumlah_koli), 0) AS jumlah_koli,
 					COALESCE(MAX(ev.jumlah_ecer), 0) AS jumlah_ecer,
 					COALESCE(MAX(ev.jumlah_high_value), 0) AS jumlah_high_value,
-					COALESCE(MAX(ev.durasi_detik), 0) AS durasi_detik,
+					COALESCE((
+						SELECT ev2.durasi_detik 
+						FROM ritase_event ev2 
+						WHERE ev2.id_ritase = rs.id_ritase 
+						AND ev2.status = 'Bongkar Muat Barang'
+						AND (
+							ev2.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
+							OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev2.nama_lokasi) IN LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
+							OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) IN LOWER(ev2.nama_lokasi)) > 0)
+						)
+						LIMIT 1
+					), 0) AS durasi_detik,
 					(SELECT ev2.foto_manifest_url FROM ritase_event ev2
 					 WHERE ev2.id_ritase = rs.id_ritase
 					   AND ev2.foto_manifest_url IS NOT NULL AND ev2.foto_manifest_url != ''
