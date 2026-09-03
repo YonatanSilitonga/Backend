@@ -47,11 +47,11 @@ type AppVersionResponse struct {
 
 func (h *APIHandler) GetAppVersion(c echo.Context) error {
 	return c.JSON(http.StatusOK, AppVersionResponse{
-		VersionCode:  9,
-		VersionName:  "1.0.8",
+		VersionCode:  10,
+		VersionName:  "1.0.9",
 		DownloadURL:  "https://api.controltowerslb.tech/uploads/apk/tower-control-latest.apk",
 		ForceUpdate:  false,
-		ReleaseNotes: "Perbaikan status awal perjalanan dan pemilihan armada kendaraan.",
+		ReleaseNotes: "Perbaikan sinkronisasi lokasi bongkar muat & tiba, dan penambahan event selesai pada riwayat ritase.",
 	})
 }
 
@@ -92,15 +92,33 @@ func (h *APIHandler) Login(c echo.Context) error {
 		return response.Error(c, http.StatusUnauthorized, "Password salah")
 	}
 
+	// Cari id_driver yang sesuai dengan username driver
+	var idDriver int64
+	var namaDriver string
+	_ = h.DB.QueryRow(ctx, `
+		SELECT id_driver, nama_driver
+		FROM driver
+		WHERE LOWER(nama_driver) LIKE '%' || LOWER($1) || '%'
+		ORDER BY id_driver ASC
+		LIMIT 1
+	`, dbUsername).Scan(&idDriver, &namaDriver)
+
+	if namaDriver == "" {
+		namaDriver = dbUsername
+	}
+
 	// Token dummy/JWT sederhana
 	token := "token_driver_" + dbUsername
 
 	return response.OK(c, map[string]interface{}{
 		"token": token,
 		"user": map[string]interface{}{
-			"id_user":  idUser,
-			"username": dbUsername,
-			"role":     role,
+			"id_user":     idUser,
+			"username":    dbUsername,
+			"role":        role,
+			"id_driver":   idDriver,
+			"nama_driver": namaDriver,
+			"name":        namaDriver,
 		},
 	})
 }
@@ -281,7 +299,10 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 				s := "Selesai"
 				req.Status = &s
 			default:
-				if strings.HasPrefix(*req.Status, "Sedang Menuju") || strings.HasPrefix(*req.Status, "Menuju ") {
+				if strings.HasPrefix(*req.Status, "Bongkar Muat") {
+					s := "Bongkar Muat Barang"
+					req.Status = &s
+				} else if strings.HasPrefix(*req.Status, "Sedang Menuju") || strings.HasPrefix(*req.Status, "Menuju ") {
 					s := "Sedang Menuju"
 					req.Status = &s
 				} else if strings.HasPrefix(*req.Status, "Tiba di ") ||
@@ -325,6 +346,21 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		`, targetRitaseID).Scan(&totalKoli, &totalEcer, &totalHV)
 	}
 
+	var namaLokasiVal interface{}
+	if req.NamaLokasi != nil && *req.NamaLokasi != "" {
+		namaLokasiVal = *req.NamaLokasi
+	} else if targetRitaseID > 0 {
+		var lastEventLoc string
+		_ = h.DB.QueryRow(ctx, `
+			SELECT nama_lokasi FROM ritase_event
+			WHERE id_ritase = $1 AND nama_lokasi IS NOT NULL AND nama_lokasi != ''
+			ORDER BY id_event DESC LIMIT 1
+		`, targetRitaseID).Scan(&lastEventLoc)
+		if lastEventLoc != "" {
+			namaLokasiVal = lastEventLoc
+		}
+	}
+
 	_, err := h.DB.Exec(ctx, `
 		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, jumlah_ecer, jumlah_high_value, nama_lokasi, last_update)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
@@ -339,9 +375,9 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		    jumlah_koli = $9,
 		    jumlah_ecer = $10,
 		    jumlah_high_value = $11,
-		    nama_lokasi = COALESCE(NULLIF(EXCLUDED.nama_lokasi, ''), armada_tracking.nama_lokasi),
+		    nama_lokasi = COALESCE($12, armada_tracking.nama_lokasi),
 		    last_update = now()
-	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, totalKoli, totalEcer, totalHV, req.NamaLokasi)
+	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, totalKoli, totalEcer, totalHV, namaLokasiVal)
 
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking: "+err.Error())
@@ -793,6 +829,35 @@ func (h *APIHandler) FinishRitase(c echo.Context) error {
 		)
 	`, req.IdRitase)
 
+	// Pastikan event 'Selesai' tercatat di ritase_event jika belum ada
+	var countSelesai int
+	_ = h.DB.QueryRow(ctx, `SELECT COUNT(*) FROM ritase_event WHERE id_ritase = $1 AND status = 'Selesai'`, req.IdRitase).Scan(&countSelesai)
+	if countSelesai == 0 {
+		var lastLoc string
+		var lastLat, lastLng float64
+		_ = h.DB.QueryRow(ctx, `
+			SELECT COALESCE(nama_lokasi, ''), COALESCE(latitude, 0), COALESCE(longitude, 0)
+			FROM ritase_event WHERE id_ritase = $1 ORDER BY id_event DESC LIMIT 1
+		`, req.IdRitase).Scan(&lastLoc, &lastLat, &lastLng)
+
+		if lastLoc == "" {
+			_ = h.DB.QueryRow(ctx, `
+				SELECT COALESCE(dp.nama_drop_point, g.nama_gudang, s.nama_seller, 'Selesai')
+				FROM ritase_stop rs
+				LEFT JOIN drop_point dp ON dp.id_drop_point = rs.id_drop_point
+				LEFT JOIN gudang g ON g.id_gudang = rs.id_gudang
+				LEFT JOIN seller s ON s.id_seller = rs.id_seller
+				WHERE rs.id_ritase = $1
+				ORDER BY rs.urutan DESC LIMIT 1
+			`, req.IdRitase).Scan(&lastLoc)
+		}
+
+		_, _ = h.DB.Exec(ctx, `
+			INSERT INTO ritase_event (id_ritase, status, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer, jumlah_high_value)
+			VALUES ($1, 'Selesai', $2, $3, $4, 0, 0, 0, 0)
+		`, req.IdRitase, lastLat, lastLng, lastLoc)
+	}
+
 	h.bus.Publish("force_refresh", "mobile_finish_ritase")
 	return response.OK(c, "success")
 }
@@ -1037,10 +1102,10 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 	}
 
 	// Terjemahkan status key dari mobile ke teks yang disimpan di DB
-	switch req.Status {
-	case "mulai_loading":
+	switch strings.ToLower(req.Status) {
+	case "mulai_loading", "bongkar muat barang":
 		req.Status = "Bongkar Muat Barang"
-	case "menuju_seller":
+	case "menuju_seller", "sedang menuju":
 		req.Status = "Sedang Menuju"
 	case "tiba":
 		req.Status = "Tiba"
@@ -1142,17 +1207,22 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 		`, totalKoli, idRitase)
 	}
 
+	// Cari id_kendaraan dan id_driver dari ritase ini
+	var idKendaraan, idDriver int64
+	_ = h.DB.QueryRow(ctx, `SELECT id_kendaraan, id_driver FROM ritase WHERE id_ritase = $1`, idRitase).Scan(&idKendaraan, &idDriver)
+
 	// Update armada_tracking status & nama_lokasi & total muatan akumulasi
 	_, _ = h.DB.Exec(ctx, `
 		UPDATE armada_tracking
-		SET status = $1,
-		    nama_lokasi = $2,
-		    jumlah_koli = $3,
-		    jumlah_ecer = $4,
-		    jumlah_high_value = $5,
+		SET id_ritase = $1,
+		    status = $2,
+		    nama_lokasi = $3,
+		    jumlah_koli = $4,
+		    jumlah_ecer = $5,
+		    jumlah_high_value = $6,
 		    last_update = now()
-		WHERE id_ritase = $6
-	`, req.Status, namaLokasi, totalKoli, totalEcer, totalHV, idRitase)
+		WHERE id_ritase = $1 OR (id_kendaraan = $7 AND $7 > 0) OR (id_driver = $8 AND $8 > 0)
+	`, idRitase, req.Status, namaLokasi, totalKoli, totalEcer, totalHV, idKendaraan, idDriver)
 
 	return response.Created(c, map[string]interface{}{
 		"id_ritase":   idRitase,
