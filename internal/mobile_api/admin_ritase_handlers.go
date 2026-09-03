@@ -830,17 +830,26 @@ func (h *APIHandler) AdminDeleteRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
-	// ── Cek status: hanya direncanakan yang boleh dihapus ──
+	// ── Cek status ritase ──
 	var delStatus string
 	err = h.DB.QueryRow(ctx, "SELECT status FROM ritase WHERE id_ritase = $1", idRitase).Scan(&delStatus)
 	if err != nil {
 		return response.Error(c, http.StatusNotFound, "Ritase tidak ditemukan")
 	}
-	if delStatus == "berjalan" {
-		return response.Error(c, http.StatusBadRequest, "Ritase sedang berjalan. Tidak bisa dihapus.")
-	}
-	if delStatus == "selesai" {
-		return response.Error(c, http.StatusBadRequest, "Ritase sudah selesai. Tidak bisa dihapus.")
+
+	// Cek apakah user adalah whisnu (hak eksklusif khusus akun whisnu)
+	userID, _ := c.Get(middleware.CtxUserID).(int64)
+	var currentUsername string
+	_ = h.DB.QueryRow(ctx, "SELECT username FROM users WHERE id_user = $1", userID).Scan(&currentUsername)
+	isWhisnu := strings.ToLower(currentUsername) == "whisnu"
+
+	if !isWhisnu {
+		if delStatus == "berjalan" {
+			return response.Error(c, http.StatusBadRequest, "Ritase sedang berjalan. Tidak bisa dihapus.")
+		}
+		if delStatus == "selesai" {
+			return response.Error(c, http.StatusBadRequest, "Ritase sudah selesai. Tidak bisa dihapus.")
+		}
 	}
 
 	_, _ = h.DB.Exec(ctx, "UPDATE armada_tracking SET id_ritase = NULL WHERE id_ritase = $1", idRitase)
@@ -886,22 +895,35 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
 	defer cancel()
 
-	// ── Cek status ritase: berjalan/selesai ada batasan edit ──
+	// ── Cek status ritase ──
 	var currentStatus string
 	err = h.DB.QueryRow(ctx, "SELECT status FROM ritase WHERE id_ritase = $1", idRitase).Scan(&currentStatus)
 	if err != nil {
 		return response.Error(c, http.StatusNotFound, "Ritase tidak ditemukan")
 	}
 
-	if currentStatus == "selesai" {
-		return response.Error(c, http.StatusBadRequest, "Ritase sudah selesai dan tidak bisa diubah")
+	// Cek apakah user adalah whisnu (hak eksklusif khusus akun whisnu)
+	userID, _ := c.Get(middleware.CtxUserID).(int64)
+	var updateUsername string
+	_ = h.DB.QueryRow(ctx, "SELECT username FROM users WHERE id_user = $1", userID).Scan(&updateUsername)
+	isWhisnuUpdate := strings.ToLower(updateUsername) == "whisnu"
+
+	if !isWhisnuUpdate {
+		if currentStatus == "selesai" {
+			return response.Error(c, http.StatusBadRequest, "Ritase sudah selesai dan tidak bisa diubah")
+		}
+		if currentStatus == "berjalan" {
+			// Saat berjalan: hanya boleh update stops, driver/kendaraan/ritase_ke/status tidak boleh diubah
+			if req.IDDriver != 0 || req.IDKendaraan != 0 || req.RitaseKe != 0 || req.Status != "" || req.JenisRitase != "" {
+				return response.Error(c, http.StatusBadRequest, "Ritase sedang berjalan. Hanya stops yang bisa diubah.")
+			}
+		}
 	}
 
-	if currentStatus == "berjalan" {
-		// Saat berjalan: hanya boleh update stops, driver/kendaraan/ritase_ke/status tidak boleh diubah
-		if req.IDDriver != 0 || req.IDKendaraan != 0 || req.RitaseKe != 0 || req.Status != "" || req.JenisRitase != "" {
-			return response.Error(c, http.StatusBadRequest, "Ritase sedang berjalan. Hanya stops yang bisa diubah.")
-		}
+	// Jika status diubah kembali ke 'direncanakan', bersihkan riwayat event agar fresh
+	if req.Status == "direncanakan" && currentStatus != "direncanakan" {
+		_, _ = h.DB.Exec(ctx, "DELETE FROM ritase_event WHERE id_ritase = $1", idRitase)
+		_, _ = h.DB.Exec(ctx, "UPDATE armada_tracking SET id_ritase = NULL WHERE id_ritase = $1", idRitase)
 	}
 
 	// ── Validasi status driver harus aktif (jika driver diganti) ──
@@ -947,7 +969,7 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 	// else: both nil → COALESCE di SQL tetap pertahankan nilai lama
 
 	// Extract user ID for audit
-	userID, _ := c.Get(middleware.CtxUserID).(int64)
+	userID, _ = c.Get(middleware.CtxUserID).(int64)
 
 	// Update Header Ritase
 	tag, err := tx.Exec(ctx, `
