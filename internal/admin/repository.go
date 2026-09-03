@@ -41,19 +41,19 @@ func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 func (r *Repository) CreateDriver(ctx context.Context, req DriverRequest, createdBy int64) (int64, error) {
 	var id int64
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO driver (nama_driver, no_hp, no_sim, jenis_sim, status_driver, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id_driver`,
-		req.NamaDriver, req.NoHP, req.NoSIM, req.JenisSIM, req.StatusDriver, createdBy,
+		INSERT INTO driver (nama_driver, no_hp, no_sim, jenis_sim, jabatan, status_driver, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id_driver`,
+		req.NamaDriver, req.NoHP, req.NoSIM, req.JenisSIM, req.Jabatan, req.StatusDriver, createdBy,
 	).Scan(&id)
 	return id, err
 }
 
 func (r *Repository) UpdateDriver(ctx context.Context, id int64, req DriverRequest, updatedBy int64) error {
 	_, err := r.db.Exec(ctx, `
-		UPDATE driver SET nama_driver=$1, no_hp=$2, no_sim=$3, jenis_sim=$4, status_driver=$5,
-		                  updated_at=NOW(), updated_by=$6
-		WHERE id_driver=$7`,
-		req.NamaDriver, req.NoHP, req.NoSIM, req.JenisSIM, req.StatusDriver, updatedBy, id,
+		UPDATE driver SET nama_driver=$1, no_hp=$2, no_sim=$3, jenis_sim=$4, jabatan=$5, status_driver=$6,
+		                  updated_at=NOW(), updated_by=$7
+		WHERE id_driver=$8`,
+		req.NamaDriver, req.NoHP, req.NoSIM, req.JenisSIM, req.Jabatan, req.StatusDriver, updatedBy, id,
 	)
 	return err
 }
@@ -244,11 +244,32 @@ func (r *Repository) CreateUser(ctx context.Context, req UserRequest, passwordHa
 	if status == "" {
 		status = "aktif"
 	}
+
+	// Buat karyawan record dulu jika ada nama
+	var karyawanID *int64
+	if req.Name != "" {
+		var kid int64
+		err := r.db.QueryRow(ctx, `
+			INSERT INTO karyawan (nik, nama, jabatan, status)
+			VALUES ($1, $2, $3, 'aktif') RETURNING id_karyawan`,
+			" AUTO-"+req.Username, req.Name, req.Role,
+		).Scan(&kid)
+		if err == nil {
+			karyawanID = &kid
+		}
+	}
+
+	// Gunakan karyawan_id dari request jika ada, atau dari yang baru dibuat
+	finalKaryawanID := req.KaryawanID
+	if finalKaryawanID == nil {
+		finalKaryawanID = karyawanID
+	}
+
 	var id int64
 	err := r.db.QueryRow(ctx, `
 		INSERT INTO users (username, password, role, karyawan_id, status, created_by)
 		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id_user`,
-		req.Username, passwordHash, req.Role, req.KaryawanID, status, createdBy,
+		req.Username, passwordHash, req.Role, finalKaryawanID, status, createdBy,
 	).Scan(&id)
 	return id, err
 }

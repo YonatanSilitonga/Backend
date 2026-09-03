@@ -19,6 +19,7 @@ type DriverRequest struct {
 	NoHP         *string `json:"no_hp,omitempty"`
 	NoSIM        *string `json:"no_sim,omitempty"`
 	JenisSIM     *string `json:"jenis_sim,omitempty"`
+	Jabatan      *string `json:"jabatan,omitempty"`
 	StatusDriver string  `json:"status_driver"`
 }
 
