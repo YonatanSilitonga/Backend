@@ -678,6 +678,7 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			r.id_drop_point, COALESCE(dp.nama_drop_point, 'Gateway #' || r.id_drop_point) AS nama_drop_point,
 			r.ritase_ke, r.status, COALESCE(r.jenis_ritase, ''),
 			TO_CHAR(r.jam_mulai, 'HH24:MI'), TO_CHAR(r.jam_selesai, 'HH24:MI'),
+			COALESCE(r.jam_berangkat::text, ''), COALESCE(r.jam_tiba::text, ''),
 			COALESCE(m.koli, 0), COALESCE(m.ecer, 0), COALESCE(m.hv, 0),
 			COALESCE(r.created_at::text, ''), COALESCE(r.updated_at::text, ''),
 			r.created_by, r.updated_by
@@ -702,11 +703,12 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 		var kodeRitase, tanggal, namaDriver, jabatanDriver, nopol, namaDropPoint, status, jenisRitase string
 		var ritaseKe int
 		var jamMulai, jamSelesai *string
+		var jamBerangkat, jamTiba *string
 		var totalKoli, totalEcer, totalHV int
 		var createdAt, updatedAt *string
 		var createdBy, updatedBy *int64
 
-		if err := rows.Scan(&idRitase, &kodeRitase, &tanggal, &idDriver, &namaDriver, &jabatanDriver, &idKendaraan, &nopol, &idDropPoint, &namaDropPoint, &ritaseKe, &status, &jenisRitase, &jamMulai, &jamSelesai, &totalKoli, &totalEcer, &totalHV, &createdAt, &updatedAt, &createdBy, &updatedBy); err != nil {
+		if err := rows.Scan(&idRitase, &kodeRitase, &tanggal, &idDriver, &namaDriver, &jabatanDriver, &idKendaraan, &nopol, &idDropPoint, &namaDropPoint, &ritaseKe, &status, &jenisRitase, &jamMulai, &jamSelesai, &jamBerangkat, &jamTiba, &totalKoli, &totalEcer, &totalHV, &createdAt, &updatedAt, &createdBy, &updatedBy); err != nil {
 			continue
 		}
 
@@ -801,6 +803,8 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			"jenis_ritase":    jenisRitase,
 			"jam_mulai":       jamMulai,
 			"jam_selesai":     jamSelesai,
+			"jam_berangkat":   jamBerangkat,
+			"jam_tiba":        jamTiba,
 			"total_koli":      totalKoli,
 			"total_eceran":    totalEcer,
 			"total_high_value": totalHV,

@@ -1107,6 +1107,20 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 		_, _ = h.DB.Exec(ctx, `UPDATE ritase SET status = 'berjalan', updated_at = NOW() WHERE id_ritase = $1 AND status != 'selesai'`, idRitase)
 	}
 
+	// Isi jam_berangkat otomatis saat status pertama kali berubah dari direncanakan
+	_, _ = h.DB.Exec(ctx, `
+		UPDATE ritase SET jam_berangkat = NOW()
+		WHERE id_ritase = $1 AND jam_berangkat IS NULL AND status != 'direncanakan'
+	`, idRitase)
+
+	// Isi jam_tiba otomatis saat driver tiba atau selesai
+	if req.Status == "Tiba" || req.Status == "Selesai" {
+		_, _ = h.DB.Exec(ctx, `
+			UPDATE ritase SET jam_tiba = NOW()
+			WHERE id_ritase = $1 AND jam_tiba IS NULL
+		`, idRitase)
+	}
+
 	// 2. Hitung total akumulasi muatan yang sedang dibawa di ritase ini (SUM dari semua event Bongkar Muat Barang)
 	var totalKoli, totalEcer, totalHV int
 	_ = h.DB.QueryRow(ctx, `

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -310,6 +311,21 @@ func (r *Repository) AddEvent(ctx context.Context, idRitase int64, req UpdateSta
 
 	if _, err := tx.Exec(ctx, "UPDATE ritase SET status = $1, updated_at = NOW() WHERE id_ritase = $2", req.Status, idRitase); err != nil {
 		return nil, err
+	}
+
+	// Isi jam_berangkat otomatis saat status pertama kali berubah dari direncanakan
+	_, _ = tx.Exec(ctx, `
+		UPDATE ritase SET jam_berangkat = NOW()
+		WHERE id_ritase = $1 AND jam_berangkat IS NULL AND status != 'direncanakan'
+	`, idRitase)
+
+	// Isi jam_tiba otomatis saat driver tiba atau selesai
+	statusLower := strings.ToLower(req.Status)
+	if strings.Contains(statusLower, "tiba") || strings.Contains(statusLower, "selesai") || strings.Contains(statusLower, "sampai") {
+		_, _ = tx.Exec(ctx, `
+			UPDATE ritase SET jam_tiba = NOW()
+			WHERE id_ritase = $1 AND jam_tiba IS NULL
+		`, idRitase)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
