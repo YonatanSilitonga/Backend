@@ -105,7 +105,7 @@ func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 	       COALESCE(r.total_awb, 0), COALESCE(m.koli, 0),
 	       COALESCE(m.hv, 0), COALESCE(m.ecer, 0),
 	       COALESCE(r.paket_tertinggal, 0), COALESCE(r.alasan_tertinggal, ''),
-	       COALESCE(TO_CHAR(r.jam_berangkat, 'HH24:MI'), ''), COALESCE(TO_CHAR(r.jam_tiba, 'HH24:MI'), ''),
+	       COALESCE(TO_CHAR(r.jam_berangkat + interval '7 hours', 'HH24:MI'), ''), COALESCE(TO_CHAR(r.jam_tiba + interval '7 hours', 'HH24:MI'), ''),
 	       TO_CHAR(r.jam_mulai, 'HH24:MI'), TO_CHAR(r.jam_selesai, 'HH24:MI'),
 		COALESCE(r.status, 'direncanakan'),
 		COALESCE(r.created_at::text, ''),
