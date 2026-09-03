@@ -681,12 +681,15 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			COALESCE(r.jam_berangkat::text, ''), COALESCE(r.jam_tiba::text, ''),
 			COALESCE(m.koli, 0), COALESCE(m.ecer, 0), COALESCE(m.hv, 0),
 			COALESCE(r.created_at::text, ''), COALESCE(r.updated_at::text, ''),
-			r.created_by, r.updated_by
+			COALESCE(u1.username, '') AS created_by_name,
+			COALESCE(u2.username, '') AS updated_by_name
 		FROM ritase r
 		LEFT JOIN driver d ON d.id_driver = r.id_driver
 		LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
 		LEFT JOIN drop_point dp ON dp.id_drop_point = r.id_drop_point
 		LEFT JOIN muatan m ON m.id_ritase = r.id_ritase
+		LEFT JOIN users u1 ON u1.id_user = r.created_by
+		LEFT JOIN users u2 ON u2.id_user = r.updated_by
 		WHERE r.tanggal = $1::date
 		ORDER BY r.id_driver ASC, r.ritase_ke ASC
 	`, tanggalParam)
@@ -706,9 +709,9 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 		var jamBerangkat, jamTiba *string
 		var totalKoli, totalEcer, totalHV int
 		var createdAt, updatedAt *string
-		var createdBy, updatedBy *int64
+		var createdByName, updatedByName string
 
-		if err := rows.Scan(&idRitase, &kodeRitase, &tanggal, &idDriver, &namaDriver, &jabatanDriver, &idKendaraan, &nopol, &idDropPoint, &namaDropPoint, &ritaseKe, &status, &jenisRitase, &jamMulai, &jamSelesai, &jamBerangkat, &jamTiba, &totalKoli, &totalEcer, &totalHV, &createdAt, &updatedAt, &createdBy, &updatedBy); err != nil {
+		if err := rows.Scan(&idRitase, &kodeRitase, &tanggal, &idDriver, &namaDriver, &jabatanDriver, &idKendaraan, &nopol, &idDropPoint, &namaDropPoint, &ritaseKe, &status, &jenisRitase, &jamMulai, &jamSelesai, &jamBerangkat, &jamTiba, &totalKoli, &totalEcer, &totalHV, &createdAt, &updatedAt, &createdByName, &updatedByName); err != nil {
 			continue
 		}
 
@@ -810,8 +813,8 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			"total_high_value": totalHV,
 			"created_at":      createdAt,
 			"updated_at":      updatedAt,
-			"created_by":      createdBy,
-			"updated_by":      updatedBy,
+			"created_by_name": createdByName,
+			"updated_by_name": updatedByName,
 			"stops":           stops,
 		})
 	}
