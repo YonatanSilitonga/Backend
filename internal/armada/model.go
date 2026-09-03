@@ -53,8 +53,8 @@ type Ritase struct {
 	Status           string    `json:"status"`
 	CreatedAt        *string   `json:"created_at,omitempty"`
 	UpdatedAt        *string   `json:"updated_at,omitempty"`
-	CreatedBy        *int64    `json:"created_by,omitempty"`
-	UpdatedBy        *int64    `json:"updated_by,omitempty"`
+	CreatedByName    string    `json:"created_by_name,omitempty"`
+	UpdatedByName    string    `json:"updated_by_name,omitempty"`
 }
 
 // RitaseEvent adalah satu baris timeline status perjalanan (10 status tombol driver).

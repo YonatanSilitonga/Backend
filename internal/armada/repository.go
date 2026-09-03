@@ -105,17 +105,20 @@ func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 	       COALESCE(r.total_awb, 0), COALESCE(m.koli, 0),
 	       COALESCE(m.hv, 0), COALESCE(m.ecer, 0),
 	       COALESCE(r.paket_tertinggal, 0), COALESCE(r.alasan_tertinggal, ''),
-	       COALESCE(r.jam_berangkat::text, ''), COALESCE(r.jam_tiba::text, ''),
+	       COALESCE(TO_CHAR(r.jam_berangkat, 'HH24:MI'), ''), COALESCE(TO_CHAR(r.jam_tiba, 'HH24:MI'), ''),
 	       TO_CHAR(r.jam_mulai, 'HH24:MI'), TO_CHAR(r.jam_selesai, 'HH24:MI'),
 		COALESCE(r.status, 'direncanakan'),
 		COALESCE(r.created_at::text, ''),
 		COALESCE(r.updated_at::text, ''),
-		r.created_by, r.updated_by
+		COALESCE(u1.username, '') AS created_by_name,
+		COALESCE(u2.username, '') AS updated_by_name
 	FROM ritase r
 	LEFT JOIN driver d ON d.id_driver = r.id_driver
 	LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
 	LEFT JOIN drop_point dp ON dp.id_drop_point = r.id_drop_point
 	LEFT JOIN muatan m ON m.id_ritase = r.id_ritase
+	LEFT JOIN users u1 ON u1.id_user = r.created_by
+	LEFT JOIN users u2 ON u2.id_user = r.updated_by
 `
 
 func scanRitase(row pgx.Row) (*Ritase, error) {
@@ -130,7 +133,7 @@ func scanRitase(row pgx.Row) (*Ritase, error) {
 		&r.PaketTertinggal, &r.AlasanTertinggal,
 		&r.JamBerangkat, &r.JamTiba,
 		&r.JamMulai, &r.JamSelesai,
-		&r.Status, &r.CreatedAt, &r.UpdatedAt, &r.CreatedBy, &r.UpdatedBy)
+		&r.Status, &r.CreatedAt, &r.UpdatedAt, &r.CreatedByName, &r.UpdatedByName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

@@ -678,7 +678,7 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			r.id_drop_point, COALESCE(dp.nama_drop_point, 'Gateway #' || r.id_drop_point) AS nama_drop_point,
 			r.ritase_ke, r.status, COALESCE(r.jenis_ritase, ''),
 			TO_CHAR(r.jam_mulai, 'HH24:MI'), TO_CHAR(r.jam_selesai, 'HH24:MI'),
-			COALESCE(r.jam_berangkat::text, ''), COALESCE(r.jam_tiba::text, ''),
+			COALESCE(TO_CHAR(r.jam_berangkat, 'HH24:MI'), ''), COALESCE(TO_CHAR(r.jam_tiba, 'HH24:MI'), ''),
 			COALESCE(m.koli, 0), COALESCE(m.ecer, 0), COALESCE(m.hv, 0),
 			COALESCE(r.created_at::text, ''), COALESCE(r.updated_at::text, ''),
 			COALESCE(u1.username, '') AS created_by_name,
