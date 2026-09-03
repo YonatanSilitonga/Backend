@@ -216,12 +216,12 @@ func (r *Repository) DeleteGudang(ctx context.Context, id int64) error {
 
 func (r *Repository) ListUser(ctx context.Context) ([]User, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT u.id_user, u.username, COALESCE(k.nama, '') AS name, u.role, u.karyawan_id,
+		SELECT u.id_user, u.username, COALESCE(d.nama_driver, '') AS name, u.role, u.id_driver,
 		       CASE WHEN u.last_login IS NOT NULL AND u.last_login > now() - interval '30 minutes' THEN true ELSE false END AS is_active,
 		       COALESCE(u.status, 'aktif') AS status,
 		       u.created_at, u.created_by, u.updated_at, u.updated_by
 		FROM users u
-		LEFT JOIN karyawan k ON k.id_karyawan = u.karyawan_id
+		LEFT JOIN driver d ON d.id_driver = u.id_driver
 		ORDER BY u.id_user`)
 	if err != nil {
 		return nil, err
@@ -230,7 +230,7 @@ func (r *Repository) ListUser(ctx context.Context) ([]User, error) {
 	var items []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.KaryawanID, &u.IsActive, &u.Status,
+		if err := rows.Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.IDDriver, &u.IsActive, &u.Status,
 			&u.CreatedAt, &u.CreatedBy, &u.UpdatedAt, &u.UpdatedBy); err != nil {
 			return nil, err
 		}
@@ -244,32 +244,11 @@ func (r *Repository) CreateUser(ctx context.Context, req UserRequest, passwordHa
 	if status == "" {
 		status = "aktif"
 	}
-
-	// Buat karyawan record dulu jika ada nama
-	var karyawanID *int64
-	if req.Name != "" {
-		var kid int64
-		err := r.db.QueryRow(ctx, `
-			INSERT INTO karyawan (nik, nama, jabatan, status)
-			VALUES ($1, $2, $3, 'aktif') RETURNING id_karyawan`,
-			" AUTO-"+req.Username, req.Name, req.Role,
-		).Scan(&kid)
-		if err == nil {
-			karyawanID = &kid
-		}
-	}
-
-	// Gunakan karyawan_id dari request jika ada, atau dari yang baru dibuat
-	finalKaryawanID := req.KaryawanID
-	if finalKaryawanID == nil {
-		finalKaryawanID = karyawanID
-	}
-
 	var id int64
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO users (username, password, role, karyawan_id, status, created_by)
+		INSERT INTO users (username, password, role, id_driver, status, created_by)
 		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id_user`,
-		req.Username, passwordHash, req.Role, finalKaryawanID, status, createdBy,
+		req.Username, passwordHash, req.Role, req.IDDriver, status, createdBy,
 	).Scan(&id)
 	return id, err
 }

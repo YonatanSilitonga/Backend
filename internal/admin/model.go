@@ -107,7 +107,7 @@ type User struct {
 	Username   string  `json:"username"`
 	Name       string  `json:"name"`
 	Role       string  `json:"role"`
-	KaryawanID *int64  `json:"karyawan_id,omitempty"`
+	IDDriver   *int64  `json:"id_driver,omitempty"`
 	IsActive   bool    `json:"is_active"`
 	Status     string  `json:"status"`
 	CreatedAt  *string `json:"created_at,omitempty"`
@@ -117,12 +117,12 @@ type User struct {
 }
 
 type UserRequest struct {
-	Username   string `json:"username"`
-	Password   string `json:"password,omitempty"`
-	Name       string `json:"name"`
-	Role       string `json:"role"`
-	KaryawanID *int64 `json:"karyawan_id,omitempty"`
-	Status     string `json:"status,omitempty"`
+	Username string `json:"username"`
+	Password string `json:"password,omitempty"`
+	Name     string `json:"name"`
+	Role     string `json:"role"`
+	IDDriver *int64 `json:"id_driver,omitempty"`
+	Status   string `json:"status,omitempty"`
 }
 
 type UserStatusRequest struct {
