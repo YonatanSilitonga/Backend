@@ -39,7 +39,7 @@ type Ritase struct {
 	IDDropPoint      int64     `json:"id_drop_point"`
 	NamaDropPoint    string    `json:"nama_drop_point,omitempty"`
 	RitaseKe         *int      `json:"ritase_ke,omitempty"`
-	JabatanDriver    string    `json:"jabatan_driver,omitempty"`
+	JenisRitase      string    `json:"jenis_ritase,omitempty"`
 	TotalAWB         *int      `json:"total_awb,omitempty"`
 	TotalKoli        *int      `json:"total_koli,omitempty"`
 	TotalHighValue   *int      `json:"total_high_value,omitempty"`
