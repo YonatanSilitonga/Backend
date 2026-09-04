@@ -19,9 +19,13 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 
 func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_driver, nama_driver, no_hp, no_sim, jenis_sim, status_driver,
-		       created_at, created_by, updated_at, updated_by
-		FROM driver ORDER BY id_driver`)
+		SELECT d.id_driver, d.nama_driver, d.no_hp, d.no_sim, d.jenis_sim, d.status_driver,
+		       d.created_at, d.created_by, COALESCE(u1.username, ''),
+		       d.updated_at, d.updated_by, COALESCE(u2.username, '')
+		FROM driver d
+		LEFT JOIN users u1 ON u1.id_user = d.created_by
+		LEFT JOIN users u2 ON u2.id_user = d.updated_by
+		ORDER BY d.id_driver`)
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +34,7 @@ func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 	for rows.Next() {
 		var d Driver
 		if err := rows.Scan(&d.ID, &d.NamaDriver, &d.NoHP, &d.NoSIM, &d.JenisSIM, &d.StatusDriver,
-			&d.CreatedAt, &d.CreatedBy, &d.UpdatedAt, &d.UpdatedBy); err != nil {
+			&d.CreatedAt, &d.CreatedBy, &d.CreatedByName, &d.UpdatedAt, &d.UpdatedBy, &d.UpdatedByName); err != nil {
 			return nil, err
 		}
 		items = append(items, d)
@@ -67,9 +71,13 @@ func (r *Repository) DeleteDriver(ctx context.Context, id int64) error {
 
 func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_kendaraan, plat_nomor, jenis_kendaraan, kapasitas_kg, status_kendaraan,
-		       created_at, created_by, updated_at, updated_by
-		FROM kendaraan ORDER BY id_kendaraan`)
+		SELECT k.id_kendaraan, k.plat_nomor, k.jenis_kendaraan, k.kapasitas_kg, k.status_kendaraan,
+		       k.created_at, k.created_by, COALESCE(u1.username, ''),
+		       k.updated_at, k.updated_by, COALESCE(u2.username, '')
+		FROM kendaraan k
+		LEFT JOIN users u1 ON u1.id_user = k.created_by
+		LEFT JOIN users u2 ON u2.id_user = k.updated_by
+		ORDER BY k.id_kendaraan`)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +86,7 @@ func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	for rows.Next() {
 		var k Kendaraan
 		if err := rows.Scan(&k.ID, &k.PlatNomor, &k.JenisKendaraan, &k.KapasitasKg, &k.StatusKendaraan,
-			&k.CreatedAt, &k.CreatedBy, &k.UpdatedAt, &k.UpdatedBy); err != nil {
+			&k.CreatedAt, &k.CreatedBy, &k.CreatedByName, &k.UpdatedAt, &k.UpdatedBy, &k.UpdatedByName); err != nil {
 			return nil, err
 		}
 		items = append(items, k)
@@ -115,10 +123,14 @@ func (r *Repository) DeleteKendaraan(ctx context.Context, id int64) error {
 
 func (r *Repository) ListSeller(ctx context.Context) ([]Seller, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_seller, kode_seller, nama_seller, alamat, kota, area, pic, no_hp,
-		       forecast_harian, status, latitude, longitude,
-		       created_at, created_by, updated_at, updated_by
-		FROM seller ORDER BY id_seller`)
+		SELECT s.id_seller, s.kode_seller, s.nama_seller, s.alamat, s.kota, s.area, s.pic, s.no_hp,
+		       s.forecast_harian, s.status, s.latitude, s.longitude,
+		       s.created_at, s.created_by, COALESCE(u1.username, ''),
+		       s.updated_at, s.updated_by, COALESCE(u2.username, '')
+		FROM seller s
+		LEFT JOIN users u1 ON u1.id_user = s.created_by
+		LEFT JOIN users u2 ON u2.id_user = s.updated_by
+		ORDER BY s.id_seller`)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +140,7 @@ func (r *Repository) ListSeller(ctx context.Context) ([]Seller, error) {
 		var s Seller
 		if err := rows.Scan(&s.ID, &s.KodeSeller, &s.NamaSeller, &s.Alamat, &s.Kota,
 			&s.Area, &s.Pic, &s.NoHP, &s.ForecastHarian, &s.Status, &s.Latitude, &s.Longitude,
-			&s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &s.UpdatedBy); err != nil {
+			&s.CreatedAt, &s.CreatedBy, &s.CreatedByName, &s.UpdatedAt, &s.UpdatedBy, &s.UpdatedByName); err != nil {
 			return nil, err
 		}
 		items = append(items, s)
@@ -168,9 +180,13 @@ func (r *Repository) DeleteSeller(ctx context.Context, id int64) error {
 
 func (r *Repository) ListGudang(ctx context.Context) ([]Gudang, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_gudang, nama_gudang, alamat, kota, latitude, longitude, status,
-		       created_at, created_by, updated_at, updated_by
-		FROM gudang ORDER BY id_gudang`)
+		SELECT g.id_gudang, g.nama_gudang, g.alamat, g.kota, g.latitude, g.longitude, g.status,
+		       g.created_at, g.created_by, COALESCE(u1.username, ''),
+		       g.updated_at, g.updated_by, COALESCE(u2.username, '')
+		FROM gudang g
+		LEFT JOIN users u1 ON u1.id_user = g.created_by
+		LEFT JOIN users u2 ON u2.id_user = g.updated_by
+		ORDER BY g.id_gudang`)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +195,7 @@ func (r *Repository) ListGudang(ctx context.Context) ([]Gudang, error) {
 	for rows.Next() {
 		var g Gudang
 		if err := rows.Scan(&g.ID, &g.NamaGudang, &g.Alamat, &g.Kota, &g.Latitude, &g.Longitude, &g.Status,
-			&g.CreatedAt, &g.CreatedBy, &g.UpdatedAt, &g.UpdatedBy); err != nil {
+			&g.CreatedAt, &g.CreatedBy, &g.CreatedByName, &g.UpdatedAt, &g.UpdatedBy, &g.UpdatedByName); err != nil {
 			return nil, err
 		}
 		items = append(items, g)
@@ -219,9 +235,12 @@ func (r *Repository) ListUser(ctx context.Context) ([]User, error) {
 		SELECT u.id_user, u.username, COALESCE(d.nama_driver, '') AS name, u.role, u.id_driver,
 		       CASE WHEN u.last_login IS NOT NULL AND u.last_login > now() - interval '30 minutes' THEN true ELSE false END AS is_active,
 		       COALESCE(u.status, 'aktif') AS status,
-		       u.created_at, u.created_by, u.updated_at, u.updated_by
+		       u.created_at, u.created_by, COALESCE(uc.username, ''),
+		       u.updated_at, u.updated_by, COALESCE(uu.username, '')
 		FROM users u
 		LEFT JOIN driver d ON d.id_driver = u.id_driver
+		LEFT JOIN users uc ON uc.id_user = u.created_by
+		LEFT JOIN users uu ON uu.id_user = u.updated_by
 		ORDER BY u.id_user`)
 	if err != nil {
 		return nil, err
@@ -231,7 +250,7 @@ func (r *Repository) ListUser(ctx context.Context) ([]User, error) {
 	for rows.Next() {
 		var u User
 		if err := rows.Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.IDDriver, &u.IsActive, &u.Status,
-			&u.CreatedAt, &u.CreatedBy, &u.UpdatedAt, &u.UpdatedBy); err != nil {
+			&u.CreatedAt, &u.CreatedBy, &u.CreatedByName, &u.UpdatedAt, &u.UpdatedBy, &u.UpdatedByName); err != nil {
 			return nil, err
 		}
 		items = append(items, u)
@@ -294,8 +313,10 @@ type DropPoint struct {
 	Status        string   `json:"status"`
 	CreatedAt     *string  `json:"created_at,omitempty"`
 	CreatedBy     *int64   `json:"created_by,omitempty"`
+	CreatedByName string   `json:"created_by_name,omitempty"`
 	UpdatedAt     *string  `json:"updated_at,omitempty"`
 	UpdatedBy     *int64   `json:"updated_by,omitempty"`
+	UpdatedByName string   `json:"updated_by_name,omitempty"`
 }
 
 type DropPointRequest struct {
@@ -308,9 +329,13 @@ type DropPointRequest struct {
 
 func (r *Repository) ListDropPoint(ctx context.Context) ([]DropPoint, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_drop_point, nama_drop_point, alamat, latitude, longitude, COALESCE(status, 'aktif'),
-		       created_at, created_by, updated_at, updated_by
-		FROM drop_point ORDER BY id_drop_point`)
+		SELECT dp.id_drop_point, dp.nama_drop_point, dp.alamat, dp.latitude, dp.longitude, COALESCE(dp.status, 'aktif'),
+		       dp.created_at, dp.created_by, COALESCE(u1.username, ''),
+		       dp.updated_at, dp.updated_by, COALESCE(u2.username, '')
+		FROM drop_point dp
+		LEFT JOIN users u1 ON u1.id_user = dp.created_by
+		LEFT JOIN users u2 ON u2.id_user = dp.updated_by
+		ORDER BY dp.id_drop_point`)
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +344,7 @@ func (r *Repository) ListDropPoint(ctx context.Context) ([]DropPoint, error) {
 	for rows.Next() {
 		var dp DropPoint
 		if err := rows.Scan(&dp.ID, &dp.NamaDropPoint, &dp.Alamat, &dp.Latitude, &dp.Longitude, &dp.Status,
-			&dp.CreatedAt, &dp.CreatedBy, &dp.UpdatedAt, &dp.UpdatedBy); err != nil {
+			&dp.CreatedAt, &dp.CreatedBy, &dp.CreatedByName, &dp.UpdatedAt, &dp.UpdatedBy, &dp.UpdatedByName); err != nil {
 			return nil, fmt.Errorf("scan drop_point: %w", err)
 		}
 		items = append(items, dp)

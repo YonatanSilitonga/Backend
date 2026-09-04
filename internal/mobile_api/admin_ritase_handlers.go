@@ -678,7 +678,8 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			r.id_drop_point, COALESCE(dp.nama_drop_point, 'Gateway #' || r.id_drop_point) AS nama_drop_point,
 			r.ritase_ke, r.status, COALESCE(r.jenis_ritase, ''),
 			TO_CHAR(r.jam_mulai, 'HH24:MI'), TO_CHAR(r.jam_selesai, 'HH24:MI'),
-			COALESCE(TO_CHAR(r.jam_berangkat + interval '7 hours', 'HH24:MI'), ''), COALESCE(TO_CHAR(r.jam_tiba + interval '7 hours', 'HH24:MI'), ''),
+			COALESCE(TO_CHAR((SELECT MIN(e.created_at) + interval '7 hours' FROM ritase_event e WHERE e.id_ritase = r.id_ritase), 'HH24:MI'), ''),
+			COALESCE(TO_CHAR((SELECT MAX(e.created_at) + interval '7 hours' FROM ritase_event e WHERE e.id_ritase = r.id_ritase AND e.status = 'Selesai'), 'HH24:MI'), ''),
 			COALESCE(m.koli, 0), COALESCE(m.ecer, 0), COALESCE(m.hv, 0),
 			COALESCE(r.created_at::text, ''), COALESCE(r.updated_at::text, ''),
 			COALESCE(u1.username, '') AS created_by_name,
@@ -736,7 +737,17 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 					COALESCE(MAX(ev.jumlah_koli), 0) AS jumlah_koli,
 					COALESCE(MAX(ev.jumlah_ecer), 0) AS jumlah_ecer,
 					COALESCE(MAX(ev.jumlah_high_value), 0) AS jumlah_high_value,
-					COALESCE(MAX(ev.durasi_detik), 0) AS durasi_detik,
+					COALESCE((
+						SELECT SUM(ev2.durasi_detik)
+						FROM ritase_event ev2 
+						WHERE ev2.id_ritase = rs.id_ritase 
+						AND ev2.status IN ('Tiba', 'Bongkar Muat Barang')
+						AND (
+							ev2.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
+							OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev2.nama_lokasi) IN LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
+							OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) IN LOWER(ev2.nama_lokasi)) > 0)
+						)
+					), 0) AS durasi_detik,
 					(SELECT ev2.foto_manifest_url FROM ritase_event ev2
 					 WHERE ev2.id_ritase = rs.id_ritase
 					   AND ev2.foto_manifest_url IS NOT NULL AND ev2.foto_manifest_url != ''

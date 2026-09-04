@@ -2,16 +2,18 @@ package admin
 
 // Driver — admin CRUD.
 type Driver struct {
-	ID           int64   `json:"id_driver"`
-	NamaDriver   string  `json:"nama_driver"`
-	NoHP         *string `json:"no_hp,omitempty"`
-	NoSIM        *string `json:"no_sim,omitempty"`
-	JenisSIM     *string `json:"jenis_sim,omitempty"`
-	StatusDriver string  `json:"status_driver"`
-	CreatedAt    *string `json:"created_at,omitempty"`
-	CreatedBy    *int64  `json:"created_by,omitempty"`
-	UpdatedAt    *string `json:"updated_at,omitempty"`
-	UpdatedBy    *int64  `json:"updated_by,omitempty"`
+	ID             int64   `json:"id_driver"`
+	NamaDriver     string  `json:"nama_driver"`
+	NoHP           *string `json:"no_hp,omitempty"`
+	NoSIM          *string `json:"no_sim,omitempty"`
+	JenisSIM       *string `json:"jenis_sim,omitempty"`
+	StatusDriver   string  `json:"status_driver"`
+	CreatedAt      *string `json:"created_at,omitempty"`
+	CreatedBy      *int64  `json:"created_by,omitempty"`
+	CreatedByName  string  `json:"created_by_name,omitempty"`
+	UpdatedAt      *string `json:"updated_at,omitempty"`
+	UpdatedBy      *int64  `json:"updated_by,omitempty"`
+	UpdatedByName  string  `json:"updated_by_name,omitempty"`
 }
 
 type DriverRequest struct {
@@ -32,8 +34,10 @@ type Kendaraan struct {
 	StatusKendaraan string  `json:"status_kendaraan"`
 	CreatedAt       *string `json:"created_at,omitempty"`
 	CreatedBy       *int64  `json:"created_by,omitempty"`
+	CreatedByName   string  `json:"created_by_name,omitempty"`
 	UpdatedAt       *string `json:"updated_at,omitempty"`
 	UpdatedBy       *int64  `json:"updated_by,omitempty"`
+	UpdatedByName   string  `json:"updated_by_name,omitempty"`
 }
 
 type KendaraanRequest struct {
@@ -59,8 +63,10 @@ type Seller struct {
 	Longitude      *float64 `json:"longitude,omitempty"`
 	CreatedAt      *string  `json:"created_at,omitempty"`
 	CreatedBy      *int64   `json:"created_by,omitempty"`
+	CreatedByName  string   `json:"created_by_name,omitempty"`
 	UpdatedAt      *string  `json:"updated_at,omitempty"`
 	UpdatedBy      *int64   `json:"updated_by,omitempty"`
+	UpdatedByName  string   `json:"updated_by_name,omitempty"`
 }
 
 type SellerRequest struct {
@@ -79,17 +85,19 @@ type SellerRequest struct {
 
 // Gudang — admin CRUD.
 type Gudang struct {
-	ID        int64    `json:"id_gudang"`
-	NamaGudang string  `json:"nama_gudang"`
-	Alamat    *string  `json:"alamat,omitempty"`
-	Kota      *string  `json:"kota,omitempty"`
-	Latitude  *float64 `json:"latitude,omitempty"`
-	Longitude *float64 `json:"longitude,omitempty"`
-	Status    string   `json:"status"`
-	CreatedAt *string  `json:"created_at,omitempty"`
-	CreatedBy *int64   `json:"created_by,omitempty"`
-	UpdatedAt *string  `json:"updated_at,omitempty"`
-	UpdatedBy *int64   `json:"updated_by,omitempty"`
+	ID            int64    `json:"id_gudang"`
+	NamaGudang    string   `json:"nama_gudang"`
+	Alamat        *string  `json:"alamat,omitempty"`
+	Kota          *string  `json:"kota,omitempty"`
+	Latitude      *float64 `json:"latitude,omitempty"`
+	Longitude     *float64 `json:"longitude,omitempty"`
+	Status        string   `json:"status"`
+	CreatedAt     *string  `json:"created_at,omitempty"`
+	CreatedBy     *int64   `json:"created_by,omitempty"`
+	CreatedByName string   `json:"created_by_name,omitempty"`
+	UpdatedAt     *string  `json:"updated_at,omitempty"`
+	UpdatedBy     *int64   `json:"updated_by,omitempty"`
+	UpdatedByName string   `json:"updated_by_name,omitempty"`
 }
 
 type GudangRequest struct {
@@ -103,17 +111,19 @@ type GudangRequest struct {
 
 // User — admin CRUD.
 type User struct {
-	ID         int64   `json:"id_user"`
-	Username   string  `json:"username"`
-	Name       string  `json:"name"`
-	Role       string  `json:"role"`
-	IDDriver   *int64  `json:"id_driver,omitempty"`
-	IsActive   bool    `json:"is_active"`
-	Status     string  `json:"status"`
-	CreatedAt  *string `json:"created_at,omitempty"`
-	CreatedBy  *int64  `json:"created_by,omitempty"`
-	UpdatedAt  *string `json:"updated_at,omitempty"`
-	UpdatedBy  *int64  `json:"updated_by,omitempty"`
+	ID            int64   `json:"id_user"`
+	Username      string  `json:"username"`
+	Name          string  `json:"name"`
+	Role          string  `json:"role"`
+	IDDriver      *int64  `json:"id_driver,omitempty"`
+	IsActive      bool    `json:"is_active"`
+	Status        string  `json:"status"`
+	CreatedAt     *string `json:"created_at,omitempty"`
+	CreatedBy     *int64  `json:"created_by,omitempty"`
+	CreatedByName string  `json:"created_by_name,omitempty"`
+	UpdatedAt     *string `json:"updated_at,omitempty"`
+	UpdatedBy     *int64  `json:"updated_by,omitempty"`
+	UpdatedByName string  `json:"updated_by_name,omitempty"`
 }
 
 type UserRequest struct {
