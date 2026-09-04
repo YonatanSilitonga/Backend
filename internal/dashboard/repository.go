@@ -40,6 +40,7 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 		loc = time.FixedZone("WIB", 7*60*60)
 	}
 	today := time.Now().In(loc).Format("2006-01-02")
+	yesterday := time.Now().In(loc).AddDate(0, 0, -1).Format("2006-01-02")
 
 	// Kendaraan — 1 query (dulu 4)
 	if err := r.db.QueryRow(ctx, `
@@ -68,16 +69,24 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
                count(*) FILTER (WHERE LOWER(status) NOT IN ('selesai','completed','done','batal','cancelled')),
                count(*) FILTER (WHERE LOWER(status) IN ('selesai','completed','done')),
                count(*) FILTER (WHERE tanggal = $1),
+               count(*) FILTER (WHERE tanggal = $2),
                COALESCE(sum(total_awb),0),
                COALESCE(sum(total_awb) FILTER (WHERE tanggal = $1),0),
-               COALESCE(sum(total_koli),0)
+               COALESCE(sum(total_awb) FILTER (WHERE tanggal = $2),0),
+               COALESCE(sum(total_koli),0),
+               COALESCE(sum(total_koli) FILTER (WHERE tanggal = $1),0),
+               COALESCE(sum(total_koli) FILTER (WHERE tanggal = $2),0)
         FROM ritase
-    `, today).Scan(&s.TotalRitase, &s.RitaseAktif, &s.RitaseSelesai, &s.RitaseToday,
-		&s.TotalAWB, &s.TotalAWBToday, &s.TotalKoli); err != nil {
+    `, today, yesterday).Scan(
+		&s.TotalRitase, &s.RitaseAktif, &s.RitaseSelesai,
+		&s.RitaseToday, &s.RitaseYesterday,
+		&s.TotalAWB, &s.TotalAWBToday, &s.TotalAWBYesterday,
+		&s.TotalKoli, &s.TotalKoliToday, &s.TotalKoliYesterday,
+	); err != nil {
 		return nil, err
 	}
 
-	// Muatan hari ini — SUM dari event "Bongkar Muat Barang" per ritase.
+	// Muatan hari ini & kemarin — SUM dari event "Bongkar Muat Barang" per ritase.
 	t := time.Now()
 	if err := r.db.QueryRow(ctx, `
 		SELECT COALESCE(sum(koli),0), COALESCE(sum(hv),0), COALESCE(sum(ecer),0)
@@ -91,6 +100,20 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 			GROUP BY ev.id_ritase
 		) latest
 	`, today).Scan(&s.TotalKoliToday, &s.TotalHighValueToday, &s.TotalEceranToday); err != nil {
+		return nil, err
+	}
+	if err := r.db.QueryRow(ctx, `
+		SELECT COALESCE(sum(koli),0), COALESCE(sum(hv),0), COALESCE(sum(ecer),0)
+		FROM (
+			SELECT ev.id_ritase,
+			       sum(ev.jumlah_koli) AS koli,
+			       sum(ev.jumlah_high_value) AS hv,
+			       sum(ev.jumlah_ecer) AS ecer
+			FROM ritase_event ev
+			WHERE (ev.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $1 AND ev.status = 'Bongkar Muat Barang'
+			GROUP BY ev.id_ritase
+		) latest
+	`, yesterday).Scan(&s.TotalKoliYesterday, &s.TotalHighValueYesterday, &s.TotalEceranYesterday); err != nil {
 		return nil, err
 	}
 	log.Printf("[TIMING] muatan_hari_ini: %v", time.Since(t))

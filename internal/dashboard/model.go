@@ -21,12 +21,17 @@ type Summary struct {
 	RitaseAktif      int64 `json:"ritase_aktif"`
 	RitaseSelesai    int64 `json:"ritase_selesai"`
 	RitaseToday      int64 `json:"ritase_hari_ini"`
+	RitaseYesterday  int64 `json:"ritase_kemarin"`
 	TotalAWB         int64 `json:"total_awb"`
 	TotalAWBToday    int64 `json:"total_awb_hari_ini"`
+	TotalAWBYesterday int64 `json:"total_awb_kemarin"`
 	TotalKoli        int64 `json:"total_koli"`
 	TotalKoliToday      int64 `json:"total_koli_hari_ini"`
+	TotalKoliYesterday  int64 `json:"total_koli_kemarin"`
 	TotalHighValueToday int64 `json:"total_high_value_hari_ini"`
+	TotalHighValueYesterday int64 `json:"total_high_value_kemarin"`
 	TotalEceranToday    int64 `json:"total_eceran_hari_ini"`
+	TotalEceranYesterday int64 `json:"total_eceran_kemarin"`
 	// Lainnya
 	TotalSeller    int64 `json:"total_seller"`
 	SellerTerlayani int64 `json:"seller_terlayani"`
