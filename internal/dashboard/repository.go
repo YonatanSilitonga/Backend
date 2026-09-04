@@ -288,6 +288,13 @@ func (r *Repository) GetBottleneck(ctx context.Context) ([]Bottleneck, error) {
 func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 	var items []AlertAnomali
 
+	// Auto-resolve alert untuk ritase yang sudah selesai.
+	_, _ = r.db.Exec(ctx, `
+		UPDATE alert_anomali SET is_resolved = true, resolved_at = now()
+		WHERE is_resolved = false
+		  AND id_ritase IN (SELECT id_ritase FROM ritase WHERE status IN ('selesai','completed','done'))
+	`)
+
 	// ritase berjalan lama tanpa update (kendaraan berhenti terlalu lama)
 	rows, err := r.db.Query(ctx, `
 		SELECT r.kode_ritase, d.nama_driver, now() - max(e.created_at), max(e.created_at)
@@ -353,6 +360,129 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 		})
 	}
 	rows.Close()
+
+	// menuju berhenti terlalu lama — kendaraan status "Sedang Menuju" tapi diam > 15 menit.
+	detectedRows, err := r.db.Query(ctx, `
+		SELECT t.id_ritase, t.id_driver, t.id_kendaraan,
+		       d.nama_driver, t.latitude, t.longitude, t.nama_lokasi,
+		       EXTRACT(EPOCH FROM COALESCE(now() - t.stopped_since, now() - t.last_update))::int AS durasi_detik
+		FROM armada_tracking t
+		JOIN ritase r ON r.id_ritase = t.id_ritase
+		JOIN driver d ON d.id_driver = t.id_driver
+		WHERE t.status = 'Sedang Menuju'
+		  AND r.status NOT IN ('selesai','completed','done','batal','cancelled')
+		  AND (
+		    (t.stopped_since IS NOT NULL AND now() - t.stopped_since > interval '1 minutes')
+		    OR
+		    (t.stopped_since IS NULL AND now() - t.last_update > interval '1 minutes')
+		  )
+		ORDER BY durasi_detik DESC
+		LIMIT 10
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer detectedRows.Close()
+
+	for detectedRows.Next() {
+		var idRitase, idDriver, idKendaraan int64
+		var namaDriver string
+		var lat, lng *float64
+		var namaLokasi *string
+		var durasiDetik int
+		if err := detectedRows.Scan(&idRitase, &idDriver, &idKendaraan, &namaDriver, &lat, &lng, &namaLokasi, &durasiDetik); err != nil {
+			return nil, err
+		}
+
+		// Jika sudah ada alert aktif untuk ritase ini, baca dari DB dan tampilkan.
+		var exists bool
+		_ = r.db.QueryRow(ctx, `
+			SELECT EXISTS(SELECT 1 FROM alert_anomali WHERE id_ritase = $1 AND kategori = 'menuju_berhenti_lama' AND is_resolved = false)
+		`, idRitase).Scan(&exists)
+		if exists {
+			var a AlertAnomali
+			_ = r.db.QueryRow(ctx, `
+				SELECT id_alert, id_ritase, tingkat, pesan, kategori, created_at, deskripsi, rekomendasi,
+				       latitude, longitude, nama_lokasi, durasi_detik, is_resolved
+				FROM alert_anomali
+				WHERE id_ritase = $1 AND kategori = 'menuju_berhenti_lama' AND is_resolved = false
+				ORDER BY created_at DESC LIMIT 1
+			`, idRitase).Scan(&a.ID, &a.IDRitase, &a.Tingkat, &a.Pesan, &a.Kategori, &a.Waktu,
+				&a.Deskripsi, &a.Rekomendasi, &a.Latitude, &a.Longitude, &a.NamaLokasi, &a.DurasiDetik, &a.IsResolved)
+			items = append(items, a)
+			continue
+		}
+
+		// Tentukan severity berdasarkan durasi.
+		tingkat := "warning"
+		if durasiDetik > 1800 { // > 30 menit
+			tingkat = "critical"
+		}
+
+		pesan := fmt.Sprintf("Driver %s berhenti %s saat menuju ke lokasi", namaDriver, formatJamMenit(time.Duration(durasiDetik)*time.Second))
+		deskripsi := fmt.Sprintf("Kendaraan berstatus \"Sedang Menuju\" namun tidak bergerak selama %s. Perlu dipastikan kondisi armada dan keselamatan muatan.", formatJamMenit(time.Duration(durasiDetik)*time.Second))
+		rekomendasi := "Hubungi driver untuk memastikan kondisi. Jika kendala di jalan, siapkan bantuan."
+
+		// Insert ke tabel alert_anomali.
+		var alertID int64
+		errInsert := r.db.QueryRow(ctx, `
+			INSERT INTO alert_anomali (id_ritase, id_driver, id_kendaraan, kategori, tingkat, latitude, longitude, nama_lokasi, durasi_detik, pesan, deskripsi, rekomendasi)
+			VALUES ($1, $2, $3, 'menuju_berhenti_lama', $4, $5, $6, $7, $8, $9, $10, $11)
+			RETURNING id_alert
+		`, idRitase, idDriver, idKendaraan, tingkat, lat, lng, namaLokasi, durasiDetik, pesan, deskripsi, rekomendasi).Scan(&alertID)
+		if errInsert != nil {
+			continue
+		}
+
+		waktu := time.Now()
+		items = append(items, AlertAnomali{
+			ID:          alertID,
+			IDRitase:    &idRitase,
+			Tingkat:     tingkat,
+			Pesan:       pesan,
+			Kategori:    "menuju_berhenti_lama",
+			Waktu:       waktu,
+			Deskripsi:   deskripsi,
+			Rekomendasi: rekomendasi,
+			Latitude:    lat,
+			Longitude:   lng,
+			NamaLokasi:  namaLokasi,
+			DurasiDetik: &durasiDetik,
+			IsResolved:  false,
+		})
+	}
+
+	// Fallback: baca semua alert menuju_berhenti_lama aktif dari tabel
+	// agar tetap tampil meskipun query deteksi tidak return (GPS masih kirim update).
+	existingRows, err := r.db.Query(ctx, `
+		SELECT id_alert, id_ritase, tingkat, pesan, kategori, created_at, deskripsi, rekomendasi,
+		       latitude, longitude, nama_lokasi, durasi_detik, is_resolved
+		FROM alert_anomali
+		WHERE kategori = 'menuju_berhenti_lama' AND is_resolved = false
+		ORDER BY created_at DESC
+		LIMIT 10
+	`)
+	if err == nil {
+		defer existingRows.Close()
+		for existingRows.Next() {
+			var a AlertAnomali
+			if err := existingRows.Scan(&a.ID, &a.IDRitase, &a.Tingkat, &a.Pesan, &a.Kategori, &a.Waktu,
+				&a.Deskripsi, &a.Rekomendasi, &a.Latitude, &a.Longitude, &a.NamaLokasi, &a.DurasiDetik, &a.IsResolved); err != nil {
+				continue
+			}
+			// Skip jika sudah ada di items (duplikat dari query deteksi).
+			duplicate := false
+			for _, existing := range items {
+				if existing.ID == a.ID {
+					duplicate = true
+					break
+				}
+			}
+			if !duplicate {
+				items = append(items, a)
+			}
+		}
+	}
 
 	return items, nil
 }
@@ -610,4 +740,54 @@ func (r *Repository) GetAnalyticsSellers(ctx context.Context, from, to string) (
 		items = append(items, s)
 	}
 	return items, rows.Err()
+}
+
+// ResolveAlert menandai alert sebagai sudah ditangani oleh tower control.
+func (r *Repository) ResolveAlert(ctx context.Context, idAlert int64, userID int64) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE alert_anomali
+		SET is_resolved = true, resolved_by = $2, resolved_at = now()
+		WHERE id_alert = $1 AND is_resolved = false
+	`, idAlert, userID)
+	return err
+}
+
+// GetAlertsByRitase mengembalikan riwayat alert untuk satu ritase.
+func (r *Repository) GetAlertsByRitase(ctx context.Context, idRitase int64) ([]AlertAnomali, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id_alert, id_ritase, kategori, tingkat, pesan, deskripsi, rekomendasi,
+		       latitude, longitude, nama_lokasi, durasi_detik, is_resolved, created_at
+		FROM alert_anomali
+		WHERE id_ritase = $1
+		ORDER BY created_at DESC
+		LIMIT 20
+	`, idRitase)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []AlertAnomali
+	for rows.Next() {
+		var a AlertAnomali
+		if err := rows.Scan(&a.ID, &a.IDRitase, &a.Kategori, &a.Tingkat, &a.Pesan, &a.Deskripsi, &a.Rekomendasi,
+			&a.Latitude, &a.Longitude, &a.NamaLokasi, &a.DurasiDetik, &a.IsResolved, &a.Waktu); err != nil {
+			return nil, err
+		}
+		items = append(items, a)
+	}
+	return items, rows.Err()
+}
+
+// CleanupOldAlerts menghapus alert yang sudah resolved dan usianya > 30 hari.
+func (r *Repository) CleanupOldAlerts(ctx context.Context) (int64, error) {
+	result, err := r.db.Exec(ctx, `
+		DELETE FROM alert_anomali
+		WHERE is_resolved = true
+		  AND resolved_at < now() - interval '30 days'
+	`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

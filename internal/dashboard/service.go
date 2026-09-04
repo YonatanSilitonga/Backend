@@ -45,3 +45,13 @@ func (s *Service) GetAnalyticsDrivers(ctx context.Context, from, to string) ([]D
 func (s *Service) GetAnalyticsSellers(ctx context.Context, from, to string) ([]SellerAnalytics, error) {
 	return s.repo.GetAnalyticsSellers(ctx, from, to)
 }
+
+// ResolveAlert menandai alert sebagai ditangani tower control.
+func (s *Service) ResolveAlert(ctx context.Context, idAlert int64, userID int64) error {
+	return s.repo.ResolveAlert(ctx, idAlert, userID)
+}
+
+// GetAlertsByRitase mengembalikan riwayat alert untuk satu ritase.
+func (s *Service) GetAlertsByRitase(ctx context.Context, idRitase int64) ([]AlertAnomali, error) {
+	return s.repo.GetAlertsByRitase(ctx, idRitase)
+}

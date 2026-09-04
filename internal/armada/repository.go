@@ -637,3 +637,27 @@ func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan, idDri
 	}
 	return items, rows.Err()
 }
+
+// ListGpsHistory mengembalikan seluruh titik GPS history untuk satu ritase.
+func (r *Repository) ListGpsHistory(ctx context.Context, idRitase int64) ([]GpsPoint, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT latitude, longitude, kecepatan, created_at
+		FROM armada_gps_history
+		WHERE id_ritase = $1
+		ORDER BY created_at ASC
+	`, idRitase)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []GpsPoint
+	for rows.Next() {
+		var p GpsPoint
+		if err := rows.Scan(&p.Latitude, &p.Longitude, &p.Kecepatan, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	return points, rows.Err()
+}

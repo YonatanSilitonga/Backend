@@ -85,3 +85,7 @@ func (s *Service) GetTrackingMap(ctx context.Context) (*MapTracking, error) {
 func (s *Service) GetTrackingHistory(ctx context.Context, idKendaraan, idDriver int64, tanggal string) ([]TrackingCheckpoint, error) {
 	return s.repo.ListTrackingHistory(ctx, idKendaraan, idDriver, tanggal)
 }
+
+func (s *Service) GetGpsHistory(ctx context.Context, idRitase int64) ([]GpsPoint, error) {
+	return s.repo.ListGpsHistory(ctx, idRitase)
+}

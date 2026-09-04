@@ -195,3 +195,11 @@ type CreateTrackingRequest struct {
 	JumlahHighValue int     `json:"jumlah_high_value"`
 	DurasiDetik     *int    `json:"durasi_detik"`
 }
+
+// GpsPoint adalah satu titik GPS dari history perjalanan driver.
+type GpsPoint struct {
+	Latitude  float64   `json:"latitude"`
+	Longitude float64   `json:"longitude"`
+	Kecepatan *int      `json:"kecepatan,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}

@@ -67,12 +67,19 @@ type Bottleneck struct {
 
 // AlertAnomali adalah notifikasi otomatis untuk kondisi abnormal.
 type AlertAnomali struct {
+	ID          int64     `json:"id_alert,omitempty"`
+	IDRitase    *int64    `json:"id_ritase,omitempty"`
 	Tingkat     string    `json:"tingkat"` // info / warning / critical
 	Pesan       string    `json:"pesan"`
 	Kategori    string    `json:"kategori"`
 	Waktu       time.Time `json:"waktu"`
 	Deskripsi   string    `json:"deskripsi"`
 	Rekomendasi string    `json:"rekomendasi"`
+	Latitude    *float64  `json:"latitude,omitempty"`
+	Longitude   *float64  `json:"longitude,omitempty"`
+	NamaLokasi  *string   `json:"nama_lokasi,omitempty"`
+	DurasiDetik *int      `json:"durasi_detik,omitempty"`
+	IsResolved  bool      `json:"is_resolved"`
 }
 
 // Analisis adalah bundle lengkap untuk dashboard analitik.

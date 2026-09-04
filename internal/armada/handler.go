@@ -216,6 +216,19 @@ func (h *Handler) GetTrackingHistory(c echo.Context) error {
 	return response.OK(c, data)
 }
 
+// GetGpsHistory menangani GET /armada/ritase/:id/gps-history — titik GPS history per ritase.
+func (h *Handler) GetGpsHistory(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "id ritase tidak valid")
+	}
+	data, err := h.svc.GetGpsHistory(c.Request().Context(), id)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil GPS history")
+	}
+	return response.OK(c, data)
+}
+
 // RegisterRoutes memasang route armada di grup yang diberikan (butuh auth).
 func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	g.GET("/armada/kendaraan", h.ListKendaraan, authMW)
@@ -223,6 +236,7 @@ func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 
 	g.GET("/armada/ritase", h.ListRitase, authMW)
 	g.GET("/armada/ritase/:id", h.GetRitase, authMW)
+	g.GET("/armada/ritase/:id/gps-history", h.GetGpsHistory, authMW)
 	g.POST("/armada/ritase", h.CreateRitase, authMW)
 	g.POST("/armada/ritase/:id/status", h.UpdateStatus, authMW)
 	g.PATCH("/armada/ritase/:id/muatan", h.UpdateMuatan, authMW)

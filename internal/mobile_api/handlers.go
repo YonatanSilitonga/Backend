@@ -362,9 +362,11 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 	}
 
 	_, err := h.DB.Exec(ctx, `
-		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, jumlah_ecer, jumlah_high_value, nama_lokasi, last_update)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
-		ON CONFLICT (id_kendaraan) DO UPDATE 
+		INSERT INTO armada_tracking (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan, arah, status, jumlah_koli, jumlah_ecer, jumlah_high_value, nama_lokasi, stopped_since, last_update)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+		        CASE WHEN $6::int IS NULL OR $6::int <= 5 THEN now() ELSE NULL END,
+		        now())
+		ON CONFLICT (id_kendaraan) DO UPDATE
 		SET id_ritase = COALESCE(EXCLUDED.id_ritase, armada_tracking.id_ritase),
 		    id_driver = EXCLUDED.id_driver,
 		    latitude = EXCLUDED.latitude,
@@ -376,11 +378,23 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		    jumlah_ecer = $10,
 		    jumlah_high_value = $11,
 		    nama_lokasi = COALESCE($12, armada_tracking.nama_lokasi),
+		    stopped_since = CASE
+		        WHEN $6::int IS NULL OR $6::int <= 5 THEN COALESCE(armada_tracking.stopped_since, now())
+		        ELSE NULL
+		    END,
 		    last_update = now()
 	`, ritaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan, req.Arah, req.Status, totalKoli, totalEcer, totalHV, namaLokasiVal)
 
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking: "+err.Error())
+	}
+
+	// Simpan GPS history — setiap titik GPS yang valid dicatat untuk rute di peta.
+	if targetRitaseID > 0 && req.Latitude != 0 && req.Longitude != 0 {
+		_, _ = h.DB.Exec(ctx, `
+			INSERT INTO armada_gps_history (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, targetRitaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan)
 	}
 
 	h.bus.Publish("force_refresh", "mobile_tracking_update")

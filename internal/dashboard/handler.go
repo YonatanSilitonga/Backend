@@ -2,9 +2,11 @@ package dashboard
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/labstack/echo/v4"
 
+	"backend/internal/pkg/middleware"
 	"backend/internal/pkg/response"
 )
 
@@ -69,4 +71,32 @@ func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	g.GET("/dashboard/analytics/trend", h.GetAnalyticsTrend, authMW)
 	g.GET("/dashboard/analytics/drivers", h.GetAnalyticsDrivers, authMW)
 	g.GET("/dashboard/analytics/sellers", h.GetAnalyticsSellers, authMW)
+	g.PATCH("/dashboard/alerts/:id/resolve", h.ResolveAlert, authMW)
+	g.GET("/dashboard/alerts/ritase/:id", h.GetAlertsByRitase, authMW)
+}
+
+// ResolveAlert menangani PATCH /dashboard/alerts/:id/resolve — menandai alert sebagai ditangani.
+func (h *Handler) ResolveAlert(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "id alert tidak valid")
+	}
+	userID, _ := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.ResolveAlert(c.Request().Context(), id, userID); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal resolve alert")
+	}
+	return response.OK(c, map[string]string{"message": "alert berhasil ditandai normal"})
+}
+
+// GetAlertsByRitase menangani GET /dashboard/alerts/ritase/:id — riwayat alert per ritase.
+func (h *Handler) GetAlertsByRitase(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "id ritase tidak valid")
+	}
+	data, err := h.svc.GetAlertsByRitase(c.Request().Context(), id)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil riwayat alert")
+	}
+	return response.OK(c, data)
 }
