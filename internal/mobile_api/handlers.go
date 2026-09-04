@@ -47,11 +47,11 @@ type AppVersionResponse struct {
 
 func (h *APIHandler) GetAppVersion(c echo.Context) error {
 	return c.JSON(http.StatusOK, AppVersionResponse{
-		VersionCode:  10,
-		VersionName:  "1.0.9",
+		VersionCode:  11,
+		VersionName:  "1.1.0",
 		DownloadURL:  "https://api.controltowerslb.tech/uploads/apk/tower-control-latest.apk",
 		ForceUpdate:  false,
-		ReleaseNotes: "Perbaikan sinkronisasi lokasi bongkar muat & tiba, dan penambahan event selesai pada riwayat ritase.",
+		ReleaseNotes: "Dukungan shift lintas hari (overnight), toleransi rute 2 jam lebih awal, penguncian layar rute aktif, serta perbaikan nama gudang & gateway pada riwayat.",
 	})
 }
 
@@ -1036,23 +1036,31 @@ func (h *APIHandler) GetDriverHistoryDetail(c echo.Context) error {
 
 	stopsRows, err := h.DB.Query(ctx, `
 		SELECT rs.id_stop, rs.urutan, rs.jenis_stop,
-		       COALESCE(s.nama_seller, rs.keterangan, 'Lokasi'),
-		       COALESCE(s.alamat, ''),
-		       COALESCE(s.no_hp, ''),
-		       COALESCE(ev.koli, 0),
-		       COALESCE(ev.ecer, 0),
-		       COALESCE(ev.hv, 0),
-		       COALESCE(rs.foto_manifest_url, ev.photo_url, '')
+		       COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, rs.keterangan, 'Lokasi') AS nama_lokasi,
+		       COALESCE(s.alamat, dp.alamat, g.alamat, '') AS alamat,
+		       COALESCE(s.no_hp, '') AS no_hp,
+		       COALESCE(ev.koli, 0) AS koli,
+		       COALESCE(ev.ecer, 0) AS ecer,
+		       COALESCE(ev.hv, 0) AS hv,
+		       COALESCE(NULLIF(rs.foto_manifest_url, ''), ev.photo_url, '') AS photo_url
 		FROM ritase_stop rs
+		LEFT JOIN ritase r ON r.id_ritase = rs.id_ritase
 		LEFT JOIN seller s ON s.id_seller = rs.id_seller
+		LEFT JOIN drop_point dp ON (dp.id_drop_point = rs.id_drop_point OR (rs.jenis_stop = 'gateway' AND rs.id_drop_point IS NULL AND dp.id_drop_point = r.id_drop_point))
+		LEFT JOIN gudang g ON g.id_gudang = rs.id_gudang
 		LEFT JOIN LATERAL (
-			SELECT SUM(jumlah_koli) as koli,
-			       SUM(jumlah_ecer) as ecer,
-			       SUM(jumlah_high_value) as hv,
-			       MAX(foto_manifest_url) as photo_url
+			SELECT COALESCE(MAX(re.jumlah_koli), 0) as koli,
+			       COALESCE(MAX(re.jumlah_ecer), 0) as ecer,
+			       COALESCE(MAX(re.jumlah_high_value), 0) as hv,
+			       MAX(COALESCE(re.foto_manifest_url, '')) as photo_url
 			FROM ritase_event re
 			WHERE re.id_ritase = rs.id_ritase 
-			  AND (re.nama_lokasi = s.nama_seller OR re.status = 'Bongkar Muat Barang')
+			  AND (
+			    re.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
+			    OR (re.nama_lokasi IS NOT NULL AND POSITION(LOWER(re.nama_lokasi) in LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
+			    OR (re.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(re.nama_lokasi)) > 0)
+			    OR re.status = 'Bongkar Muat Barang'
+			  )
 		) ev ON true
 		WHERE rs.id_ritase = $1
 		ORDER BY rs.urutan ASC
