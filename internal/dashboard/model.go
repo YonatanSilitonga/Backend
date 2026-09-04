@@ -21,12 +21,17 @@ type Summary struct {
 	RitaseAktif      int64 `json:"ritase_aktif"`
 	RitaseSelesai    int64 `json:"ritase_selesai"`
 	RitaseToday      int64 `json:"ritase_hari_ini"`
+	RitaseYesterday  int64 `json:"ritase_kemarin"`
 	TotalAWB         int64 `json:"total_awb"`
 	TotalAWBToday    int64 `json:"total_awb_hari_ini"`
+	TotalAWBYesterday int64 `json:"total_awb_kemarin"`
 	TotalKoli        int64 `json:"total_koli"`
 	TotalKoliToday      int64 `json:"total_koli_hari_ini"`
+	TotalKoliYesterday  int64 `json:"total_koli_kemarin"`
 	TotalHighValueToday int64 `json:"total_high_value_hari_ini"`
+	TotalHighValueYesterday int64 `json:"total_high_value_kemarin"`
 	TotalEceranToday    int64 `json:"total_eceran_hari_ini"`
+	TotalEceranYesterday int64 `json:"total_eceran_kemarin"`
 	// Lainnya
 	TotalSeller    int64 `json:"total_seller"`
 	SellerTerlayani int64 `json:"seller_terlayani"`
@@ -41,7 +46,11 @@ type Summary struct {
 // DurasiAnalisis adalah ringkasan durasi proses (dari timeline ritase_event).
 type DurasiAnalisis struct {
 	RataRataLoading   string `json:"rata_rata_loading"`
+	RataRataLoadingDetik float64 `json:"rata_rata_loading_detik"`
+	RataRataLoadingKemarinDetik float64 `json:"rata_rata_loading_kemarin_detik"`
 	RataRataPerjalanan string `json:"rata_rata_perjalanan"`
+	RataRataPerjalananDetik float64 `json:"rata_rata_perjalanan_detik"`
+	RataRataPerjalananKemarinDetik float64 `json:"rata_rata_perjalanan_kemarin_detik"`
 	RataRataUnloading string `json:"rata_rata_unloading"`
 	TotalRitaseDihitung int64 `json:"total_ritase_dihitung"`
 }

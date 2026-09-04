@@ -474,9 +474,9 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 		       t.id_driver, COALESCE(d.nama_driver,''),
 		       t.latitude, t.longitude, t.kecepatan, t.arah, t.status,
 		       COALESCE(NULLIF(t.nama_lokasi, ''), re.nama_lokasi, ''),
-		       COALESCE(NULLIF(t.jumlah_koli, 0), re.jumlah_koli, 0),
-		       COALESCE(NULLIF(t.jumlah_ecer, 0), re.jumlah_ecer, 0),
-		       COALESCE(NULLIF(t.jumlah_high_value, 0), re.jumlah_high_value, 0),
+		       COALESCE(re.jumlah_koli, 0),
+		       COALESCE(re.jumlah_ecer, 0),
+		       COALESCE(re.jumlah_high_value, 0),
 		       t.last_update,
 		       %s AS offline,
 		       (u.last_login IS NOT NULL AND u.last_login > now() - make_interval(hours => %d)) AS session_online,
@@ -490,6 +490,7 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 			SELECT ev.nama_lokasi, ev.jumlah_koli, ev.jumlah_ecer, ev.jumlah_high_value
 			FROM ritase_event ev
 			WHERE ev.id_ritase = t.id_ritase AND (ev.jumlah_koli > 0 OR ev.jumlah_ecer > 0 OR ev.jumlah_high_value > 0)
+			  AND (ev.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = current_date
 			ORDER BY ev.created_at DESC, ev.id_event DESC
 			LIMIT 1
 		) re ON true
