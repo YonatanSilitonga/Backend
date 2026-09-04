@@ -592,7 +592,7 @@ func (r *Repository) ListDropPoints(ctx context.Context) ([]DropPointPoi, error)
 	return items, rows.Err()
 }
 
-func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan int64, tanggal string) ([]TrackingCheckpoint, error) {
+func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan, idDriver int64, tanggal string) ([]TrackingCheckpoint, error) {
 	query := `
 		SELECT e.id_event, e.id_ritase, COALESCE(r.kode_ritase,''),
 		       e.status, e.catatan, e.latitude, e.longitude,
@@ -600,9 +600,16 @@ func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan int64,
 		       e.created_at
 		FROM ritase_event e
 		JOIN ritase r ON r.id_ritase = e.id_ritase
-		WHERE r.id_kendaraan = $1
+		WHERE 1=1
 	`
-	var args []interface{} = []interface{}{idKendaraan}
+	var args []interface{}
+	if idDriver > 0 {
+		args = append(args, idDriver)
+		query += " AND r.id_driver = $" + fmt.Sprint(len(args))
+	} else if idKendaraan > 0 {
+		args = append(args, idKendaraan)
+		query += " AND r.id_kendaraan = $" + fmt.Sprint(len(args))
+	}
 	if tanggal != "" {
 		args = append(args, tanggal)
 		query += " AND (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $" + fmt.Sprint(len(args))
