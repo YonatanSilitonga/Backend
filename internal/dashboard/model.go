@@ -46,7 +46,11 @@ type Summary struct {
 // DurasiAnalisis adalah ringkasan durasi proses (dari timeline ritase_event).
 type DurasiAnalisis struct {
 	RataRataLoading   string `json:"rata_rata_loading"`
+	RataRataLoadingDetik float64 `json:"rata_rata_loading_detik"`
+	RataRataLoadingKemarinDetik float64 `json:"rata_rata_loading_kemarin_detik"`
 	RataRataPerjalanan string `json:"rata_rata_perjalanan"`
+	RataRataPerjalananDetik float64 `json:"rata_rata_perjalanan_detik"`
+	RataRataPerjalananKemarinDetik float64 `json:"rata_rata_perjalanan_kemarin_detik"`
 	RataRataUnloading string `json:"rata_rata_unloading"`
 	TotalRitaseDihitung int64 `json:"total_ritase_dihitung"`
 }

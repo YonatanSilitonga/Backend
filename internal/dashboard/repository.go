@@ -181,10 +181,17 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 // Dioptimasi menggunakan Window Function LEAD() — 1 Single Pass scan tanpa perbandingan kuadratik.
 func (r *Repository) GetDurasiAnalisis(ctx context.Context) (*DurasiAnalisis, error) {
 	d := &DurasiAnalisis{}
+	loc, _ := time.LoadLocation("Asia/Jakarta")
+	if loc == nil {
+		loc = time.FixedZone("WIB", 7*60*60)
+	}
+	today := time.Now().In(loc).Format("2006-01-02")
+	yesterday := time.Now().In(loc).AddDate(0, 0, -1).Format("2006-01-02")
 
 	var avgLoading, avgJalan *float64
 	var totalDihitung int64
 
+	// Overall averages
 	err := r.db.QueryRow(ctx, `
 		WITH stepped AS (
 			SELECT e.id_ritase, e.status, e.created_at,
@@ -207,17 +214,68 @@ func (r *Repository) GetDurasiAnalisis(ctx context.Context) (*DurasiAnalisis, er
 
 	if avgLoading != nil {
 		d.RataRataLoading = formatJamMenit(time.Duration(*avgLoading) * time.Second)
+		d.RataRataLoadingDetik = *avgLoading
 	} else {
 		d.RataRataLoading = "belum ada data"
 	}
 
 	if avgJalan != nil {
 		d.RataRataPerjalanan = formatJamMenit(time.Duration(*avgJalan) * time.Second)
+		d.RataRataPerjalananDetik = *avgJalan
 	} else {
 		d.RataRataPerjalanan = "belum ada data"
 	}
 
 	d.TotalRitaseDihitung = totalDihitung
+
+	// Today averages
+	var avgLoadingToday, avgJalanToday *float64
+	_ = r.db.QueryRow(ctx, `
+		WITH stepped AS (
+			SELECT e.id_ritase, e.status, e.created_at,
+			       LEAD(e.status) OVER (PARTITION BY e.id_ritase ORDER BY e.created_at) AS next_status,
+			       LEAD(e.created_at) OVER (PARTITION BY e.id_ritase ORDER BY e.created_at) AS next_time
+			FROM ritase_event e
+			JOIN ritase r ON r.id_ritase = e.id_ritase
+			WHERE r.status IN ('selesai', 'berjalan')
+			  AND r.tanggal = $1
+		)
+		SELECT 
+			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Tiba' AND next_status = 'Sedang Menuju'),
+			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Sedang Menuju' AND next_status = 'Tiba')
+		FROM stepped;
+	`, today).Scan(&avgLoadingToday, &avgJalanToday)
+	if avgLoadingToday != nil {
+		d.RataRataLoadingDetik = *avgLoadingToday
+	}
+	if avgJalanToday != nil {
+		d.RataRataPerjalananDetik = *avgJalanToday
+	}
+
+	// Yesterday averages
+	var avgLoadingYesterday, avgJalanYesterday *float64
+	_ = r.db.QueryRow(ctx, `
+		WITH stepped AS (
+			SELECT e.id_ritase, e.status, e.created_at,
+			       LEAD(e.status) OVER (PARTITION BY e.id_ritase ORDER BY e.created_at) AS next_status,
+			       LEAD(e.created_at) OVER (PARTITION BY e.id_ritase ORDER BY e.created_at) AS next_time
+			FROM ritase_event e
+			JOIN ritase r ON r.id_ritase = e.id_ritase
+			WHERE r.status IN ('selesai', 'berjalan')
+			  AND r.tanggal = $1
+		)
+		SELECT 
+			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Tiba' AND next_status = 'Sedang Menuju'),
+			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Sedang Menuju' AND next_status = 'Tiba')
+		FROM stepped;
+	`, yesterday).Scan(&avgLoadingYesterday, &avgJalanYesterday)
+	if avgLoadingYesterday != nil {
+		d.RataRataLoadingKemarinDetik = *avgLoadingYesterday
+	}
+	if avgJalanYesterday != nil {
+		d.RataRataPerjalananKemarinDetik = *avgJalanYesterday
+	}
+
 	return d, nil
 }
 
