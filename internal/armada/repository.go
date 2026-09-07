@@ -93,7 +93,7 @@ func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 		       sum(jumlah_high_value) AS hv,
 		       sum(jumlah_ecer) AS ecer
 		FROM ritase_event
-		WHERE status = 'Bongkar Muat Barang'
+		WHERE status IN ('Bongkar Muat Barang', 'Muat Barang')
 		GROUP BY id_ritase
 	)
 	SELECT r.id_ritase, r.kode_ritase, COALESCE(r.tanggal::text, ''),
@@ -212,7 +212,7 @@ func (r *Repository) ListStops(ctx context.Context, idRitase int64) ([]RitaseSto
 					SELECT SUM(ev2.durasi_detik)
 					FROM ritase_event ev2 
 					WHERE ev2.id_ritase = rs.id_ritase 
-					AND ev2.status IN ('Tiba', 'Bongkar Muat Barang')
+					AND ev2.status IN ('Tiba', 'Bongkar Muat Barang', 'Muat Barang', 'Bongkar Barang')
 					AND (
 						ev2.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
 						OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev2.nama_lokasi) IN LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)

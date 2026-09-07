@@ -47,11 +47,11 @@ type AppVersionResponse struct {
 
 func (h *APIHandler) GetAppVersion(c echo.Context) error {
 	return c.JSON(http.StatusOK, AppVersionResponse{
-		VersionCode:  11,
-		VersionName:  "1.1.0",
+		VersionCode:  12,
+		VersionName:  "1.2.1",
 		DownloadURL:  "https://api.controltowerslb.tech/uploads/apk/tower-control-latest.apk",
 		ForceUpdate:  false,
-		ReleaseNotes: "Dukungan shift lintas hari (overnight), toleransi rute 2 jam lebih awal, penguncian layar rute aktif, serta perbaikan nama gudang & gateway pada riwayat.",
+		ReleaseNotes: "Pembaruan istilah Bongkar & Muat, layout dan tampilan kolom login, integrasi alur ritase pengembalian mobil ke gudang, serta tombol Mulai Perjalanan.",
 	})
 }
 
@@ -283,8 +283,11 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 			// Bug 3: normalisasi semua varian "tiba" ke "Tiba" (Title Case) agar
 			// konsisten dengan yang disimpan PostTripStatus ke ritase_event.
 			switch *req.Status {
-			case "mulai_loading":
-				s := "Bongkar Muat Barang"
+			case "mulai_loading", "muat_barang", "muat":
+				s := "Muat Barang"
+				req.Status = &s
+			case "mulai_unloading", "bongkar_barang", "bongkar":
+				s := "Bongkar Barang"
 				req.Status = &s
 			case "berangkat_gudang":
 				s := "Keluar Gudang"
@@ -295,12 +298,24 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 			case "sampai_gudang", "tiba", "Tiba":
 				s := "Tiba"
 				req.Status = &s
+			case "kembali_ke_gudang", "kembali_gudang", "kembali ke gudang":
+				s := "Kembali ke Gudang"
+				req.Status = &s
 			case "selesai":
 				s := "Selesai"
 				req.Status = &s
 			default:
-				if strings.HasPrefix(*req.Status, "Bongkar Muat") {
-					s := "Bongkar Muat Barang"
+				if strings.EqualFold(*req.Status, "muat barang") || strings.HasPrefix(*req.Status, "Muat") {
+					s := "Muat Barang"
+					req.Status = &s
+				} else if strings.EqualFold(*req.Status, "bongkar barang") || strings.HasPrefix(*req.Status, "Bongkar") {
+					s := "Bongkar Barang"
+					req.Status = &s
+				} else if strings.HasPrefix(*req.Status, "Bongkar Muat") {
+					s := "Muat Barang"
+					req.Status = &s
+				} else if strings.EqualFold(*req.Status, "kembali ke gudang") || strings.HasPrefix(*req.Status, "Kembali") {
+					s := "Kembali ke Gudang"
 					req.Status = &s
 				} else if strings.HasPrefix(*req.Status, "Sedang Menuju") || strings.HasPrefix(*req.Status, "Menuju ") {
 					s := "Sedang Menuju"
@@ -342,7 +357,7 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 				COALESCE(SUM(jumlah_ecer), 0),
 				COALESCE(SUM(jumlah_high_value), 0)
 			FROM ritase_event
-			WHERE id_ritase = $1 AND status = 'Bongkar Muat Barang'
+			WHERE id_ritase = $1 AND status IN ('Bongkar Muat Barang', 'Muat Barang')
 		`, targetRitaseID).Scan(&totalKoli, &totalEcer, &totalHV)
 	}
 
@@ -712,6 +727,51 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		  )
 	`, idDriver, hariIni).Scan(&countUnfinished)
 
+	isLastRitase := countUnfinished <= 1
+	if isLastRitase && len(stops) > 0 {
+		lastStop := stops[len(stops)-1]
+		lastJenis, _ := lastStop["jenis_stop"].(string)
+		if strings.ToLower(lastJenis) != "gudang" {
+			var dbGudangId int64 = 1
+			dbNamaGudang := "Gudang Outgoing"
+			dbAlamat := "Gudang Outgoing Utama"
+			gudangLat := -6.171496
+			gudangLon := 106.657155
+
+			var dbLat, dbLon *float64
+			errG := h.DB.QueryRow(ctx, `
+				SELECT id_gudang, nama_gudang, COALESCE(alamat, 'Gudang Outgoing Utama'), latitude, longitude
+				FROM gudang
+				WHERE LOWER(tipe) = 'outgoing' OR LOWER(nama_gudang) LIKE '%outgoing%'
+				ORDER BY id_gudang ASC
+				LIMIT 1
+			`).Scan(&dbGudangId, &dbNamaGudang, &dbAlamat, &dbLat, &dbLon)
+			if errG == nil {
+				if dbLat != nil && dbLon != nil {
+					gudangLat = *dbLat
+					gudangLon = *dbLon
+				}
+			}
+
+			nextUrutan := len(stops) + 1
+			stops = append(stops, map[string]interface{}{
+				"id_stop":           int64(999000 + nextUrutan),
+				"urutan":            nextUrutan,
+				"jenis_stop":        "gudang",
+				"id_seller":         nil,
+				"id_drop_point":     nil,
+				"id_gudang":         dbGudangId,
+				"keterangan":        "Pengembalian Armada ke Gudang Outgoing",
+				"nama_lokasi":       dbNamaGudang,
+				"alamat":            dbAlamat,
+				"no_hp":             "-",
+				"latitude":          gudangLat,
+				"longitude":         gudangLon,
+				"is_return_to_base": true,
+			})
+		}
+	}
+
 	var stageStartedAt *time.Time
 	_ = h.DB.QueryRow(ctx, `
 		SELECT MAX(created_at) FROM ritase_event WHERE id_ritase = $1
@@ -965,7 +1025,7 @@ func (h *APIHandler) GetDriverHistoryRitase(c echo.Context) error {
 			       SUM(COALESCE(jumlah_ecer, 0)) as total_ecer,
 			       SUM(COALESCE(jumlah_high_value, 0)) as total_hv
 			FROM ritase_event
-			WHERE status = 'Bongkar Muat Barang'
+			WHERE status IN ('Bongkar Muat Barang', 'Muat Barang')
 			GROUP BY id_ritase
 		) sub_ev ON sub_ev.id_ritase = r.id_ritase
 		LEFT JOIN (
@@ -1073,7 +1133,7 @@ func (h *APIHandler) GetDriverHistoryDetail(c echo.Context) error {
 			    re.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
 			    OR (re.nama_lokasi IS NOT NULL AND POSITION(LOWER(re.nama_lokasi) in LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
 			    OR (re.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(re.nama_lokasi)) > 0)
-			    OR re.status = 'Bongkar Muat Barang'
+			    OR re.status IN ('Bongkar Muat Barang', 'Muat Barang', 'Bongkar Barang')
 			  )
 		) ev ON true
 		WHERE rs.id_ritase = $1
@@ -1148,10 +1208,16 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 
 	// Terjemahkan status key dari mobile ke teks yang disimpan di DB
 	switch strings.ToLower(req.Status) {
-	case "mulai_loading", "bongkar muat barang":
-		req.Status = "Bongkar Muat Barang"
+	case "mulai_loading", "muat_barang", "muat", "muat barang":
+		req.Status = "Muat Barang"
+	case "mulai_unloading", "bongkar_barang", "bongkar", "bongkar barang":
+		req.Status = "Bongkar Barang"
+	case "bongkar muat barang":
+		req.Status = "Muat Barang"
 	case "menuju_seller", "sedang menuju":
 		req.Status = "Sedang Menuju"
+	case "kembali_ke_gudang", "kembali_gudang", "kembali ke gudang":
+		req.Status = "Kembali ke Gudang"
 	case "tiba":
 		req.Status = "Tiba"
 	case "selesai":
@@ -1231,7 +1297,7 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 		`, idRitase)
 	}
 
-	// 2. Hitung total akumulasi muatan yang sedang dibawa di ritase ini (SUM dari semua event Bongkar Muat Barang)
+	// 2. Hitung total akumulasi muatan yang sedang dibawa di ritase ini (SUM dari semua event Muat Barang & Bongkar Muat Barang lama)
 	var totalKoli, totalEcer, totalHV int
 	_ = h.DB.QueryRow(ctx, `
 		SELECT 
@@ -1239,12 +1305,12 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 			COALESCE(SUM(jumlah_ecer), 0),
 			COALESCE(SUM(jumlah_high_value), 0)
 		FROM ritase_event
-		WHERE id_ritase = $1 AND status = 'Bongkar Muat Barang'
+		WHERE id_ritase = $1 AND status IN ('Bongkar Muat Barang', 'Muat Barang')
 	`, idRitase).Scan(&totalKoli, &totalEcer, &totalHV)
 
 	// Bug 10: update total_awb di tabel ritase dari akumulasi muatan event
 	// (jumlah_koli dipakai sebagai proxy AWB karena mobile tidak kirim AWB terpisah).
-	if req.Status == "Bongkar Muat Barang" {
+	if req.Status == "Muat Barang" || req.Status == "Bongkar Muat Barang" || req.Status == "Bongkar Barang" {
 		_, _ = h.DB.Exec(ctx, `
 			UPDATE ritase
 			SET total_koli = $1

@@ -96,7 +96,7 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 			       sum(ev.jumlah_high_value) AS hv,
 			       sum(ev.jumlah_ecer) AS ecer
 			FROM ritase_event ev
-			WHERE (ev.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $1 AND ev.status = 'Bongkar Muat Barang'
+			WHERE (ev.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $1 AND ev.status IN ('Bongkar Muat Barang', 'Muat Barang')
 			GROUP BY ev.id_ritase
 		) latest
 	`, today).Scan(&s.TotalKoliToday, &s.TotalHighValueToday, &s.TotalEceranToday); err != nil {
@@ -110,7 +110,7 @@ func (r *Repository) GetSummary(ctx context.Context) (*Summary, error) {
 			       sum(ev.jumlah_high_value) AS hv,
 			       sum(ev.jumlah_ecer) AS ecer
 			FROM ritase_event ev
-			WHERE (ev.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $1 AND ev.status = 'Bongkar Muat Barang'
+			WHERE (ev.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $1 AND ev.status IN ('Bongkar Muat Barang', 'Muat Barang')
 			GROUP BY ev.id_ritase
 		) latest
 	`, yesterday).Scan(&s.TotalKoliYesterday, &s.TotalHighValueYesterday, &s.TotalEceranYesterday); err != nil {
@@ -202,8 +202,8 @@ func (r *Repository) GetDurasiAnalisis(ctx context.Context) (*DurasiAnalisis, er
 			WHERE r.status IN ('selesai', 'berjalan')
 		)
 		SELECT 
-			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Tiba' AND next_status = 'Sedang Menuju'),
-			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Sedang Menuju' AND next_status = 'Tiba'),
+			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Tiba' AND next_status IN ('Sedang Menuju', 'Kembali ke Gudang')),
+			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status IN ('Sedang Menuju', 'Kembali ke Gudang') AND next_status = 'Tiba'),
 			count(DISTINCT id_ritase)
 		FROM stepped;
 	`).Scan(&avgLoading, &avgJalan, &totalDihitung)
@@ -241,8 +241,8 @@ func (r *Repository) GetDurasiAnalisis(ctx context.Context) (*DurasiAnalisis, er
 			  AND r.tanggal = $1
 		)
 		SELECT 
-			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Tiba' AND next_status = 'Sedang Menuju'),
-			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Sedang Menuju' AND next_status = 'Tiba')
+			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Tiba' AND next_status IN ('Sedang Menuju', 'Kembali ke Gudang')),
+			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status IN ('Sedang Menuju', 'Kembali ke Gudang') AND next_status = 'Tiba')
 		FROM stepped;
 	`, today).Scan(&avgLoadingToday, &avgJalanToday)
 	if avgLoadingToday != nil {
@@ -265,8 +265,8 @@ func (r *Repository) GetDurasiAnalisis(ctx context.Context) (*DurasiAnalisis, er
 			  AND r.tanggal = $1
 		)
 		SELECT 
-			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Tiba' AND next_status = 'Sedang Menuju'),
-			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Sedang Menuju' AND next_status = 'Tiba')
+			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Tiba' AND next_status IN ('Sedang Menuju', 'Kembali ke Gudang')),
+			avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status IN ('Sedang Menuju', 'Kembali ke Gudang') AND next_status = 'Tiba')
 		FROM stepped;
 	`, yesterday).Scan(&avgLoadingYesterday, &avgJalanYesterday)
 	if avgLoadingYesterday != nil {
@@ -369,7 +369,7 @@ func (r *Repository) GetAlerts(ctx context.Context) ([]AlertAnomali, error) {
 		FROM armada_tracking t
 		JOIN ritase r ON r.id_ritase = t.id_ritase
 		JOIN driver d ON d.id_driver = t.id_driver
-		WHERE t.status = 'Sedang Menuju'
+		WHERE t.status IN ('Sedang Menuju', 'Kembali ke Gudang')
 		  AND r.status NOT IN ('selesai','completed','done','batal','cancelled')
 		  AND (
 		    (t.stopped_since IS NOT NULL AND now() - t.stopped_since > interval '1 minutes')
@@ -545,7 +545,7 @@ func (r *Repository) GetAnalyticsTrend(ctx context.Context, from, to string) ([]
 			       sum(ev.jumlah_high_value) AS hv,
 			       sum(ev.jumlah_ecer) AS ecer
 			FROM ritase_event ev
-			WHERE ev.status = 'Bongkar Muat Barang'
+			WHERE ev.status IN ('Bongkar Muat Barang', 'Muat Barang')
 			  AND ev.id_ritase IN (SELECT id_ritase FROM active_ritase)
 			GROUP BY ev.id_ritase
 		)
@@ -606,9 +606,9 @@ func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) (
 		),
 		durasi_per_ritase AS (
 			SELECT id_ritase,
-			       avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Tiba' AND next_status = 'Sedang Menuju') AS loading_dur,
-			       avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Sedang Menuju' AND next_status = 'Tiba') AS jalan_dur,
-			       avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Bongkar Muat Barang' AND next_status = 'Selesai') AS unloading_dur
+			       avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Tiba' AND next_status IN ('Sedang Menuju', 'Kembali ke Gudang')) AS loading_dur,
+			       avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status IN ('Sedang Menuju', 'Kembali ke Gudang') AND next_status = 'Tiba') AS jalan_dur,
+			       avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status IN ('Bongkar Muat Barang', 'Bongkar Barang') AND next_status = 'Selesai') AS unloading_dur
 			FROM stepped_events
 			GROUP BY id_ritase
 		),
@@ -618,7 +618,7 @@ func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) (
 			       sum(ev.jumlah_high_value) AS hv,
 			       sum(ev.jumlah_ecer) AS ecer
 			FROM ritase_event ev
-			WHERE ev.status = 'Bongkar Muat Barang'
+			WHERE ev.status IN ('Bongkar Muat Barang', 'Muat Barang')
 			  AND ev.id_ritase IN (SELECT id_ritase FROM active_ritase)
 			GROUP BY ev.id_ritase
 		)
@@ -698,7 +698,7 @@ func (r *Repository) GetAnalyticsSellers(ctx context.Context, from, to string) (
 			       sum(ev.jumlah_high_value) AS hv,
 			       sum(ev.jumlah_ecer) AS ecer
 			FROM ritase_event ev
-			WHERE ev.status = 'Bongkar Muat Barang'
+			WHERE ev.status IN ('Bongkar Muat Barang', 'Muat Barang')
 			  AND ev.id_ritase IN (SELECT id_ritase FROM active_ritase)
 			GROUP BY ev.id_ritase
 		)

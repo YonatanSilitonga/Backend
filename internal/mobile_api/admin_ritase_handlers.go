@@ -667,7 +667,7 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 			       sum(jumlah_ecer) AS ecer,
 			       sum(jumlah_high_value) AS hv
 			FROM ritase_event
-			WHERE status = 'Bongkar Muat Barang'
+			WHERE status IN ('Bongkar Muat Barang', 'Muat Barang')
 			GROUP BY id_ritase
 		)
 		SELECT 
@@ -741,7 +741,7 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 						SELECT SUM(ev2.durasi_detik)
 						FROM ritase_event ev2 
 						WHERE ev2.id_ritase = rs.id_ritase 
-						AND ev2.status IN ('Tiba', 'Bongkar Muat Barang')
+						AND ev2.status IN ('Tiba', 'Bongkar Muat Barang', 'Muat Barang', 'Bongkar Barang')
 						AND (
 							ev2.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
 							OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev2.nama_lokasi) IN LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
@@ -1418,7 +1418,7 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 			COALESCE(k.plat_nomor, '-') AS nopol,
 			COALESCE(k.jenis_kendaraan, 'Blindvan') AS jenis_kendaraan,
 			COALESCE(ev.nama_lokasi, 'Lokasi') AS nama_lokasi,
-			COALESCE(ev.status, 'Bongkar Muat') AS status,
+			COALESCE(ev.status, 'Muat Barang') AS status,
 			COALESCE(ev.jumlah_koli, 0) AS jumlah_koli,
 			COALESCE(ev.jumlah_ecer, 0) AS jumlah_ecer,
 			COALESCE(ev.jumlah_high_value, 0) AS jumlah_high_value,

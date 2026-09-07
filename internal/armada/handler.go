@@ -116,12 +116,18 @@ func (h *Handler) UpdateStatus(c echo.Context) error {
 	}
 
 	switch req.Status {
-	case "mulai_loading":
-		req.Status = "Bongkar Muat Barang"
+	case "mulai_loading", "muat", "muat_barang":
+		req.Status = "Muat Barang"
+	case "mulai_unloading", "bongkar", "bongkar_barang":
+		req.Status = "Bongkar Barang"
+	case "bongkar muat barang":
+		req.Status = "Muat Barang"
 	case "berangkat_gudang":
 		req.Status = "Keluar Gudang"
 	case "menuju_seller":
 		req.Status = "Sedang Menuju"
+	case "kembali_ke_gudang", "kembali_gudang", "kembali ke gudang":
+		req.Status = "Kembali ke Gudang"
 	case "sampai_gudang", "tiba":
 		req.Status = "tiba"
 	case "selesai":
@@ -129,6 +135,8 @@ func (h *Handler) UpdateStatus(c echo.Context) error {
 	default:
 		if strings.HasPrefix(req.Status, "Sedang Menuju") || strings.HasPrefix(req.Status, "Menuju ") {
 			req.Status = "Sedang Menuju"
+		} else if strings.EqualFold(req.Status, "kembali ke gudang") || strings.HasPrefix(req.Status, "Kembali") {
+			req.Status = "Kembali ke Gudang"
 		} else if strings.HasPrefix(req.Status, "Tiba di ") || req.Status == "tiba" {
 			req.Status = "tiba"
 		}
