@@ -269,6 +269,47 @@ func (h *Handler) GetImplanBarangHistory(c echo.Context) error {
 	return response.OK(c, logs)
 }
 
+// ListDriverPickups menangani GET /armada/pickup/drivers
+func (h *Handler) ListDriverPickups(c echo.Context) error {
+	data, err := h.svc.ListDriverPickups(c.Request().Context())
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data driver pickup")
+	}
+	return response.OK(c, data)
+}
+
+// SaveDriverPickupBarang menangani POST /armada/pickup/barang
+func (h *Handler) SaveDriverPickupBarang(c echo.Context) error {
+	var req DriverPickupInput
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "format data tidak valid")
+	}
+	if req.IDUser <= 0 && req.NamaDriver == "" {
+		return response.Error(c, http.StatusBadRequest, "id_user atau nama_driver wajib diisi")
+	}
+	username, _ := c.Get(appMiddleware.CtxUsername).(string)
+	if username == "" {
+		username = "user"
+	}
+	if err := h.svc.SaveDriverPickupBarang(c.Request().Context(), req, username); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan muatan driver pickup")
+	}
+	return response.OK(c, map[string]string{"message": "muatan driver pickup berhasil disimpan"})
+}
+
+// GetDriverPickupHistory menangani GET /armada/pickup/:id/history
+func (h *Handler) GetDriverPickupHistory(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		return response.Error(c, http.StatusBadRequest, "id driver tidak valid")
+	}
+	logs, err := h.svc.GetDriverPickupHistory(c.Request().Context(), id)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil riwayat muatan driver pickup")
+	}
+	return response.OK(c, logs)
+}
+
 // RegisterRoutes memasang route armada di grup yang diberikan (butuh auth).
 func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	g.GET("/armada/kendaraan", h.ListKendaraan, authMW)
@@ -288,4 +329,8 @@ func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 
 	g.POST("/armada/implan/barang", h.SaveImplanBarang, authMW)
 	g.GET("/armada/implan/:id/history", h.GetImplanBarangHistory, authMW)
+
+	g.GET("/armada/pickup/drivers", h.ListDriverPickups, authMW)
+	g.POST("/armada/pickup/barang", h.SaveDriverPickupBarang, authMW)
+	g.GET("/armada/pickup/:id/history", h.GetDriverPickupHistory, authMW)
 }

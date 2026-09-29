@@ -79,7 +79,17 @@ func (s *Service) GetTrackingMap(ctx context.Context) (*MapTracking, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &MapTracking{Vehicles: vehicles, Sellers: sellers, Gudang: gudang, DropPoints: drops}, nil
+	driverPickups, err := s.repo.ListDriverPickups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &MapTracking{
+		Vehicles:      vehicles,
+		Sellers:       sellers,
+		Gudang:        gudang,
+		DropPoints:    drops,
+		DriverPickups: driverPickups,
+	}, nil
 }
 
 func (s *Service) GetTrackingHistory(ctx context.Context, idKendaraan, idDriver int64, tanggal string) ([]TrackingCheckpoint, error) {
@@ -96,4 +106,16 @@ func (s *Service) SaveImplanBarang(ctx context.Context, req ImplanBarangInput, c
 
 func (s *Service) GetImplanBarangHistory(ctx context.Context, idSeller int64) ([]ImplanBarangLog, error) {
 	return s.repo.GetImplanBarangHistory(ctx, idSeller)
+}
+
+func (s *Service) ListDriverPickups(ctx context.Context) ([]DriverPickupItem, error) {
+	return s.repo.ListDriverPickups(ctx)
+}
+
+func (s *Service) SaveDriverPickupBarang(ctx context.Context, req DriverPickupInput, createdBy string) error {
+	return s.repo.SaveDriverPickupBarang(ctx, req, createdBy)
+}
+
+func (s *Service) GetDriverPickupHistory(ctx context.Context, idUser int64) ([]DriverPickupLog, error) {
+	return s.repo.GetDriverPickupHistory(ctx, idUser)
 }

@@ -151,12 +151,60 @@ type ImplanBarangLog struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-// MapTracking gabungan posisi live kendaraan + titik seller + gudang + drop_point (data peta).
+// DriverPickupItem mewakili data driver pickup beserta muatan aktifnya hari ini.
+type DriverPickupItem struct {
+	IDUser       int64      `json:"id_user"`
+	Username     string     `json:"username"`
+	NamaDriver   string     `json:"nama_driver"`
+	NoHP         string     `json:"no_hp"`
+	JumlahBarang int        `json:"jumlah_barang"`
+	Koli         int        `json:"koli"`
+	Ecer         int        `json:"ecer"`
+	HighValue    int        `json:"high_value"`
+	Status       string     `json:"status"` // 'menuju_gudang' | 'selesai' | 'standby'
+	Catatan      string     `json:"catatan"`
+	AsalSeller   string     `json:"asal_seller"`
+	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
+}
+
+// DriverPickupInput payload untuk input/update muatan driver pickup.
+type DriverPickupInput struct {
+	IDUser       int64  `json:"id_user"`
+	NamaDriver   string `json:"nama_driver"`
+	JumlahBarang int    `json:"jumlah_barang"`
+	Koli         int    `json:"koli"`
+	Ecer         int    `json:"ecer"`
+	HighValue    int    `json:"high_value"`
+	Status       string `json:"status"` // 'menuju_gudang' | 'selesai' | 'standby'
+	Catatan      string `json:"catatan"`
+	AsalSeller   string `json:"asal_seller"`
+}
+
+// DriverPickupLog satu baris riwayat muatan driver pickup.
+type DriverPickupLog struct {
+	ID           int64      `json:"id_log"`
+	IDUser       *int64     `json:"id_user"`
+	NamaDriver   string     `json:"nama_driver"`
+	Tanggal      string     `json:"tanggal"`
+	JumlahBarang int        `json:"jumlah_barang"`
+	Koli         int        `json:"koli"`
+	Ecer         int        `json:"ecer"`
+	HighValue    int        `json:"high_value"`
+	Status       string     `json:"status"`
+	Catatan      string     `json:"catatan"`
+	AsalSeller   string     `json:"asal_seller"`
+	CreatedBy    string     `json:"created_by"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// MapTracking gabungan posisi live kendaraan + titik seller + gudang + drop_point + driver pickup (data peta).
 type MapTracking struct {
-	Vehicles   []TrackingLive   `json:"vehicles"`
-	Sellers    []SellerLocation `json:"sellers"`
-	Gudang     []GudangPoint    `json:"gudang"`
-	DropPoints []DropPointPoi   `json:"drop_points"`
+	Vehicles      []TrackingLive     `json:"vehicles"`
+	Sellers       []SellerLocation   `json:"sellers"`
+	Gudang        []GudangPoint      `json:"gudang"`
+	DropPoints    []DropPointPoi     `json:"drop_points"`
+	DriverPickups []DriverPickupItem `json:"driver_pickups"`
 }
 
 // TrackingCheckpoint satu baris riwayat status dari ritase_event.
