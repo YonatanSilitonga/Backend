@@ -120,6 +120,35 @@ type TrackingLive struct {
 	SessionOnline   bool       `json:"session_online"`
 	LastLogin       *time.Time `json:"last_login,omitempty"`
 	LastOpen        *time.Time `json:"last_open,omitempty"`
+	RoleDriver      *string    `json:"role_driver,omitempty"`
+	TotalAWB        *int       `json:"total_awb,omitempty"`
+}
+
+// ImplanBarangInput payload untuk input/update jumlah barang di implan.
+type ImplanBarangInput struct {
+	IDSeller     int64  `json:"id_seller"`
+	JumlahBarang int    `json:"jumlah_barang"`
+	Koli         int    `json:"koli"`
+	Ecer         int    `json:"ecer"`
+	HighValue    int    `json:"high_value"`
+	Status       string `json:"status"` // 'menunggu' | 'sudah_diambil'
+	Catatan      string `json:"catatan"`
+}
+
+// ImplanBarangLog satu baris riwayat barang di implan.
+type ImplanBarangLog struct {
+	ID           int64     `json:"id_log"`
+	IDSeller     int64     `json:"id_seller"`
+	Tanggal      string    `json:"tanggal"`
+	JumlahBarang int       `json:"jumlah_barang"`
+	Koli         int       `json:"koli"`
+	Ecer         int       `json:"ecer"`
+	HighValue    int       `json:"high_value"`
+	Status       string    `json:"status"`
+	Catatan      string    `json:"catatan"`
+	CreatedBy    string    `json:"created_by"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // MapTracking gabungan posisi live kendaraan + titik seller + gudang + drop_point (data peta).

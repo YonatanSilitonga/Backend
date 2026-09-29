@@ -237,6 +237,38 @@ func (h *Handler) GetGpsHistory(c echo.Context) error {
 	return response.OK(c, data)
 }
 
+// SaveImplanBarang menangani POST /armada/implan/barang
+func (h *Handler) SaveImplanBarang(c echo.Context) error {
+	var req ImplanBarangInput
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "format data tidak valid")
+	}
+	if req.IDSeller <= 0 {
+		return response.Error(c, http.StatusBadRequest, "id_seller wajib diisi")
+	}
+	username, _ := c.Get(appMiddleware.CtxUsername).(string)
+	if username == "" {
+		username = "user"
+	}
+	if err := h.svc.SaveImplanBarang(c.Request().Context(), req, username); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan status barang implan")
+	}
+	return response.OK(c, map[string]string{"message": "status barang implan berhasil disimpan"})
+}
+
+// GetImplanBarangHistory menangani GET /armada/implan/:id/history
+func (h *Handler) GetImplanBarangHistory(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		return response.Error(c, http.StatusBadRequest, "id seller tidak valid")
+	}
+	logs, err := h.svc.GetImplanBarangHistory(c.Request().Context(), id)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil riwayat barang implan")
+	}
+	return response.OK(c, logs)
+}
+
 // RegisterRoutes memasang route armada di grup yang diberikan (butuh auth).
 func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	g.GET("/armada/kendaraan", h.ListKendaraan, authMW)
@@ -253,4 +285,7 @@ func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	g.POST("/armada/tracking", h.CreateTracking, authMW)
 	g.GET("/armada/tracking/map", h.GetTrackingMap, authMW)
 	g.GET("/armada/tracking/history", h.GetTrackingHistory, authMW)
+
+	g.POST("/armada/implan/barang", h.SaveImplanBarang, authMW)
+	g.GET("/armada/implan/:id/history", h.GetImplanBarangHistory, authMW)
 }

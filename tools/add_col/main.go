@@ -21,11 +21,12 @@ func main() {
 
 	// Alter table
 	_, err = db.Exec(ctx, `
-		ALTER TABLE ritase_event ADD COLUMN IF NOT EXISTS nama_lokasi VARCHAR(255);
-		ALTER TABLE armada_tracking ADD COLUMN IF NOT EXISTS nama_lokasi VARCHAR(255);
+		ALTER TABLE implan_barang_log ADD COLUMN IF NOT EXISTS koli INTEGER DEFAULT 0;
+		ALTER TABLE implan_barang_log ADD COLUMN IF NOT EXISTS ecer INTEGER DEFAULT 0;
+		ALTER TABLE implan_barang_log ADD COLUMN IF NOT EXISTS high_value INTEGER DEFAULT 0;
 	`)
 	if err != nil {
 		log.Fatalf("Gagal alter table: %v", err)
 	}
-	fmt.Println("Berhasil menambahkan kolom nama_lokasi ke ritase_event dan armada_tracking!")
+	fmt.Println("Berhasil menambahkan kolom koli, ecer, dan high_value ke implan_barang_log!")
 }

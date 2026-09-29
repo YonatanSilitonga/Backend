@@ -72,4 +72,10 @@ Latitude       float64  `json:"latitude"`
 	// Jarak dari OUTGOING & dari DC (Buaran Indah), dihitung sekali via tools/fill_jarak.
 	JarakTempuhKm  *float64 `json:"jarak_tempuh_km,omitempty"` // dari Gudang Outgoing
 	JarakDcKm      *float64 `json:"jarak_dc_km,omitempty"`     // dari Gudang DC
+	JumlahBarang   *int     `json:"jumlah_barang,omitempty"`
+	Koli           *int     `json:"koli,omitempty"`
+	Ecer           *int     `json:"ecer,omitempty"`
+	HighValue      *int     `json:"high_value,omitempty"`
+	StatusPickup   *string  `json:"status_pickup,omitempty"`
+	CatatanPickup  *string  `json:"catatan_pickup,omitempty"`
 }

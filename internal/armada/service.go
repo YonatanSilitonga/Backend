@@ -89,3 +89,11 @@ func (s *Service) GetTrackingHistory(ctx context.Context, idKendaraan, idDriver 
 func (s *Service) GetGpsHistory(ctx context.Context, idRitase int64) ([]GpsPoint, error) {
 	return s.repo.ListGpsHistory(ctx, idRitase)
 }
+
+func (s *Service) SaveImplanBarang(ctx context.Context, req ImplanBarangInput, createdBy string) error {
+	return s.repo.SaveImplanBarang(ctx, req, createdBy)
+}
+
+func (s *Service) GetImplanBarangHistory(ctx context.Context, idSeller int64) ([]ImplanBarangLog, error) {
+	return s.repo.GetImplanBarangHistory(ctx, idSeller)
+}

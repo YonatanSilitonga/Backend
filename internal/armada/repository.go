@@ -480,7 +480,9 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 		       t.last_update,
 		       %s AS offline,
 		       (u.last_login IS NOT NULL AND u.last_login > now() - make_interval(hours => %d)) AS session_online,
-		       u.last_login, u.last_open
+		       u.last_login, u.last_open,
+		       COALESCE(u.role, 'driver') AS role_driver,
+		       COALESCE(r.total_awb, re.jumlah_koli, 0) AS total_awb
 		FROM armada_tracking t
 		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
 		LEFT JOIN ritase r ON r.id_ritase = t.id_ritase
@@ -509,7 +511,8 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 			&t.Latitude, &t.Longitude, &t.Kecepatan, &t.Arah, &t.Status, &t.NamaLokasi,
 			&t.JumlahKoli, &t.JumlahEcer, &t.JumlahHighValue,
 			&t.LastUpdate,
-			&t.Offline, &t.SessionOnline, &t.LastLogin, &t.LastOpen); err != nil {
+			&t.Offline, &t.SessionOnline, &t.LastLogin, &t.LastOpen,
+			&t.RoleDriver, &t.TotalAWB); err != nil {
 			return nil, err
 		}
 		items = append(items, t)
@@ -517,15 +520,23 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 	return items, rows.Err()
 }
 
-// ListSellerLocations mengambil seller yang punya koordinat (untuk peta).
+// ListSellerLocations mengambil seller yang punya koordinat (untuk peta), termasuk status log barang hari ini.
 func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_seller, COALESCE(kode_seller,''), COALESCE(nama_seller,''), COALESCE(alamat,''),
-		       COALESCE(kota,''), COALESCE(pic,''), COALESCE(no_hp,''),
-		       latitude, longitude, jarak_tempuh_km, jarak_dc_km
-		FROM seller
-		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-		ORDER BY id_seller ASC
+		SELECT s.id_seller, COALESCE(s.kode_seller,''), COALESCE(s.nama_seller,''), COALESCE(s.alamat,''),
+		       COALESCE(s.kota,''), COALESCE(s.pic,''), COALESCE(s.no_hp,''),
+		       s.latitude, s.longitude, s.jarak_tempuh_km, s.jarak_dc_km,
+		       ib.jumlah_barang, ib.koli, ib.ecer, ib.high_value, ib.status, ib.catatan
+		FROM seller s
+		LEFT JOIN LATERAL (
+			SELECT jumlah_barang, COALESCE(koli, 0) AS koli, COALESCE(ecer, 0) AS ecer, COALESCE(high_value, 0) AS high_value, status, catatan
+			FROM implan_barang_log
+			WHERE id_seller = s.id_seller AND tanggal = CURRENT_DATE
+			ORDER BY id_log DESC
+			LIMIT 1
+		) ib ON true
+		WHERE s.latitude IS NOT NULL AND s.longitude IS NOT NULL
+		ORDER BY s.id_seller ASC
 	`)
 	if err != nil {
 		return nil, err
@@ -535,7 +546,9 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 	var items []SellerLocation
 	for rows.Next() {
 		var s SellerLocation
-		if err := rows.Scan(&s.IDSeller, &s.KodeSeller, &s.NamaSeller, &s.Alamat, &s.Kota, &s.PIC, &s.NoHP, &s.Latitude, &s.Longitude, &s.JarakTempuhKm, &s.JarakDcKm); err != nil {
+		if err := rows.Scan(&s.IDSeller, &s.KodeSeller, &s.NamaSeller, &s.Alamat, &s.Kota, &s.PIC, &s.NoHP,
+			&s.Latitude, &s.Longitude, &s.JarakTempuhKm, &s.JarakDcKm,
+			&s.JumlahBarang, &s.Koli, &s.Ecer, &s.HighValue, &s.StatusPickup, &s.CatatanPickup); err != nil {
 			return nil, err
 		}
 		items = append(items, s)
@@ -661,3 +674,44 @@ func (r *Repository) ListGpsHistory(ctx context.Context, idRitase int64) ([]GpsP
 	}
 	return points, rows.Err()
 }
+
+// SaveImplanBarang mencatat atau memperbarui log barang di implan.
+func (r *Repository) SaveImplanBarang(ctx context.Context, req ImplanBarangInput, createdBy string) error {
+	status := req.Status
+	if status == "" {
+		status = "menunggu"
+	}
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO implan_barang_log (id_seller, tanggal, jumlah_barang, koli, ecer, high_value, status, catatan, created_by, updated_at)
+		VALUES ($1, CURRENT_DATE, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+	`, req.IDSeller, req.JumlahBarang, req.Koli, req.Ecer, req.HighValue, status, req.Catatan, createdBy)
+	return err
+}
+
+// GetImplanBarangHistory mengambil riwayat status barang untuk satu seller.
+func (r *Repository) GetImplanBarangHistory(ctx context.Context, idSeller int64) ([]ImplanBarangLog, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id_log, id_seller, TO_CHAR(tanggal, 'YYYY-MM-DD'), jumlah_barang, COALESCE(koli, 0), COALESCE(ecer, 0), COALESCE(high_value, 0), status,
+		       COALESCE(catatan, ''), COALESCE(created_by, ''), created_at, updated_at
+		FROM implan_barang_log
+		WHERE id_seller = $1
+		ORDER BY id_log DESC
+		LIMIT 50
+	`, idSeller)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []ImplanBarangLog
+	for rows.Next() {
+		var l ImplanBarangLog
+		if err := rows.Scan(&l.ID, &l.IDSeller, &l.Tanggal, &l.JumlahBarang, &l.Koli, &l.Ecer, &l.HighValue, &l.Status,
+			&l.Catatan, &l.CreatedBy, &l.CreatedAt, &l.UpdatedAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, rows.Err()
+}
+
