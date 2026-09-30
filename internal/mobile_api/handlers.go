@@ -47,11 +47,11 @@ type AppVersionResponse struct {
 
 func (h *APIHandler) GetAppVersion(c echo.Context) error {
 	return c.JSON(http.StatusOK, AppVersionResponse{
-		VersionCode:  12,
-		VersionName:  "1.2.1",
+		VersionCode:  13,
+		VersionName:  "1.2.2",
 		DownloadURL:  "https://api.controltowerslb.tech/uploads/apk/tower-control-latest.apk",
 		ForceUpdate:  false,
-		ReleaseNotes: "Pembaruan istilah Bongkar & Muat, layout dan tampilan kolom login, integrasi alur ritase pengembalian mobil ke gudang, serta tombol Mulai Perjalanan.",
+		ReleaseNotes: "Fitur Driver Pickup: form input muatan seller (menuju seller berikutnya & kembali ke gudang), konfirmasi sampai gudang, dan live tracking armada pickup.",
 	})
 }
 
@@ -262,12 +262,19 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		defer cancel()
 		_, err := h.DB.Exec(ctx, `
 			UPDATE armada_tracking
-			SET last_update = now() - interval '1 hour'
+			SET last_update = now() - interval '2 hours',
+			    status = 'Selesai'
 			WHERE id_kendaraan = $1 OR id_driver = $2
 		`, req.IDKendaraan, req.IDDriver)
 		if err != nil {
 			return response.Error(c, http.StatusInternalServerError, "gagal menandai offline: "+err.Error())
 		}
+		// Hapus juga baris armada_tracking untuk driver pickup (tanpa id_ritase) agar langsung bersih dari peta Fadel
+		_, _ = h.DB.Exec(ctx, `
+			DELETE FROM armada_tracking
+			WHERE (id_kendaraan = $1 OR id_driver = $2) AND (id_ritase IS NULL OR id_ritase = 0)
+		`, req.IDKendaraan, req.IDDriver)
+
 		h.bus.Publish("force_refresh", "mobile_offline_signal")
 		return response.OK(c, "ok")
 	}
