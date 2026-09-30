@@ -116,6 +116,10 @@ func (s *Service) SaveDriverPickupBarang(ctx context.Context, req DriverPickupIn
 	return s.repo.SaveDriverPickupBarang(ctx, req, createdBy)
 }
 
+func (s *Service) SaveDriverPickupBatch(ctx context.Context, req DriverPickupBatchInput, createdBy string) error {
+	return s.repo.SaveDriverPickupBatch(ctx, req, createdBy)
+}
+
 func (s *Service) GetDriverPickupHistory(ctx context.Context, idUser int64) ([]DriverPickupLog, error) {
 	return s.repo.GetDriverPickupHistory(ctx, idUser)
 }

@@ -531,7 +531,7 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 		LEFT JOIN LATERAL (
 			SELECT jumlah_barang, COALESCE(koli, 0) AS koli, COALESCE(ecer, 0) AS ecer, COALESCE(high_value, 0) AS high_value, status, catatan
 			FROM implan_barang_log
-			WHERE id_seller = s.id_seller AND tanggal = CURRENT_DATE
+			WHERE id_seller = s.id_seller AND (tanggal = CURRENT_DATE OR tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
 			ORDER BY id_log DESC
 			LIMIT 1
 		) ib ON true
@@ -683,7 +683,7 @@ func (r *Repository) SaveImplanBarang(ctx context.Context, req ImplanBarangInput
 	}
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO implan_barang_log (id_seller, tanggal, jumlah_barang, koli, ecer, high_value, status, catatan, created_by, updated_at)
-		VALUES ($1, CURRENT_DATE, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+		VALUES ($1, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
 	`, req.IDSeller, req.JumlahBarang, req.Koli, req.Ecer, req.HighValue, status, req.Catatan, createdBy)
 	return err
 }
@@ -715,7 +715,7 @@ func (r *Repository) GetImplanBarangHistory(ctx context.Context, idSeller int64)
 	return logs, rows.Err()
 }
 
-// ListDriverPickups mengembalikan seluruh driver pickup beserta status muatannya hari ini.
+// ListDriverPickups mengembalikan seluruh driver pickup beserta status muatannya hari ini (diagregasikan per driver per hari).
 func (r *Repository) ListDriverPickups(ctx context.Context) ([]DriverPickupItem, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT 
@@ -734,13 +734,19 @@ func (r *Repository) ListDriverPickups(ctx context.Context) ([]DriverPickupItem,
 		FROM users u
 		LEFT JOIN driver d ON LOWER(d.nama_driver) = LOWER(u.username)
 		LEFT JOIN LATERAL (
-			SELECT jumlah_barang, koli, ecer, high_value, status, catatan, asal_seller, updated_at
+			SELECT 
+				COALESCE(SUM(jumlah_barang), 0)::int AS jumlah_barang,
+				COALESCE(SUM(koli), 0)::int AS koli,
+				COALESCE(SUM(ecer), 0)::int AS ecer,
+				COALESCE(SUM(high_value), 0)::int AS high_value,
+				COALESCE((ARRAY_AGG(status ORDER BY id_log DESC))[1], 'standby') AS status,
+				COALESCE(STRING_AGG(DISTINCT NULLIF(TRIM(asal_seller), ''), ', '), '') AS asal_seller,
+				COALESCE((ARRAY_AGG(catatan ORDER BY id_log DESC))[1], '') AS catatan,
+				MAX(updated_at) AS updated_at
 			FROM driver_pickup_log
-			WHERE id_user = u.id_user AND tanggal = CURRENT_DATE
-			ORDER BY id_log DESC
-			LIMIT 1
+			WHERE id_user = u.id_user AND (tanggal = CURRENT_DATE OR tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
 		) l ON TRUE
-		WHERE u.role = 'driver_pickup' AND u.status = 'aktif'
+		WHERE LOWER(TRIM(u.role)) = 'driver_pickup' AND (u.status = 'aktif' OR u.status IS NULL OR u.status = '')
 		ORDER BY u.username ASC
 	`)
 	if err != nil {
@@ -748,7 +754,7 @@ func (r *Repository) ListDriverPickups(ctx context.Context) ([]DriverPickupItem,
 	}
 	defer rows.Close()
 
-	var items []DriverPickupItem
+	items := make([]DriverPickupItem, 0)
 	for rows.Next() {
 		var item DriverPickupItem
 		if err := rows.Scan(
@@ -763,7 +769,7 @@ func (r *Repository) ListDriverPickups(ctx context.Context) ([]DriverPickupItem,
 	return items, rows.Err()
 }
 
-// SaveDriverPickupBarang mencatat log muatan driver pickup.
+// SaveDriverPickupBarang mencatat log muatan driver pickup (single).
 func (r *Repository) SaveDriverPickupBarang(ctx context.Context, req DriverPickupInput, createdBy string) error {
 	status := req.Status
 	if status == "" {
@@ -771,9 +777,42 @@ func (r *Repository) SaveDriverPickupBarang(ctx context.Context, req DriverPicku
 	}
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO driver_pickup_log (id_user, nama_driver, tanggal, jumlah_barang, koli, ecer, high_value, status, catatan, asal_seller, created_by, updated_at)
-		VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
+		VALUES ($1, $2, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
 	`, req.IDUser, req.NamaDriver, req.JumlahBarang, req.Koli, req.Ecer, req.HighValue, status, req.Catatan, req.AsalSeller, createdBy)
 	return err
+}
+
+// SaveDriverPickupBatch mencatat banyak seller sekaligus untuk satu driver pickup.
+func (r *Repository) SaveDriverPickupBatch(ctx context.Context, req DriverPickupBatchInput, createdBy string) error {
+	if len(req.Items) == 0 {
+		return nil
+	}
+	status := req.Status
+	if status == "" {
+		status = "menuju_gudang"
+	}
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	for _, item := range req.Items {
+		seller := strings.TrimSpace(item.AsalSeller)
+		if seller == "" && item.JumlahBarang <= 0 {
+			continue
+		}
+		_, err := tx.Exec(ctx, `
+			INSERT INTO driver_pickup_log (id_user, nama_driver, tanggal, jumlah_barang, koli, ecer, high_value, status, catatan, asal_seller, created_by, updated_at)
+			VALUES ($1, $2, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
+		`, req.IDUser, req.NamaDriver, item.JumlahBarang, item.Koli, item.Ecer, item.HighValue, status, req.Catatan, seller, createdBy)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
 }
 
 // GetDriverPickupHistory mengambil riwayat muatan untuk satu driver pickup.

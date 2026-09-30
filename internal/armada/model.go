@@ -161,13 +161,31 @@ type DriverPickupItem struct {
 	Koli         int        `json:"koli"`
 	Ecer         int        `json:"ecer"`
 	HighValue    int        `json:"high_value"`
-	Status       string     `json:"status"` // 'menuju_gudang' | 'selesai' | 'standby'
+	Status       string     `json:"status"` // 'menuju_gudang' | 'menuju_seller' | 'selesai' | 'standby'
 	Catatan      string     `json:"catatan"`
 	AsalSeller   string     `json:"asal_seller"`
 	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
 }
 
-// DriverPickupInput payload untuk input/update muatan driver pickup.
+// DriverPickupSellerItem satu entri seller pada multi-input driver pickup.
+type DriverPickupSellerItem struct {
+	AsalSeller   string `json:"asal_seller"`
+	JumlahBarang int    `json:"jumlah_barang"`
+	Koli         int    `json:"koli"`
+	Ecer         int    `json:"ecer"`
+	HighValue    int    `json:"high_value"`
+}
+
+// DriverPickupBatchInput payload untuk simpan banyak seller sekaligus untuk 1 driver.
+type DriverPickupBatchInput struct {
+	IDUser     int64                    `json:"id_user"`
+	NamaDriver string                   `json:"nama_driver"`
+	Status     string                   `json:"status"` // 'menuju_gudang' | 'menuju_seller' | 'selesai' | 'standby'
+	Catatan    string                   `json:"catatan"`
+	Items      []DriverPickupSellerItem `json:"items"`
+}
+
+// DriverPickupInput payload untuk input/update muatan driver pickup (single).
 type DriverPickupInput struct {
 	IDUser       int64  `json:"id_user"`
 	NamaDriver   string `json:"nama_driver"`
@@ -175,7 +193,7 @@ type DriverPickupInput struct {
 	Koli         int    `json:"koli"`
 	Ecer         int    `json:"ecer"`
 	HighValue    int    `json:"high_value"`
-	Status       string `json:"status"` // 'menuju_gudang' | 'selesai' | 'standby'
+	Status       string `json:"status"` // 'menuju_gudang' | 'menuju_seller' | 'selesai' | 'standby'
 	Catatan      string `json:"catatan"`
 	AsalSeller   string `json:"asal_seller"`
 }
