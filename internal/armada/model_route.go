@@ -6,25 +6,25 @@ package armada
 
 // RitaseStop adalah satu titik dalam rute ritase (gudang -> seller(s) -> drop_point/GTW).
 type RitaseStop struct {
-	IDStop         int64   `json:"id_stop"`
-	IDRitase       int64   `json:"id_ritase"`
-	Urutan         int     `json:"urutan"`
-	JenisStop      string  `json:"jenis_stop"` // gudang | seller | drop_point
-	IDGudang       *int64  `json:"id_gudang,omitempty"`
-	NamaGudang     *string `json:"nama_gudang,omitempty"`
-	TipeGudang     *string `json:"tipe_gudang,omitempty"`
-	IDSeller       *int64  `json:"id_seller,omitempty"`
-	IDDropPoint    *int64  `json:"id_drop_point,omitempty"`
-	NamaSeller     *string `json:"nama_seller,omitempty"`
-	NamaDropPoint  *string `json:"nama_drop_point,omitempty"`
-	Keterangan     *string `json:"keterangan,omitempty"`
-	Latitude       *float64 `json:"latitude,omitempty"`
-	Longitude      *float64 `json:"longitude,omitempty"`
+	IDStop          int64    `json:"id_stop"`
+	IDRitase        int64    `json:"id_ritase"`
+	Urutan          int      `json:"urutan"`
+	JenisStop       string   `json:"jenis_stop"` // gudang | seller | drop_point
+	IDGudang        *int64   `json:"id_gudang,omitempty"`
+	NamaGudang      *string  `json:"nama_gudang,omitempty"`
+	TipeGudang      *string  `json:"tipe_gudang,omitempty"`
+	IDSeller        *int64   `json:"id_seller,omitempty"`
+	IDDropPoint     *int64   `json:"id_drop_point,omitempty"`
+	NamaSeller      *string  `json:"nama_seller,omitempty"`
+	NamaDropPoint   *string  `json:"nama_drop_point,omitempty"`
+	Keterangan      *string  `json:"keterangan,omitempty"`
+	Latitude        *float64 `json:"latitude,omitempty"`
+	Longitude       *float64 `json:"longitude,omitempty"`
 	JumlahKoli      *int     `json:"jumlah_koli,omitempty"`
 	JumlahEcer      *int     `json:"jumlah_ecer,omitempty"`
 	JumlahHighValue *int     `json:"jumlah_high_value,omitempty"`
 	DurasiDetik     *int     `json:"durasi_detik,omitempty"`
-	FotoManifestURL *string `json:"foto_manifest_url,omitempty"`
+	FotoManifestURL *string  `json:"foto_manifest_url,omitempty"`
 }
 
 // RitaseStopRequest adalah satu titik rute saat membuat ritase.
@@ -48,11 +48,11 @@ type GudangPoint struct {
 
 // DropPointPoi posisi drop_point (Gateway JKT/SEG) untuk peta.
 type DropPointPoi struct {
-	IDDropPoint  int64    `json:"id_drop_point"`
-	KodeDP       string   `json:"kode_dp,omitempty"`
-	NamaDP       string   `json:"nama_drop_point,omitempty"`
-	Latitude     float64  `json:"latitude"`
-	Longitude    float64  `json:"longitude"`
+	IDDropPoint int64   `json:"id_drop_point"`
+	KodeDP      string  `json:"kode_dp,omitempty"`
+	NamaDP      string  `json:"nama_drop_point,omitempty"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
 	// Jarak dari OUTGOING & dari DC, dihitung sekali via tools/fill_jarak.
 	JarakTempuhKm *float64 `json:"jarak_tempuh_km,omitempty"` // dari Gudang Outgoing
 	JarakDcKm     *float64 `json:"jarak_dc_km,omitempty"`     // dari Gudang DC
@@ -60,22 +60,20 @@ type DropPointPoi struct {
 
 // SellerLocation lokasi toko seller untuk peta (termasuk kontak PIC/NoHP).
 type SellerLocation struct {
-	IDSeller        int64    `json:"id_seller"`
-	KodeSeller      string   `json:"kode_seller,omitempty"`
-	NamaSeller      string   `json:"nama_seller"`
-	Alamat          string   `json:"alamat"`
-	Kota            string   `json:"kota"`
-	PIC             string   `json:"pic,omitempty"`
-	NoHP            string   `json:"no_hp,omitempty"`
-Latitude       float64  `json:"latitude"`
-	Longitude      float64  `json:"longitude"`
+	IDSeller   int64   `json:"id_seller"`
+	KodeSeller string  `json:"kode_seller,omitempty"`
+	NamaSeller string  `json:"nama_seller"`
+	Alamat     string  `json:"alamat"`
+	Kota       string  `json:"kota"`
+	PIC        string  `json:"pic,omitempty"`
+	NoHP       string  `json:"no_hp,omitempty"`
+	Latitude   float64 `json:"latitude"`
+	Longitude  float64 `json:"longitude"`
 	// Jarak dari OUTGOING & dari DC (Buaran Indah), dihitung sekali via tools/fill_jarak.
-	JarakTempuhKm  *float64 `json:"jarak_tempuh_km,omitempty"` // dari Gudang Outgoing
-	JarakDcKm      *float64 `json:"jarak_dc_km,omitempty"`     // dari Gudang DC
-	JumlahBarang   *int     `json:"jumlah_barang,omitempty"`
-	Koli           *int     `json:"koli,omitempty"`
-	Ecer           *int     `json:"ecer,omitempty"`
-	HighValue      *int     `json:"high_value,omitempty"`
-	StatusPickup   *string  `json:"status_pickup,omitempty"`
-	CatatanPickup  *string  `json:"catatan_pickup,omitempty"`
+	JarakTempuhKm *float64 `json:"jarak_tempuh_km,omitempty"` // dari Gudang Outgoing
+	JarakDcKm     *float64 `json:"jarak_dc_km,omitempty"`     // dari Gudang DC
+	// Muatan hari ini dari input kapten (ritase_event)
+	TotalKoli      *int `json:"total_koli,omitempty"`
+	TotalEcer      *int `json:"total_ecer,omitempty"`
+	TotalHighValue *int `json:"total_high_value,omitempty"`
 }

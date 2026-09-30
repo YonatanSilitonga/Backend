@@ -1,0 +1,2 @@
+ALTER TABLE ritase_event ADD COLUMN IF NOT EXISTS input_by VARCHAR(50) DEFAULT 'driver';
+ALTER TABLE ritase_event ADD COLUMN IF NOT EXISTS input_by_id INTEGER;

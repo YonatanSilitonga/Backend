@@ -46,7 +46,11 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*AuthResponse, e
 	if user.IDDriver != nil {
 		idDriver = *user.IDDriver
 	}
-	token, err := s.jwt.Generate(user.ID, user.Username, user.Role, idDriver)
+	var idSeller int64
+	if user.IDSeller != nil {
+		idSeller = *user.IDSeller
+	}
+	token, err := s.jwt.Generate(user.ID, user.Username, user.Role, idDriver, idSeller)
 	if err != nil {
 		return nil, err
 	}

@@ -15,6 +15,7 @@ import (
 	"backend/internal/database"
 	"backend/internal/driver"
 	"backend/internal/eventbus"
+	"backend/internal/kapten"
 	"backend/internal/kendaraan"
 	"backend/internal/mobile_api"
 	appJWT "backend/internal/pkg/jwt"
@@ -155,6 +156,9 @@ func main() {
 	// Inisialisasi API Handler Mobile milik Whisnu
 	handler := mobile_api.NewAPIHandler(db, eventBus, cfg.TrackerAPIKey)
 
+	// Kapten handler (seller implant)
+	kaptenH := kapten.NewHandler(db, eventBus, jwtManager)
+
 	v1 := e.Group("/api/v1")
 	v1.GET("/sellers", handler.GetSellers)
 	v1.GET("/drivers", handler.GetDrivers)
@@ -178,6 +182,9 @@ func main() {
 	v1.GET("/driver/history-ritase", handler.GetDriverHistoryRitase, authMW)
 	v1.GET("/driver/history-ritase/:id", handler.GetDriverHistoryDetail, authMW)
 
+	// Kapten endpoints (seller implant) — butuh JWT + role kapten
+	kaptenH.RegisterRoutes(v1, authMW)
+
 	// GPS tracker hardware — sumber posisi cadangan saat HP mati.
 	// Tanpa JWT (device tidak login), dilindungi header X-Tracker-Key.
 	v1.POST("/tracker/gps", handler.PostTrackerGPS)
@@ -194,10 +201,11 @@ func main() {
 	v1.GET("/ritases", handler.AdminGetRitases, authMW)
 	v1.GET("/master-options", handler.AdminGetMasterOptions, authMW)
 	v1.GET("/manifest-photos", handler.AdminGetManifestPhotos, authMW)
+	v1.GET("/manifest-konfirmasi-penjemputan", handler.AdminGetKonfirmasiPenjemputan, authMW)
 	v1.GET("/ritase/generate/preview", handler.AdminPreviewGenerateDailyRitase, authMW)
 
-	// ── RITASE WRITE ENDPOINTS (admin + direktur + tower_control) ──
-	ritaseWriteMW := []echo.MiddlewareFunc{authMW, appMiddleware.RequireRoles("admin", "direktur", "tower_control")}
+	// ── RITASE WRITE ENDPOINTS (admin + direktur + tower_control + kapten) ──
+	ritaseWriteMW := []echo.MiddlewareFunc{authMW, appMiddleware.RequireRoles("admin", "direktur", "tower_control", "kapten")}
 	ritaseWrite := v1.Group("/ritase", ritaseWriteMW...)
 	ritaseWrite.POST("/generate", handler.AdminGenerateDailyRitase)
 	ritaseWrite.POST("", handler.AdminCreateRitase)

@@ -13,12 +13,14 @@ import (
 const (
 	// CtxUserID adalah key di Echo context untuk user ID dari token.
 	CtxUserID = "auth_user_id"
-	// CtxRole adalah key di Echo context untuk role dari token.
-	CtxRole = "auth_role"
 	// CtxUsername adalah key di Echo context untuk username dari token.
 	CtxUsername = "auth_username"
+	// CtxRole adalah key di Echo context untuk role dari token.
+	CtxRole = "auth_role"
 	// CtxDriverID adalah key di Echo context untuk id_driver dari token (jika ada).
 	CtxDriverID = "auth_driver_id"
+	// CtxSellerID adalah key di Echo context untuk id_seller dari token (jika ada, untuk kapten).
+	CtxSellerID = "auth_seller_id"
 )
 
 // Auth adalah middleware untuk memvalidasi JWT dari header Authorization.
@@ -41,9 +43,10 @@ func Auth(jwtManager *jwt.Manager) echo.MiddlewareFunc {
 			}
 
 			c.Set(CtxUserID, claims.UserID)
-			c.Set(CtxRole, claims.Role)
 			c.Set(CtxUsername, claims.Username)
+			c.Set(CtxRole, claims.Role)
 			c.Set(CtxDriverID, claims.IDDriver)
+			c.Set(CtxSellerID, claims.IDSeller)
 
 			return next(c)
 		}

@@ -86,7 +86,7 @@ func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 
 /* ---------- Ritase ---------- */
 
-	const ritaseSelect = `
+const ritaseSelect = `
 	WITH muatan AS (
 		SELECT id_ritase,
 		       sum(jumlah_koli) AS koli,
@@ -526,15 +526,19 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 		SELECT s.id_seller, COALESCE(s.kode_seller,''), COALESCE(s.nama_seller,''), COALESCE(s.alamat,''),
 		       COALESCE(s.kota,''), COALESCE(s.pic,''), COALESCE(s.no_hp,''),
 		       s.latitude, s.longitude, s.jarak_tempuh_km, s.jarak_dc_km,
-		       ib.jumlah_barang, ib.koli, ib.ecer, ib.high_value, ib.status, ib.catatan
+		       mu.total_koli, mu.total_ecer, mu.total_hv
 		FROM seller s
-		LEFT JOIN LATERAL (
-			SELECT jumlah_barang, COALESCE(koli, 0) AS koli, COALESCE(ecer, 0) AS ecer, COALESCE(high_value, 0) AS high_value, status, catatan
-			FROM implan_barang_log
-			WHERE id_seller = s.id_seller AND (tanggal = CURRENT_DATE OR tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
-			ORDER BY id_log DESC
-			LIMIT 1
-		) ib ON true
+		LEFT JOIN (
+			SELECT rs.id_seller,
+			       SUM(re.jumlah_koli) AS total_koli,
+			       SUM(re.jumlah_ecer) AS total_ecer,
+			       SUM(re.jumlah_high_value) AS total_hv
+			FROM ritase_event re
+			JOIN ritase r ON r.id_ritase = re.id_ritase
+			JOIN ritase_stop rs ON rs.id_ritase = re.id_ritase AND rs.id_seller IS NOT NULL
+			WHERE r.tanggal = CURRENT_DATE AND r.status != 'selesai'
+			GROUP BY rs.id_seller
+		) mu ON mu.id_seller = s.id_seller
 		WHERE s.latitude IS NOT NULL AND s.longitude IS NOT NULL
 		ORDER BY s.id_seller ASC
 	`)
@@ -546,9 +550,10 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 	var items []SellerLocation
 	for rows.Next() {
 		var s SellerLocation
-		if err := rows.Scan(&s.IDSeller, &s.KodeSeller, &s.NamaSeller, &s.Alamat, &s.Kota, &s.PIC, &s.NoHP,
-			&s.Latitude, &s.Longitude, &s.JarakTempuhKm, &s.JarakDcKm,
-			&s.JumlahBarang, &s.Koli, &s.Ecer, &s.HighValue, &s.StatusPickup, &s.CatatanPickup); err != nil {
+		if err := rows.Scan(&s.IDSeller, &s.KodeSeller, &s.NamaSeller, &s.Alamat,
+			&s.Kota, &s.PIC, &s.NoHP, &s.Latitude, &s.Longitude,
+			&s.JarakTempuhKm, &s.JarakDcKm,
+			&s.TotalKoli, &s.TotalEcer, &s.TotalHighValue); err != nil {
 			return nil, err
 		}
 		items = append(items, s)
@@ -841,4 +846,3 @@ func (r *Repository) GetDriverPickupHistory(ctx context.Context, idUser int64) (
 	}
 	return logs, rows.Err()
 }
-

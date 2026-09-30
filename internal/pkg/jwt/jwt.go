@@ -14,6 +14,7 @@ type Claims struct {
 	Username  string `json:"username"`
 	Role      string `json:"role"`
 	IDDriver  int64  `json:"id_driver,omitempty"`
+	IDSeller  int64  `json:"id_seller,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -29,13 +30,18 @@ func NewManager(secret string, ttl time.Duration) *Manager {
 }
 
 // Generate membuat token baru untuk user.
-func (m *Manager) Generate(userID int64, username, role string, idDriver int64) (string, error) {
+func (m *Manager) Generate(userID int64, username, role string, idDriver int64, idSeller ...int64) (string, error) {
+	var sellerID int64
+	if len(idSeller) > 0 {
+		sellerID = idSeller[0]
+	}
 	now := time.Now()
 	claims := Claims{
 		UserID:   userID,
 		Username: username,
 		Role:     role,
 		IDDriver: idDriver,
+		IDSeller: sellerID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(m.ttl)),
 			IssuedAt:  jwt.NewNumericDate(now),

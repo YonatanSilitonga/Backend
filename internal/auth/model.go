@@ -10,6 +10,7 @@ type User struct {
 	Role       string  `json:"role"`
 	KaryawanID *int64  `json:"karyawan_id,omitempty"`
 	IDDriver   *int64  `json:"id_driver,omitempty"`
+	IDSeller   *int64  `json:"id_seller,omitempty"`
 	CreatedAt  time.Time `json:"created_at,omitempty"`
 }
 

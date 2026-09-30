@@ -675,7 +675,8 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 			COALESCE(s.alamat, dp.alamat, g.alamat, 'Gudang Outgoing Utama') AS alamat,
 			COALESCE(s.no_hp, '-') AS no_hp,
 			COALESCE(s.latitude, g.latitude) AS latitude,
-			COALESCE(s.longitude, g.longitude) AS longitude
+			COALESCE(s.longitude, g.longitude) AS longitude,
+			COALESCE(s.is_implant, FALSE) AS is_implant
 		FROM ritase_stop rs
 		LEFT JOIN seller s ON s.id_seller = rs.id_seller
 		LEFT JOIN drop_point dp ON dp.id_drop_point = rs.id_drop_point
@@ -698,8 +699,9 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		var idSeller, idDropPoint, idGudang *int64
 		var keterangan *string
 		var latitude, longitude *float64
+		var isImplant bool
 
-		if err := rows.Scan(&idStop, &urutan, &jenisStop, &idSeller, &idDropPoint, &idGudang, &keterangan, &namaLokasi, &alamat, &noHp, &latitude, &longitude); err == nil {
+		if err := rows.Scan(&idStop, &urutan, &jenisStop, &idSeller, &idDropPoint, &idGudang, &keterangan, &namaLokasi, &alamat, &noHp, &latitude, &longitude, &isImplant); err == nil {
 			stop := map[string]interface{}{
 				"id_stop":       idStop,
 				"urutan":        urutan,
@@ -711,6 +713,7 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 				"nama_lokasi":   namaLokasi,
 				"alamat":        alamat,
 				"no_hp":         noHp,
+				"is_implant":    isImplant,
 			}
 			if latitude != nil {
 				stop["latitude"] = *latitude
@@ -1274,10 +1277,23 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 	if req.FotoManifestURL != "" {
 		fotoURL = req.FotoManifestURL
 	}
+
+	// Ambil driver_id dari JWT
+	var inputByID interface{}
+	if did, ok := c.Get(middleware.CtxDriverID).(int64); ok && did > 0 {
+		inputByID = did
+	}
+
 	_, err := h.DB.Exec(ctx, `
-		INSERT INTO ritase_event (id_ritase, status, latitude, longitude, nama_lokasi, durasi_detik, jumlah_koli, jumlah_ecer, jumlah_high_value, foto_manifest_url)
-		VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9)
-	`, idRitase, req.Status, req.Latitude, req.Longitude, namaLokasi, req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue, fotoURL)
+		INSERT INTO ritase_event (id_ritase, status, latitude, longitude, nama_lokasi, durasi_detik,
+		                          koli_jkt, koli_seg, koli_btn, ecer_jkt, ecer_seg, ecer_btn,
+		                          koli_hv_jkt, koli_hv_seg, koli_hv_btn, ecer_hv_jkt, ecer_hv_seg, ecer_hv_btn,
+		                          jumlah_koli, jumlah_ecer, jumlah_high_value,
+		                          foto_manifest_url, input_by, input_by_id)
+		VALUES ($1, $2, $3, $4, $5, 0,
+		        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		        0, 0, 0, $6, 'driver', $7)
+	`, idRitase, req.Status, req.Latitude, req.Longitude, namaLokasi, fotoURL, inputByID)
 	if err != nil {
 		log.Printf("[PostTripStatus] Gagal insert ritase_event: %v", err)
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan event: "+err.Error())
@@ -1401,7 +1417,7 @@ func (h *APIHandler) UploadManifest(c echo.Context) error {
 			_, _ = h.DB.Exec(ctx, `
 				UPDATE ritase_event
 				SET foto_manifest_url = $1
-				WHERE id_ritase = $2 AND (nama_lokasi = $3 OR POSITION(LOWER($3) in LOWER(nama_lokasi)) > 0 OR POSITION(LOWER(nama_lokasi) in LOWER($3)) > 0)
+				WHERE id_ritase = $2 AND input_by = 'driver' AND (nama_lokasi = $3 OR POSITION(LOWER($3) in LOWER(nama_lokasi)) > 0 OR POSITION(LOWER(nama_lokasi) in LOWER($3)) > 0)
 			`, photoURL, idRitase, namaLokasi)
 		} else {
 			_, _ = h.DB.Exec(ctx, `

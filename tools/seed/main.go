@@ -82,6 +82,10 @@ func main() {
 	hashAwaludin, _ := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.DefaultCost)
 	exec(ctx, "INSERT INTO users (username, password, role) VALUES ('AWALUDIN',$1,'driver') ON CONFLICT (username) DO NOTHING", string(hashAwaludin))
 
+	// ---------- kapten (seller implant) ----------
+	hashKapten, _ := bcrypt.GenerateFromPassword([]byte("kapten123"), bcrypt.DefaultCost)
+	exec(ctx, "INSERT INTO users (username, password, role) VALUES ('kapten',$1,'kapten') ON CONFLICT (username) DO NOTHING", string(hashKapten))
+
 	// ---------- ritase ----------
 	today := time.Now().Format("2006-01-02")
 	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
