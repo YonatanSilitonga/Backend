@@ -474,15 +474,15 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 		       t.id_driver, COALESCE(d.nama_driver,''),
 		       t.latitude, t.longitude, t.kecepatan, t.arah, t.status,
 		       COALESCE(NULLIF(t.nama_lokasi, ''), re.nama_lokasi, ''),
-		       COALESCE(re.jumlah_koli, 0),
-		       COALESCE(re.jumlah_ecer, 0),
-		       COALESCE(re.jumlah_high_value, 0),
+		       COALESCE(t.jumlah_koli, re.jumlah_koli, 0),
+		       COALESCE(t.jumlah_ecer, re.jumlah_ecer, 0),
+		       COALESCE(t.jumlah_high_value, re.jumlah_high_value, 0),
 		       t.last_update,
 		       %s AS offline,
 		       (u.last_login IS NOT NULL AND u.last_login > now() - make_interval(hours => %d)) AS session_online,
 		       u.last_login, u.last_open,
 		       COALESCE(u.role, 'driver') AS role_driver,
-		       COALESCE(r.total_awb, re.jumlah_koli, 0) AS total_awb
+		       COALESCE(r.total_awb, t.jumlah_koli, re.jumlah_koli, 0) AS total_awb
 		FROM armada_tracking t
 		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
 		LEFT JOIN ritase r ON r.id_ritase = t.id_ritase
@@ -739,17 +739,53 @@ func (r *Repository) ListDriverPickups(ctx context.Context) ([]DriverPickupItem,
 		FROM users u
 		LEFT JOIN driver d ON LOWER(d.nama_driver) = LOWER(u.username)
 		LEFT JOIN LATERAL (
+			WITH last_selesai AS (
+				SELECT COALESCE(MAX(id_log), 0) AS max_selesai_id
+				FROM driver_pickup_log
+				WHERE id_user = u.id_user 
+				  AND status = 'selesai'
+				  AND (tanggal = CURRENT_DATE OR tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
+			),
+			active_logs AS (
+				SELECT dpl.*
+				FROM driver_pickup_log dpl, last_selesai ls
+				WHERE dpl.id_user = u.id_user
+				  AND (dpl.tanggal = CURRENT_DATE OR dpl.tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
+				  AND dpl.id_log > ls.max_selesai_id
+			),
+			latest_overall AS (
+				SELECT status, catatan, updated_at, asal_seller
+				FROM driver_pickup_log
+				WHERE id_user = u.id_user
+				  AND (tanggal = CURRENT_DATE OR tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
+				ORDER BY id_log DESC
+				LIMIT 1
+			)
 			SELECT 
-				COALESCE(SUM(jumlah_barang), 0)::int AS jumlah_barang,
-				COALESCE(SUM(koli), 0)::int AS koli,
-				COALESCE(SUM(ecer), 0)::int AS ecer,
-				COALESCE(SUM(high_value), 0)::int AS high_value,
-				COALESCE((ARRAY_AGG(status ORDER BY id_log DESC))[1], 'standby') AS status,
-				COALESCE(STRING_AGG(DISTINCT NULLIF(TRIM(asal_seller), ''), ', '), '') AS asal_seller,
-				COALESCE((ARRAY_AGG(catatan ORDER BY id_log DESC))[1], '') AS catatan,
-				MAX(updated_at) AS updated_at
-			FROM driver_pickup_log
-			WHERE id_user = u.id_user AND (tanggal = CURRENT_DATE OR tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
+				COALESCE(SUM(al.jumlah_barang), 0)::int AS jumlah_barang,
+				COALESCE(SUM(al.koli), 0)::int AS koli,
+				COALESCE(SUM(al.ecer), 0)::int AS ecer,
+				COALESCE(SUM(al.high_value), 0)::int AS high_value,
+				COALESCE(
+					(ARRAY_AGG(al.status ORDER BY al.id_log DESC))[1],
+					(SELECT lo.status FROM latest_overall lo),
+					'standby'
+				) AS status,
+				COALESCE(
+					NULLIF(
+						STRING_AGG(DISTINCT NULLIF(TRIM(CASE WHEN al.asal_seller <> 'Gudang' THEN al.asal_seller END), ''), ', '),
+						''
+					),
+					(SELECT lo.asal_seller FROM latest_overall lo),
+					'Gudang'
+				) AS asal_seller,
+				COALESCE(
+					(ARRAY_AGG(al.catatan ORDER BY al.id_log DESC))[1],
+					(SELECT lo.catatan FROM latest_overall lo),
+					''
+				) AS catatan,
+				COALESCE(MAX(al.updated_at), (SELECT lo.updated_at FROM latest_overall lo)) AS updated_at
+			FROM active_logs al
 		) l ON TRUE
 		WHERE LOWER(TRIM(u.role)) = 'driver_pickup' AND (u.status = 'aktif' OR u.status IS NULL OR u.status = '')
 		ORDER BY u.username ASC
