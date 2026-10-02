@@ -76,4 +76,11 @@ type SellerLocation struct {
 	TotalKoli      *int `json:"total_koli,omitempty"`
 	TotalEcer      *int `json:"total_ecer,omitempty"`
 	TotalHighValue *int `json:"total_high_value,omitempty"`
+	// Status log barang hari ini untuk implan
+	JumlahBarang  *int    `json:"jumlah_barang,omitempty"`
+	Koli          *int    `json:"koli,omitempty"`
+	Ecer          *int    `json:"ecer,omitempty"`
+	HighValue     *int    `json:"high_value,omitempty"`
+	StatusPickup  *string `json:"status_pickup,omitempty"`
+	CatatanPickup *string `json:"catatan_pickup,omitempty"`
 }

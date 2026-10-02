@@ -474,15 +474,15 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 		       t.id_driver, COALESCE(d.nama_driver,''),
 		       t.latitude, t.longitude, t.kecepatan, t.arah, t.status,
 		       COALESCE(NULLIF(t.nama_lokasi, ''), re.nama_lokasi, ''),
-		       COALESCE(t.jumlah_koli, re.jumlah_koli, 0),
-		       COALESCE(t.jumlah_ecer, re.jumlah_ecer, 0),
-		       COALESCE(t.jumlah_high_value, re.jumlah_high_value, 0),
+		       COALESCE(NULLIF(pl.pickup_koli, 0), t.jumlah_koli, re.jumlah_koli, 0),
+		       COALESCE(NULLIF(pl.pickup_ecer, 0), t.jumlah_ecer, re.jumlah_ecer, 0),
+		       COALESCE(NULLIF(pl.pickup_hv, 0), t.jumlah_high_value, re.jumlah_high_value, 0),
 		       t.last_update,
 		       %s AS offline,
 		       (u.last_login IS NOT NULL AND u.last_login > now() - make_interval(hours => %d)) AS session_online,
 		       u.last_login, u.last_open,
 		       COALESCE(u.role, 'driver') AS role_driver,
-		       COALESCE(r.total_awb, t.jumlah_koli, re.jumlah_koli, 0) AS total_awb
+		       COALESCE(NULLIF(pl.pickup_awb, 0), r.total_awb, t.jumlah_koli, re.jumlah_koli, 0) AS total_awb
 		FROM armada_tracking t
 		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
 		LEFT JOIN ritase r ON r.id_ritase = t.id_ritase
@@ -496,6 +496,28 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 			ORDER BY ev.created_at DESC, ev.id_event DESC
 			LIMIT 1
 		) re ON true
+		LEFT JOIN LATERAL (
+			WITH last_selesai AS (
+				SELECT COALESCE(MAX(id_log), 0) AS max_selesai_id
+				FROM driver_pickup_log
+				WHERE id_user = u.id_user 
+				  AND status = 'selesai'
+				  AND (tanggal = CURRENT_DATE OR tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
+			),
+			active_logs AS (
+				SELECT dpl.*
+				FROM driver_pickup_log dpl, last_selesai ls
+				WHERE dpl.id_user = u.id_user
+				  AND (dpl.tanggal = CURRENT_DATE OR dpl.tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
+				  AND dpl.id_log > ls.max_selesai_id
+			)
+			SELECT 
+				COALESCE(SUM(al.jumlah_barang), 0)::int AS pickup_awb,
+				COALESCE(SUM(al.koli), 0)::int AS pickup_koli,
+				COALESCE(SUM(al.ecer), 0)::int AS pickup_ecer,
+				COALESCE(SUM(al.high_value), 0)::int AS pickup_hv
+			FROM active_logs al
+		) pl ON true
 		ORDER BY t.last_update DESC
 	`, offlineExpr, sessionHours))
 	if err != nil {
@@ -526,7 +548,8 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 		SELECT s.id_seller, COALESCE(s.kode_seller,''), COALESCE(s.nama_seller,''), COALESCE(s.alamat,''),
 		       COALESCE(s.kota,''), COALESCE(s.pic,''), COALESCE(s.no_hp,''),
 		       s.latitude, s.longitude, s.jarak_tempuh_km, s.jarak_dc_km,
-		       mu.total_koli, mu.total_ecer, mu.total_hv
+		       mu.total_koli, mu.total_ecer, mu.total_hv,
+		       ibl.jumlah_barang, ibl.koli, ibl.ecer, ibl.high_value, ibl.status, ibl.catatan
 		FROM seller s
 		LEFT JOIN (
 			SELECT rs.id_seller,
@@ -536,9 +559,17 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 			FROM ritase_event re
 			JOIN ritase r ON r.id_ritase = re.id_ritase
 			JOIN ritase_stop rs ON rs.id_ritase = re.id_ritase AND rs.id_seller IS NOT NULL
-			WHERE r.tanggal = CURRENT_DATE AND r.status != 'selesai'
+			WHERE (r.tanggal = CURRENT_DATE OR r.tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE) AND r.status != 'selesai'
 			GROUP BY rs.id_seller
 		) mu ON mu.id_seller = s.id_seller
+		LEFT JOIN LATERAL (
+			SELECT log.jumlah_barang, log.koli, log.ecer, log.high_value, log.status, log.catatan
+			FROM implan_barang_log log
+			WHERE log.id_seller = s.id_seller
+			  AND (log.tanggal = CURRENT_DATE OR log.tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
+			ORDER BY log.id_log DESC
+			LIMIT 1
+		) ibl ON TRUE
 		WHERE s.latitude IS NOT NULL AND s.longitude IS NOT NULL
 		ORDER BY s.id_seller ASC
 	`)
@@ -553,7 +584,8 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 		if err := rows.Scan(&s.IDSeller, &s.KodeSeller, &s.NamaSeller, &s.Alamat,
 			&s.Kota, &s.PIC, &s.NoHP, &s.Latitude, &s.Longitude,
 			&s.JarakTempuhKm, &s.JarakDcKm,
-			&s.TotalKoli, &s.TotalEcer, &s.TotalHighValue); err != nil {
+			&s.TotalKoli, &s.TotalEcer, &s.TotalHighValue,
+			&s.JumlahBarang, &s.Koli, &s.Ecer, &s.HighValue, &s.StatusPickup, &s.CatatanPickup); err != nil {
 			return nil, err
 		}
 		items = append(items, s)
@@ -854,6 +886,63 @@ func (r *Repository) SaveDriverPickupBatch(ctx context.Context, req DriverPickup
 	}
 
 	return tx.Commit(ctx)
+}
+
+// ListAllDriverPickupHistory mengambil seluruh riwayat muatan driver pickup dengan filter tanggal dan driver opsional.
+func (r *Repository) ListAllDriverPickupHistory(ctx context.Context, idUser int64, startDate, endDate, status string, limit int) ([]DriverPickupLog, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 500
+	}
+
+	query := `
+		SELECT id_log, id_user, nama_driver, TO_CHAR(tanggal, 'YYYY-MM-DD'), jumlah_barang, COALESCE(koli, 0), COALESCE(ecer, 0), COALESCE(high_value, 0), status,
+		       COALESCE(catatan, ''), COALESCE(asal_seller, ''), COALESCE(created_by, ''), created_at, updated_at
+		FROM driver_pickup_log
+		WHERE 1=1
+	`
+	args := []interface{}{}
+	argIdx := 1
+
+	if idUser > 0 {
+		query += fmt.Sprintf(" AND id_user = $%d", argIdx)
+		args = append(args, idUser)
+		argIdx++
+	}
+	if startDate != "" {
+		query += fmt.Sprintf(" AND tanggal >= $%d::DATE", argIdx)
+		args = append(args, startDate)
+		argIdx++
+	}
+	if endDate != "" {
+		query += fmt.Sprintf(" AND tanggal <= $%d::DATE", argIdx)
+		args = append(args, endDate)
+		argIdx++
+	}
+	if status != "" && status != "all" {
+		query += fmt.Sprintf(" AND LOWER(status) = LOWER($%d)", argIdx)
+		args = append(args, status)
+		argIdx++
+	}
+
+	query += fmt.Sprintf(" ORDER BY id_log DESC LIMIT $%d", argIdx)
+	args = append(args, limit)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []DriverPickupLog
+	for rows.Next() {
+		var l DriverPickupLog
+		if err := rows.Scan(&l.ID, &l.IDUser, &l.NamaDriver, &l.Tanggal, &l.JumlahBarang, &l.Koli, &l.Ecer, &l.HighValue, &l.Status,
+			&l.Catatan, &l.AsalSeller, &l.CreatedBy, &l.CreatedAt, &l.UpdatedAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, rows.Err()
 }
 
 // GetDriverPickupHistory mengambil riwayat muatan untuk satu driver pickup.

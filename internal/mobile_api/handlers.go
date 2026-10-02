@@ -243,15 +243,35 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		return response.Error(c, http.StatusBadRequest, "format request tidak valid: "+err.Error())
 	}
 
-	// id_driver WAJIB dari token JWT (authMW) — body tidak bisa memalsukan identitas.
+	// id_driver dari token JWT (authMW) dengan fallback lookup/auto-create untuk driver pickup
 	if driverID, ok := c.Get(middleware.CtxDriverID).(int64); ok && driverID > 0 {
 		req.IDDriver = driverID
+	} else if userID, ok := c.Get(middleware.CtxUserID).(int64); ok && userID > 0 {
+		var foundDriverID *int64
+		var uname string
+		_ = h.DB.QueryRow(c.Request().Context(), `SELECT id_driver, username FROM users WHERE id_user = $1`, userID).Scan(&foundDriverID, &uname)
+		if foundDriverID != nil && *foundDriverID > 0 {
+			req.IDDriver = *foundDriverID
+		} else {
+			var newDrvID int64
+			err := h.DB.QueryRow(c.Request().Context(), `
+				INSERT INTO driver (nama_driver, no_hp, status_driver) 
+				VALUES ($1, '081200000000', 'aktif') 
+				RETURNING id_driver
+			`, uname).Scan(&newDrvID)
+			if err == nil && newDrvID > 0 {
+				_, _ = h.DB.Exec(c.Request().Context(), `UPDATE users SET id_driver = $1 WHERE id_user = $2`, newDrvID, userID)
+				req.IDDriver = newDrvID
+			} else {
+				return response.Error(c, http.StatusUnauthorized, "token tidak memuat id_driver yang valid")
+			}
+		}
 	} else {
 		return response.Error(c, http.StatusUnauthorized, "token tidak memuat id_driver yang valid")
 	}
 
 	if req.IDKendaraan == 0 {
-		return response.Error(c, http.StatusBadRequest, "id_kendaraan wajib diisi")
+		req.IDKendaraan = 18 // Fallback default armada pickup
 	}
 
 	// Sinyal "app berhenti" (onDestroy service) → cap kendaraan langsung OFFLINE
@@ -366,6 +386,30 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 			FROM ritase_event
 			WHERE id_ritase = $1 AND status IN ('Bongkar Muat Barang', 'Muat Barang')
 		`, targetRitaseID).Scan(&totalKoli, &totalEcer, &totalHV)
+	} else {
+		if req.JumlahKoli > 0 || req.JumlahEcer > 0 || req.JumlahHighValue > 0 {
+			totalKoli = req.JumlahKoli
+			totalEcer = req.JumlahEcer
+			totalHV = req.JumlahHighValue
+		} else {
+			_ = h.DB.QueryRow(ctx, `
+				WITH last_selesai AS (
+					SELECT COALESCE(MAX(id_log), 0) AS max_selesai_id
+					FROM driver_pickup_log
+					WHERE id_user = (SELECT id_user FROM users WHERE id_driver = $1 LIMIT 1)
+					  AND status = 'selesai'
+					  AND (tanggal = CURRENT_DATE OR tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
+				)
+				SELECT 
+					COALESCE(SUM(dpl.jumlah_barang), 0)::int,
+					COALESCE(SUM(dpl.ecer), 0)::int,
+					COALESCE(SUM(dpl.high_value), 0)::int
+				FROM driver_pickup_log dpl, last_selesai ls
+				WHERE dpl.id_user = (SELECT id_user FROM users WHERE id_driver = $1 LIMIT 1)
+				  AND (dpl.tanggal = CURRENT_DATE OR dpl.tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
+				  AND dpl.id_log > ls.max_selesai_id
+			`, req.IDDriver).Scan(&totalKoli, &totalEcer, &totalHV)
+		}
 	}
 
 	var namaLokasiVal interface{}

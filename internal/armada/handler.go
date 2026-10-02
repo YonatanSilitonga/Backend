@@ -316,6 +316,31 @@ func (h *Handler) SaveDriverPickupBatch(c echo.Context) error {
 	return response.OK(c, map[string]string{"message": "seluruh muatan driver pickup berhasil disimpan"})
 }
 
+// ListAllDriverPickupHistory menangani GET /armada/pickup/history
+func (h *Handler) ListAllDriverPickupHistory(c echo.Context) error {
+	var idUser int64
+	if idStr := c.QueryParam("id_user"); idStr != "" {
+		idUser, _ = strconv.ParseInt(idStr, 10, 64)
+	}
+	startDate := c.QueryParam("start_date")
+	endDate := c.QueryParam("end_date")
+	if tanggal := c.QueryParam("tanggal"); tanggal != "" && startDate == "" && endDate == "" {
+		startDate = tanggal
+		endDate = tanggal
+	}
+	status := c.QueryParam("status")
+	limit, _ := strconv.Atoi(c.QueryParam("limit"))
+
+	logs, err := h.svc.ListAllDriverPickupHistory(c.Request().Context(), idUser, startDate, endDate, status, limit)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil riwayat pickup: "+err.Error())
+	}
+	if logs == nil {
+		logs = []DriverPickupLog{}
+	}
+	return response.OK(c, logs)
+}
+
 // GetDriverPickupHistory menangani GET /armada/pickup/:id/history
 func (h *Handler) GetDriverPickupHistory(c echo.Context) error {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -350,6 +375,7 @@ func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	g.GET("/armada/implan/:id/history", h.GetImplanBarangHistory, authMW)
 
 	g.GET("/armada/pickup/drivers", h.ListDriverPickups, authMW)
+	g.GET("/armada/pickup/history", h.ListAllDriverPickupHistory, authMW)
 	g.POST("/armada/pickup/barang", h.SaveDriverPickupBarang, authMW)
 	g.POST("/armada/pickup/batch", h.SaveDriverPickupBatch, authMW)
 	g.GET("/armada/pickup/:id/history", h.GetDriverPickupHistory, authMW)

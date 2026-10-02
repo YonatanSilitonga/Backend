@@ -120,6 +120,10 @@ func (s *Service) SaveDriverPickupBatch(ctx context.Context, req DriverPickupBat
 	return s.repo.SaveDriverPickupBatch(ctx, req, createdBy)
 }
 
+func (s *Service) ListAllDriverPickupHistory(ctx context.Context, idUser int64, startDate, endDate, status string, limit int) ([]DriverPickupLog, error) {
+	return s.repo.ListAllDriverPickupHistory(ctx, idUser, startDate, endDate, status, limit)
+}
+
 func (s *Service) GetDriverPickupHistory(ctx context.Context, idUser int64) ([]DriverPickupLog, error) {
 	return s.repo.GetDriverPickupHistory(ctx, idUser)
 }
