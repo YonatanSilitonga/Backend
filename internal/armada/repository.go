@@ -28,7 +28,7 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id_kendaraan, plat_nomor, jenis_kendaraan,
-		       kapasitas_kg, status_kendaraan
+		       kapasitas_koli, kapasitas_kg, status_kendaraan
 		FROM kendaraan
 		ORDER BY id_kendaraan
 	`)
@@ -41,7 +41,7 @@ func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	for rows.Next() {
 		var k Kendaraan
 		if err := rows.Scan(&k.ID, &k.PlatNomor, &k.JenisKendaraan,
-			&k.KapasitasKg, &k.StatusKendaraan); err != nil {
+			&k.KapasitasKoli, &k.KapasitasKg, &k.StatusKendaraan); err != nil {
 			return nil, err
 		}
 		items = append(items, k)
@@ -662,7 +662,30 @@ func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan, idDri
 	}
 	if tanggal != "" {
 		args = append(args, tanggal)
-		query += " AND (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $" + fmt.Sprint(len(args))
+		// Cross-midnight: return ALL events from any ritase that has ≥1 event on selected date.
+		// This ensures trips spanning midnight show complete logs.
+		if idDriver > 0 {
+			args = append(args, idDriver)
+			query += " AND e.id_ritase IN (" +
+				"SELECT e2.id_ritase FROM ritase_event e2 " +
+				"JOIN ritase r2 ON r2.id_ritase = e2.id_ritase " +
+				"WHERE (e2.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $" + fmt.Sprint(len(args)-1) +
+				" AND r2.id_driver = $" + fmt.Sprint(len(args)) +
+				")"
+		} else if idKendaraan > 0 {
+			args = append(args, idKendaraan)
+			query += " AND e.id_ritase IN (" +
+				"SELECT e2.id_ritase FROM ritase_event e2 " +
+				"JOIN ritase r2 ON r2.id_ritase = e2.id_ritase " +
+				"WHERE (e2.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $" + fmt.Sprint(len(args)-1) +
+				" AND r2.id_kendaraan = $" + fmt.Sprint(len(args)) +
+				")"
+		} else {
+			query += " AND e.id_ritase IN (" +
+				"SELECT e2.id_ritase FROM ritase_event e2 " +
+				"WHERE (e2.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $" + fmt.Sprint(len(args)) +
+				")"
+		}
 	}
 	query += " ORDER BY e.created_at DESC, e.id_event DESC"
 
