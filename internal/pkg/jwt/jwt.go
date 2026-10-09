@@ -15,6 +15,7 @@ type Claims struct {
 	Role      string `json:"role"`
 	IDDriver  int64  `json:"id_driver,omitempty"`
 	IDSeller  int64  `json:"id_seller,omitempty"`
+	IDImplant int64  `json:"id_implant,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -30,18 +31,24 @@ func NewManager(secret string, ttl time.Duration) *Manager {
 }
 
 // Generate membuat token baru untuk user.
-func (m *Manager) Generate(userID int64, username, role string, idDriver int64, idSeller ...int64) (string, error) {
-	var sellerID int64
-	if len(idSeller) > 0 {
-		sellerID = idSeller[0]
+// Kompatibilitas: idSeller/idImplant bersifat variadik agar pemanggil lama
+// (yang hanya kirim seller) tetap kompilasi — indeks 0 = seller, 1 = implant.
+func (m *Manager) Generate(userID int64, username, role string, idDriver int64, idLokasi ...int64) (string, error) {
+	var sellerID, implantID int64
+	if len(idLokasi) > 0 {
+		sellerID = idLokasi[0]
+	}
+	if len(idLokasi) > 1 {
+		implantID = idLokasi[1]
 	}
 	now := time.Now()
 	claims := Claims{
-		UserID:   userID,
-		Username: username,
-		Role:     role,
-		IDDriver: idDriver,
-		IDSeller: sellerID,
+		UserID:    userID,
+		Username:  username,
+		Role:      role,
+		IDDriver:  idDriver,
+		IDSeller:  sellerID,
+		IDImplant: implantID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(m.ttl)),
 			IssuedAt:  jwt.NewNumericDate(now),

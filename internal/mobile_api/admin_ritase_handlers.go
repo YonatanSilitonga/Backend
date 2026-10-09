@@ -2,6 +2,7 @@ package mobile_api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"backend/internal/pkg/response"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v4"
 )
 
@@ -604,6 +606,8 @@ func (h *APIHandler) AdminGenerateDailyRitase(c echo.Context) error {
 			if stop.KolomLokasi == "" {
 				if stop.Jenis == "gudang" {
 					stop.KolomLokasi = "id_gudang"
+				} else if stop.Jenis == "implant" {
+					stop.KolomLokasi = "id_implant"
 				} else if stop.Jenis == "seller" {
 					stop.KolomLokasi = "id_seller"
 				} else {
@@ -722,9 +726,10 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 		stops := make([]map[string]interface{}, 0)
 		stopRows, _ := h.DB.Query(ctx, `
 			SELECT 
-				rs.id_stop, rs.urutan, rs.jenis_stop,
-				rs.id_seller, rs.id_drop_point, rs.id_gudang, rs.keterangan,
-				COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, 'Lokasi') AS nama_lokasi,
+				rs.id_stop, rs.urutan,
+				CASE WHEN rs.id_implant IS NOT NULL THEN 'implant' ELSE rs.jenis_stop END AS jenis_stop,
+				rs.id_seller, rs.id_implant, rs.id_drop_point, rs.id_gudang, rs.keterangan,
+				COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, 'Lokasi') AS nama_lokasi,
 				re.jumlah_koli,
 				re.jumlah_ecer,
 				re.jumlah_high_value,
@@ -732,6 +737,7 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 				COALESCE(re.foto_manifest_url, rs.foto_manifest_url) AS foto_manifest_url
 			FROM ritase_stop rs
 			LEFT JOIN seller s ON s.id_seller = rs.id_seller
+			LEFT JOIN implant i ON i.id_implant = rs.id_implant
 			LEFT JOIN drop_point dp ON dp.id_drop_point = rs.id_drop_point
 			LEFT JOIN gudang g ON g.id_gudang = rs.id_gudang
 			LEFT JOIN LATERAL (
@@ -745,27 +751,27 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 						WHERE ev2.id_ritase = rs.id_ritase 
 						AND ev2.status IN ('Tiba', 'Bongkar Muat Barang', 'Muat Barang', 'Bongkar Barang')
 						AND (
-							ev2.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
-							OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev2.nama_lokasi) IN LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
-							OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) IN LOWER(ev2.nama_lokasi)) > 0)
+							ev2.nama_lokasi = COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang)
+							OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev2.nama_lokasi) IN LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
+							OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) IN LOWER(ev2.nama_lokasi)) > 0)
 						)
 					), 0) AS durasi_detik,
 					(SELECT ev2.foto_manifest_url FROM ritase_event ev2
 					 WHERE ev2.id_ritase = rs.id_ritase
 					   AND ev2.foto_manifest_url IS NOT NULL AND ev2.foto_manifest_url != ''
 					   AND (
-					     ev2.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
-					     OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev2.nama_lokasi) in LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
-					     OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(ev2.nama_lokasi)) > 0)
+					     ev2.nama_lokasi = COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang)
+					     OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev2.nama_lokasi) in LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
+					     OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(ev2.nama_lokasi)) > 0)
 					   )
 					 LIMIT 1
 					) AS foto_manifest_url
 				FROM ritase_event ev
 				WHERE ev.id_ritase = rs.id_ritase
 				  AND (
-				    ev.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
-				    OR (ev.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev.nama_lokasi) in LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
-				    OR (ev.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(ev.nama_lokasi)) > 0)
+				    ev.nama_lokasi = COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang)
+				    OR (ev.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev.nama_lokasi) in LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
+				    OR (ev.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(ev.nama_lokasi)) > 0)
 				  )
 			) re ON true
 			WHERE rs.id_ritase = $1
@@ -777,17 +783,18 @@ func (h *APIHandler) AdminGetRitases(c echo.Context) error {
 				var idStop int64
 				var urutan int
 				var jenisStop, namaLokasi string
-				var idSeller, idDP, idGudang *int64
+				var idSeller, idImplant, idDP, idGudang *int64
 				var ket *string
 				var koli, ecer, highValue, durasiDetik *int
 				var fotoManifestURL *string
 
-				if err := stopRows.Scan(&idStop, &urutan, &jenisStop, &idSeller, &idDP, &idGudang, &ket, &namaLokasi, &koli, &ecer, &highValue, &durasiDetik, &fotoManifestURL); err == nil {
+				if err := stopRows.Scan(&idStop, &urutan, &jenisStop, &idSeller, &idImplant, &idDP, &idGudang, &ket, &namaLokasi, &koli, &ecer, &highValue, &durasiDetik, &fotoManifestURL); err == nil {
 					stops = append(stops, map[string]interface{}{
 						"id_stop":           idStop,
 						"urutan":            urutan,
 						"jenis_stop":        jenisStop,
 						"id_seller":         idSeller,
+						"id_implant":        idImplant,
 						"id_drop_point":     idDP,
 						"id_gudang":         idGudang,
 						"keterangan":        ket,
@@ -868,12 +875,52 @@ func (h *APIHandler) AdminDeleteRitase(c echo.Context) error {
 		}
 	}
 
-	_, _ = h.DB.Exec(ctx, "UPDATE armada_tracking SET id_ritase = NULL WHERE id_ritase = $1", idRitase)
-	_, _ = h.DB.Exec(ctx, "DELETE FROM ritase_event WHERE id_ritase = $1", idRitase)
-	_, _ = h.DB.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase = $1", idRitase)
-	_, err = h.DB.Exec(ctx, "DELETE FROM ritase WHERE id_ritase = $1", idRitase)
+	// ── Opsi A (preserve data): tolak hapus jika masih ada data anak ──
+	// input_kapten.id_ritase terisi lewat konfirmasi manual kapten dan dijaga
+	// FK RESTRICT (input_kapten_id_ritase_fkey). Jangan CASCADE agar bukti
+	// muatan kapten tidak ikut hilang.
+	var nInputKapten int
+	if err := h.DB.QueryRow(ctx, "SELECT COUNT(*) FROM input_kapten WHERE id_ritase = $1", idRitase).Scan(&nInputKapten); err != nil {
+		log.Printf("[AdminDeleteRitase] pre-check input_kapten gagal id=%d: %v", idRitase, err)
+	} else if nInputKapten > 0 {
+		return response.Error(c, http.StatusBadRequest,
+			fmt.Sprintf("Ritase tidak bisa dihapus karena sudah ada %d input kapten yang terhubung. Data kapten dipertahankan agar tidak hilang. Batalkan penautan / hubungi kapten terlebih dahulu.", nInputKapten))
+	}
+
+	var nKonfirmasi int
+	if err := h.DB.QueryRow(ctx, "SELECT COUNT(*) FROM konfirmasi_penjemputan WHERE id_ritase = $1", idRitase).Scan(&nKonfirmasi); err != nil {
+		log.Printf("[AdminDeleteRitase] pre-check konfirmasi_penjemputan gagal id=%d: %v", idRitase, err)
+	} else if nKonfirmasi > 0 {
+		return response.Error(c, http.StatusBadRequest,
+			fmt.Sprintf("Ritase tidak bisa dihapus karena sudah ada %d konfirmasi penjemputan yang terhubung. Batalkan penautan terlebih dahulu.", nKonfirmasi))
+	}
+
+	tx, err := h.DB.Begin(ctx)
 	if err != nil {
-		return response.Error(c, http.StatusInternalServerError, "Gagal menghapus ritase: "+err.Error())
+		log.Printf("[AdminDeleteRitase] begin tx gagal id=%d: %v", idRitase, err)
+		return response.Error(c, http.StatusInternalServerError, "Gagal menghapus ritase. Coba lagi.")
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err = tx.Exec(ctx, "UPDATE armada_tracking SET id_ritase = NULL WHERE id_ritase = $1", idRitase); err != nil {
+		log.Printf("[AdminDeleteRitase] unlink armada_tracking gagal id=%d: %v", idRitase, err)
+		return response.Error(c, http.StatusInternalServerError, "Gagal menghapus ritase. Coba lagi.")
+	}
+	_, _ = tx.Exec(ctx, "DELETE FROM ritase_event WHERE id_ritase = $1", idRitase)
+	_, _ = tx.Exec(ctx, "DELETE FROM ritase_stop WHERE id_ritase = $1", idRitase)
+	if _, err = tx.Exec(ctx, "DELETE FROM ritase WHERE id_ritase = $1", idRitase); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			log.Printf("[AdminDeleteRitase] FK block id=%d: %v", idRitase, err)
+			return response.Error(c, http.StatusBadRequest,
+				"Ritase tidak bisa dihapus karena masih ada data kapten / penjemputan yang terhubung. Data dipertahankan agar tidak hilang. Batalkan penautan terlebih dahulu.")
+		}
+		log.Printf("[AdminDeleteRitase] delete ritase gagal id=%d: %v", idRitase, err)
+		return response.Error(c, http.StatusInternalServerError, "Gagal menghapus ritase. Coba lagi.")
+	}
+	if err = tx.Commit(ctx); err != nil {
+		log.Printf("[AdminDeleteRitase] commit gagal id=%d: %v", idRitase, err)
+		return response.Error(c, http.StatusInternalServerError, "Gagal menghapus ritase. Coba lagi.")
 	}
 
 	h.bus.Publish("force_refresh", "admin_delete_ritase")
@@ -1214,7 +1261,7 @@ func (h *APIHandler) AdminCreateRitase(c echo.Context) error {
 // validKolom cek nama kolom lokasi di ritase_stop (whitelist — hindari SQL injection).
 func validKolom(k string) bool {
 	switch k {
-	case "id_seller", "id_drop_point", "id_gudang":
+	case "id_seller", "id_implant", "id_drop_point", "id_gudang":
 		return true
 	}
 	return false
@@ -1231,6 +1278,8 @@ func lokasiKolom(jenis string) (string, error) {
 		return "id_drop_point", nil
 	case "seller":
 		return "id_seller", nil
+	case "implant":
+		return "id_implant", nil
 	}
 	return "", fmt.Errorf("jenis_stop tidak dikenal: %q", jenis)
 }
@@ -1244,6 +1293,8 @@ func validasiStopID(ctx context.Context, tx pgx.Tx, jenis string, idLokasi int64
 		table, column = "gudang", "id_gudang"
 	case "seller":
 		table, column = "seller", "id_seller"
+	case "implant":
+		table, column = "implant", "id_implant"
 	case "gateway", "drop_point":
 		table, column = "drop_point", "id_drop_point"
 	default:
@@ -1306,9 +1357,9 @@ func (h *APIHandler) AdminGetMasterOptions(c echo.Context) error {
 		dpRows.Close()
 	}
 
-	// 4. Sellers
+	// 4. Sellers (hanya aktif — seller pindahan implant sudah nonaktif/dihapus)
 	sellers := make([]map[string]interface{}, 0)
-	sRows, _ := h.DB.Query(ctx, "SELECT id_seller, nama_seller, kode_seller FROM seller ORDER BY id_seller ASC")
+	sRows, _ := h.DB.Query(ctx, "SELECT id_seller, nama_seller, kode_seller FROM seller WHERE status = 'aktif' ORDER BY id_seller ASC")
 	if sRows != nil {
 		for sRows.Next() {
 			var id int64
@@ -1318,6 +1369,20 @@ func (h *APIHandler) AdminGetMasterOptions(c echo.Context) error {
 			}
 		}
 		sRows.Close()
+	}
+
+	// 4b. Implants (hanya aktif)
+	implants := make([]map[string]interface{}, 0)
+	iRows, _ := h.DB.Query(ctx, "SELECT id_implant, nama_implant, kode_implant FROM implant WHERE status = 'aktif' ORDER BY id_implant ASC")
+	if iRows != nil {
+		for iRows.Next() {
+			var id int64
+			var nama, kode string
+			if err := iRows.Scan(&id, &nama, &kode); err == nil {
+				implants = append(implants, map[string]interface{}{"id_implant": id, "nama_implant": nama, "kode_implant": kode})
+			}
+		}
+		iRows.Close()
 	}
 
 	// 5. Gudang
@@ -1371,6 +1436,7 @@ func (h *APIHandler) AdminGetMasterOptions(c echo.Context) error {
 		"kendaraan":    kendaraans,
 		"drop_points":  dropPoints,
 		"sellers":      sellers,
+		"implants":     implants,
 		"gudangs":      gudangs,
 		"driver_jenis": driverJenis,
 		"jam_ritase":   jamRitase,

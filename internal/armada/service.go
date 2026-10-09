@@ -71,6 +71,10 @@ func (s *Service) GetTrackingMap(ctx context.Context) (*MapTracking, error) {
 	if err != nil {
 		return nil, err
 	}
+	implants, err := s.repo.ListImplantLocations(ctx)
+	if err != nil {
+		return nil, err
+	}
 	gudang, err := s.repo.ListGudangLocations(ctx)
 	if err != nil {
 		return nil, err
@@ -86,6 +90,7 @@ func (s *Service) GetTrackingMap(ctx context.Context) (*MapTracking, error) {
 	return &MapTracking{
 		Vehicles:      vehicles,
 		Sellers:       sellers,
+		Implants:      implants,
 		Gudang:        gudang,
 		DropPoints:    drops,
 		DriverPickups: driverPickups,
@@ -106,6 +111,10 @@ func (s *Service) SaveImplanBarang(ctx context.Context, req ImplanBarangInput, c
 
 func (s *Service) GetImplanBarangHistory(ctx context.Context, idSeller int64) ([]ImplanBarangLog, error) {
 	return s.repo.GetImplanBarangHistory(ctx, idSeller)
+}
+
+func (s *Service) GetImplantBarangHistory(ctx context.Context, idImplant int64) ([]ImplanBarangLog, error) {
+	return s.repo.GetImplantBarangHistory(ctx, idImplant)
 }
 
 func (s *Service) ListDriverPickups(ctx context.Context) ([]DriverPickupItem, error) {

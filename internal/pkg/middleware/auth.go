@@ -21,6 +21,8 @@ const (
 	CtxDriverID = "auth_driver_id"
 	// CtxSellerID adalah key di Echo context untuk id_seller dari token (jika ada, untuk kapten).
 	CtxSellerID = "auth_seller_id"
+	// CtxImplantID adalah key di Echo context untuk id_implant dari token (jika ada, untuk kapten).
+	CtxImplantID = "auth_implant_id"
 )
 
 // Auth adalah middleware untuk memvalidasi JWT dari header Authorization.
@@ -42,11 +44,12 @@ func Auth(jwtManager *jwt.Manager) echo.MiddlewareFunc {
 				return response.Error(c, http.StatusUnauthorized, "token tidak valid atau kedaluwarsa")
 			}
 
-			c.Set(CtxUserID, claims.UserID)
-			c.Set(CtxUsername, claims.Username)
-			c.Set(CtxRole, claims.Role)
-			c.Set(CtxDriverID, claims.IDDriver)
-			c.Set(CtxSellerID, claims.IDSeller)
+		c.Set(CtxUserID, claims.UserID)
+		c.Set(CtxUsername, claims.Username)
+		c.Set(CtxRole, claims.Role)
+		c.Set(CtxDriverID, claims.IDDriver)
+		c.Set(CtxSellerID, claims.IDSeller)
+		c.Set(CtxImplantID, claims.IDImplant)
 
 			return next(c)
 		}

@@ -26,12 +26,52 @@ func NewHandler(db *pgxpool.Pool, bus *eventbus.Bus, jwtMgr *appJWT.Manager) *Ha
 	return &Handler{DB: db, bus: bus, jwt: jwtMgr}
 }
 
-// GetMySellerRitase mengambil daftar ritase yang hari ini singgah di seller kapten.
+// lokasiKapten membaca konteks lokasi kapten dari JWT: implant (baru) atau
+// seller (legacy). Selalu mengembalikan keduanya — sisi yang kosong di-resolve
+// via padanan kode (implant.kode_implant = seller.kode_seller). Bila keduanya
+// nol, kapten belum memilih lokasi.
+func (h *Handler) lokasiKapten(ctx context.Context, c echo.Context) (implantID, sellerID int64) {
+	implantID, _ = c.Get(appMiddleware.CtxImplantID).(int64)
+	sellerID, _ = c.Get(appMiddleware.CtxSellerID).(int64)
+	if implantID == 0 && sellerID > 0 {
+		_ = h.DB.QueryRow(ctx, `
+			SELECT i.id_implant FROM implant i
+			JOIN seller s ON s.kode_seller = i.kode_implant
+			WHERE s.id_seller = $1`, sellerID).Scan(&implantID)
+	}
+	if sellerID == 0 && implantID > 0 {
+		_ = h.DB.QueryRow(ctx, `
+			SELECT s.id_seller FROM seller s
+			JOIN implant i ON i.kode_implant = s.kode_seller
+			WHERE i.id_implant = $1`, implantID).Scan(&sellerID)
+	}
+	return implantID, sellerID
+}
+
+// namaLokasiKapten mengembalikan nama lokasi dari sisi yang tersedia.
+func (h *Handler) namaLokasiKapten(ctx context.Context, implantID, sellerID int64) string {
+	if implantID > 0 {
+		var nama string
+		if err := h.DB.QueryRow(ctx, `SELECT nama_implant FROM implant WHERE id_implant = $1`, implantID).Scan(&nama); err == nil && nama != "" {
+			return nama
+		}
+	}
+	if sellerID > 0 {
+		var nama string
+		_ = h.DB.QueryRow(ctx, `SELECT nama_seller FROM seller WHERE id_seller = $1`, sellerID).Scan(&nama)
+		return nama
+	}
+	return ""
+}
+
+// GetMySellerRitase mengambil daftar ritase yang hari ini singgah di lokasi kapten.
 // GET /api/v1/kapten/my-seller-ritase
 func (h *Handler) GetMySellerRitase(c echo.Context) error {
-	sellerID, _ := c.Get(appMiddleware.CtxSellerID).(int64)
-	if sellerID == 0 {
-		return response.Error(c, http.StatusBadRequest, "akun kapten tidak terkait dengan seller")
+	ctx0, cancel0 := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel0()
+	implantID, sellerID := h.lokasiKapten(ctx0, c)
+	if implantID == 0 && sellerID == 0 {
+		return response.Error(c, http.StatusBadRequest, "akun kapten tidak terkait dengan implant/seller")
 	}
 
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
@@ -47,15 +87,15 @@ func (h *Handler) GetMySellerRitase(c echo.Context) error {
 		       rs.id_stop, rs.urutan,
 		       COALESCE(rs.foto_manifest_url, '')
 		FROM ritase r
-		JOIN ritase_stop rs ON rs.id_ritase = r.id_ritase AND rs.id_seller = $1
+		JOIN ritase_stop rs ON rs.id_ritase = r.id_ritase AND (rs.id_implant = $1 OR rs.id_seller = $2)
 		JOIN driver d ON d.id_driver = r.id_driver
 		JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
-		WHERE r.tanggal = $2
+		WHERE r.tanggal = $3
 		  AND r.status != 'selesai'
 		ORDER BY r.ritase_ke ASC, rs.urutan ASC
-	`, sellerID, hariIni)
+	`, implantID, sellerID, hariIni)
 	if err != nil {
-		log.Printf("[Kapten] gagal ambil ritase seller %d: %v", sellerID, err)
+		log.Printf("[Kapten] gagal ambil ritase lokasi implant %d seller %d: %v", implantID, sellerID, err)
 		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data ritase")
 	}
 	defer rows.Close()
@@ -136,17 +176,44 @@ type KaptenCargoInputRequest struct {
 	EcerHVJKT       int     `json:"ecer_hv_jkt"`
 	EcerHVSEG       int     `json:"ecer_hv_seg"`
 	EcerHVBTN       int     `json:"ecer_hv_btn"`
+	// Opsi A: HV gabungan 1 field. Alias baru menang bila > 0,
+	// disimpan ke kolom jkt dengan seg/btn = 0 (skema DB tidak berubah).
+	// HvAwb = label baru "HV AWB" (pengganti Ecer HV, satuan sama).
+	KoliHV          int     `json:"koli_hv"`
+	HvAwb           int     `json:"hv_awb"`
+	EcerHV          int     `json:"ecer_hv"`
 	FotoManifestURL string  `json:"foto_manifest_url"`
 	Catatan         string  `json:"catatan"`
+}
+
+// normalisasiHV menggabungkan alias baru + kolom legacy menjadi nilai jkt
+// tunggal dengan seg/btn = 0. App lama (kirim jkt/seg/btn) tetap didukung:
+// bila alias 0, nilai legacy dipakai apa adanya.
+func normalisasiHV(alias int, altAlias int, jkt int, seg int, btn int) (int, int, int) {
+	clamp := func(v int) int {
+		if v < 0 {
+			return 0
+		}
+		return v
+	}
+	if v := clamp(alias); v > 0 {
+		return v, 0, 0
+	}
+	if v := clamp(altAlias); v > 0 {
+		return v, 0, 0
+	}
+	return clamp(jkt), clamp(seg), clamp(btn)
 }
 
 // PostCargoInput mencatat input data muatan dari kapten ke input_kapten.
 // POST /api/v1/kapten/cargo-input
 // Tidak perlu id_ritase — data disimpan independen, di-link nanti saat admin generate ritase.
 func (h *Handler) PostCargoInput(c echo.Context) error {
-	sellerID, _ := c.Get(appMiddleware.CtxSellerID).(int64)
-	if sellerID == 0 {
-		return response.Error(c, http.StatusBadRequest, "akun kapten tidak terkait dengan seller")
+	ctx0, cancel0 := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel0()
+	implantID, sellerID := h.lokasiKapten(ctx0, c)
+	if implantID == 0 && sellerID == 0 {
+		return response.Error(c, http.StatusBadRequest, "akun kapten tidak terkait dengan implant/seller")
 	}
 
 	var req KaptenCargoInputRequest
@@ -198,11 +265,10 @@ func (h *Handler) PostCargoInput(c echo.Context) error {
 		}
 	}
 
-	// Ambil info seller untuk nama lokasi
-	var namaSeller string
-	_ = h.DB.QueryRow(ctx, `SELECT nama_seller FROM seller WHERE id_seller = $1`, sellerID).Scan(&namaSeller)
+	// Ambil info lokasi untuk nama lokasi (implant diutamakan)
+	namaLokasi := h.namaLokasiKapten(ctx, implantID, sellerID)
 	if req.NamaLokasi == "" {
-		req.NamaLokasi = namaSeller
+		req.NamaLokasi = namaLokasi
 	}
 
 	// Ambil user_id dari JWT (kapten yang login)
@@ -225,11 +291,31 @@ func (h *Handler) PostCargoInput(c echo.Context) error {
 	// konfirmasi manual kapten (POST /kapten/confirm-pickup). Tidak ada auto-link.
 	var idRitase *int64 = nil
 
-	// INSERT ke input_kapten
+	// Opsi A: normalisasi HV gabungan + jepit negatif ke 0.
+	clamp0 := func(v int) int {
+		if v < 0 {
+			return 0
+		}
+		return v
+	}
+	req.JumlahAWB = clamp0(req.JumlahAWB)
+	req.KoliJKT, req.KoliSEG, req.KoliBTN = clamp0(req.KoliJKT), clamp0(req.KoliSEG), clamp0(req.KoliBTN)
+	req.EcerJKT, req.EcerSEG, req.EcerBTN = clamp0(req.EcerJKT), clamp0(req.EcerSEG), clamp0(req.EcerBTN)
+	hvKoliJkt, hvKoliSeg, hvKoliBtn := normalisasiHV(req.KoliHV, 0, req.KoliHVJKT, req.KoliHVSEG, req.KoliHVBTN)
+	hvAwbJkt, hvAwbSeg, hvAwbBtn := normalisasiHV(req.HvAwb, req.EcerHV, req.EcerHVJKT, req.EcerHVSEG, req.EcerHVBTN)
+
+	// INSERT ke input_kapten (dual-write: id_implant sumber baru, id_seller legacy)
 	var insertedID int64
+	var colImplant, colSeller interface{}
+	if implantID > 0 {
+		colImplant = implantID
+	}
+	if sellerID > 0 {
+		colSeller = sellerID
+	}
 	err := h.DB.QueryRow(ctx, `
 		INSERT INTO input_kapten (
-			id_user, id_seller, jenis_ritase, ritase_ke, catatan,
+			id_user, id_seller, id_implant, jenis_ritase, ritase_ke, catatan,
 			jumlah_awb, koli_jkt, koli_seg, koli_btn,
 			ecer_jkt, ecer_seg, ecer_btn,
 			koli_hv_jkt, koli_hv_seg, koli_hv_btn,
@@ -237,15 +323,15 @@ func (h *Handler) PostCargoInput(c echo.Context) error {
 			foto_manifest_url, nama_lokasi, latitude, longitude,
 			id_ritase
 		) VALUES (
-			$1, $2, $3, $4, $5,
-			$6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-			$19, $20, $21, $22, $23
+			$1, $2, $3, $4, $5, $6,
+			$7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+			$20, $21, $22, $23, $24
 		) RETURNING id
-	`, userID, sellerID, req.JenisRitase, req.RitaseKe, catatan,
+	`, userID, colSeller, colImplant, req.JenisRitase, req.RitaseKe, catatan,
 		req.JumlahAWB, req.KoliJKT, req.KoliSEG, req.KoliBTN,
 		req.EcerJKT, req.EcerSEG, req.EcerBTN,
-		req.KoliHVJKT, req.KoliHVSEG, req.KoliHVBTN,
-		req.EcerHVJKT, req.EcerHVSEG, req.EcerHVBTN,
+		hvKoliJkt, hvKoliSeg, hvKoliBtn,
+		hvAwbJkt, hvAwbSeg, hvAwbBtn,
 		fotoURL, req.NamaLokasi, req.Latitude, req.Longitude,
 		idRitase,
 	).Scan(&insertedID)
@@ -263,9 +349,9 @@ func (h *Handler) PostCargoInput(c echo.Context) error {
 		       COALESCE(SUM(ecer_jkt + ecer_seg + ecer_btn), 0),
 		       COALESCE(SUM(koli_hv_jkt + koli_hv_seg + koli_hv_btn + ecer_hv_jkt + ecer_hv_seg + ecer_hv_btn), 0)
 		FROM input_kapten
-		WHERE id_seller = $1 AND jenis_ritase = $2 AND ritase_ke = $3
+		WHERE (id_implant = $1 OR id_seller = $2) AND jenis_ritase = $3 AND ritase_ke = $4
 		  AND DATE(created_at) = CURRENT_DATE
-	`, sellerID, req.JenisRitase, req.RitaseKe).Scan(&locAwb, &locKoli, &locEcer, &locHV)
+	`, implantID, sellerID, req.JenisRitase, req.RitaseKe).Scan(&locAwb, &locKoli, &locEcer, &locHV)
 
 	h.bus.Publish("force_refresh", "kapten_cargo_input")
 
@@ -278,7 +364,7 @@ func (h *Handler) PostCargoInput(c echo.Context) error {
 	})
 }
 
-// GetSellerInfo mengambil info seller yang terkait dengan kapten.
+// GetSellerInfo mengambil info seller yang terkait dengan kapten (legacy).
 // GET /api/v1/kapten/seller-info
 func (h *Handler) GetSellerInfo(c echo.Context) error {
 	sellerID, _ := c.Get(appMiddleware.CtxSellerID).(int64)
@@ -315,12 +401,55 @@ func (h *Handler) GetSellerInfo(c echo.Context) error {
 	})
 }
 
+// GetImplantInfo mengambil info implant yang terkait dengan kapten.
+// GET /api/v1/kapten/implant-info
+func (h *Handler) GetImplantInfo(c echo.Context) error {
+	ctx0, cancel0 := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel0()
+	implantID, _ := h.lokasiKapten(ctx0, c)
+	if implantID == 0 {
+		return response.Error(c, http.StatusBadRequest, "akun kapten tidak terkait dengan implant")
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel()
+
+	var (
+		namaImplant string
+		alamat      string
+		kota        string
+		noHP        string
+		kapten      string
+	)
+	err := h.DB.QueryRow(ctx, `
+		SELECT i.nama_implant, COALESCE(i.alamat, ''), COALESCE(i.kota, ''), COALESCE(i.no_hp, ''),
+		       COALESCE((SELECT STRING_AGG(k.nama, ', ' ORDER BY CASE WHEN kim.peran = 'utama' THEN 0 ELSE 1 END, k.nama)
+		                 FROM kapten_implant_map kim JOIN kapten k ON k.id_user = kim.id_user
+		                 WHERE kim.id_implant = i.id_implant), '')
+		FROM implant WHERE id_implant = $1
+	`, implantID).Scan(&namaImplant, &alamat, &kota, &noHP, &kapten)
+	if err != nil {
+		return response.Error(c, http.StatusNotFound, "implant tidak ditemukan")
+	}
+
+	return response.OK(c, map[string]interface{}{
+		"id_implant":   implantID,
+		"nama_implant": namaImplant,
+		"alamat":       alamat,
+		"kota":         kota,
+		"no_hp":        noHP,
+		"kapten":       kapten,
+	})
+}
+
 // GetTodayCargo mengambil total akumulasi cargo kapten hari ini dari input_kapten.
 // GET /api/v1/kapten/today-cargo?jenis_ritase=outgoing&ritase_ke=1
 func (h *Handler) GetTodayCargo(c echo.Context) error {
-	sellerID, _ := c.Get(appMiddleware.CtxSellerID).(int64)
-	if sellerID == 0 {
-		return response.Error(c, http.StatusBadRequest, "akun kapten tidak terkait dengan seller")
+	ctx0, cancel0 := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel0()
+	implantID, sellerID := h.lokasiKapten(ctx0, c)
+	if implantID == 0 && sellerID == 0 {
+		return response.Error(c, http.StatusBadRequest, "akun kapten tidak terkait dengan implant/seller")
 	}
 
 	jenisRitase := c.QueryParam("jenis_ritase")
@@ -336,9 +465,8 @@ func (h *Handler) GetTodayCargo(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
 	defer cancel()
 
-	// Ambil nama seller
-	var namaSeller string
-	_ = h.DB.QueryRow(ctx, `SELECT nama_seller FROM seller WHERE id_seller = $1`, sellerID).Scan(&namaSeller)
+	// Ambil nama lokasi (implant diutamakan)
+	namaLokasi := h.namaLokasiKapten(ctx, implantID, sellerID)
 
 	// Query dari input_kapten (bukan ritase_event)
 	var awb, koliJkt, koliSeg, koliBtn, ecerJkt, ecerSeg, ecerBtn int
@@ -353,17 +481,17 @@ func (h *Handler) GetTodayCargo(c echo.Context) error {
 		       COALESCE(SUM(koli_hv_jkt), 0), COALESCE(SUM(koli_hv_seg), 0), COALESCE(SUM(koli_hv_btn), 0),
 		       COALESCE(SUM(ecer_hv_jkt), 0), COALESCE(SUM(ecer_hv_seg), 0), COALESCE(SUM(ecer_hv_btn), 0),
 		       COALESCE((SELECT foto_manifest_url FROM input_kapten
-		                 WHERE id_seller = $1 AND jenis_ritase = $2 AND ritase_ke = $3
+		                 WHERE (id_implant = $1 OR id_seller = $2) AND jenis_ritase = $3 AND ritase_ke = $4
 		                   AND DATE(created_at) = CURRENT_DATE AND foto_manifest_url IS NOT NULL
 		                 ORDER BY id DESC LIMIT 1), ''),
 		       COALESCE((SELECT catatan FROM input_kapten
-		                 WHERE id_seller = $1 AND jenis_ritase = $2 AND ritase_ke = $3
+		                 WHERE (id_implant = $1 OR id_seller = $2) AND jenis_ritase = $3 AND ritase_ke = $4
 		                   AND DATE(created_at) = CURRENT_DATE AND catatan IS NOT NULL AND catatan != ''
 		                 ORDER BY id DESC LIMIT 1), '')
 		FROM input_kapten
-		WHERE id_seller = $1 AND jenis_ritase = $2 AND ritase_ke = $3
+		WHERE (id_implant = $1 OR id_seller = $2) AND jenis_ritase = $3 AND ritase_ke = $4
 		  AND DATE(created_at) = CURRENT_DATE
-	`, sellerID, jenisRitase, ritaseKe).Scan(&awb, &koliJkt, &koliSeg, &koliBtn,
+	`, implantID, sellerID, jenisRitase, ritaseKe).Scan(&awb, &koliJkt, &koliSeg, &koliBtn,
 		&ecerJkt, &ecerSeg, &ecerBtn,
 		&koliHvJkt, &koliHvSeg, &koliHvBtn,
 		&ecerHvJkt, &ecerHvSeg, &ecerHvBtn, &fotoURL, &catatan)
@@ -376,12 +504,14 @@ func (h *Handler) GetTodayCargo(c echo.Context) error {
 	}
 
 	return response.OK(c, map[string]interface{}{
-		"nama_lokasi": namaSeller,
+		"nama_lokasi": namaLokasi,
 		"jumlah_awb":  awb,
 		"koli_jkt":    koliJkt, "koli_seg": koliSeg, "koli_btn": koliBtn,
 		"ecer_jkt": ecerJkt, "ecer_seg": ecerSeg, "ecer_btn": ecerBtn,
 		"koli_hv_jkt": koliHvJkt, "koli_hv_seg": koliHvSeg, "koli_hv_btn": koliHvBtn,
 		"ecer_hv_jkt": ecerHvJkt, "ecer_hv_seg": ecerHvSeg, "ecer_hv_btn": ecerHvBtn,
+		"koli_hv": koliHvJkt + koliHvSeg + koliHvBtn,
+		"hv_awb":  ecerHvJkt + ecerHvSeg + ecerHvBtn,
 		"foto_url":    fotoURL,
 		"catatan":     catatan,
 		"is_ada_data": isAda,
@@ -438,6 +568,58 @@ func (h *Handler) GetMySellers(c echo.Context) error {
 	})
 }
 
+// GetMyImplants mengambil daftar implant yang bisa diakses kapten (dari kapten_implant_map).
+// GET /api/v1/kapten/my-implants
+func (h *Handler) GetMyImplants(c echo.Context) error {
+	userID, _ := c.Get(appMiddleware.CtxUserID).(int64)
+	if userID == 0 {
+		return response.Error(c, http.StatusUnauthorized, "tidak terautentikasi")
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel()
+
+	rows, err := h.DB.Query(ctx, `
+		SELECT i.id_implant, COALESCE(i.kode_implant, ''), COALESCE(i.nama_implant, ''), COALESCE(kim.peran, 'utama')
+		FROM implant i
+		JOIN kapten_implant_map kim ON kim.id_implant = i.id_implant
+		WHERE kim.id_user = $1 AND i.status = 'aktif'
+		ORDER BY i.nama_implant
+	`, userID)
+	if err != nil {
+		log.Printf("[Kapten] gagal ambil my-implants untuk user %d: %v", userID, err)
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil daftar implant")
+	}
+	defer rows.Close()
+
+	var implants []map[string]interface{}
+	for rows.Next() {
+		var (
+			idImplant   int64
+			kodeImplant string
+			namaImplant string
+			peran       string
+		)
+		if err := rows.Scan(&idImplant, &kodeImplant, &namaImplant, &peran); err != nil {
+			continue
+		}
+		implants = append(implants, map[string]interface{}{
+			"id_implant":   idImplant,
+			"kode_implant": kodeImplant,
+			"nama_implant": namaImplant,
+			"peran":        peran,
+		})
+	}
+
+	if implants == nil {
+		implants = []map[string]interface{}{}
+	}
+
+	return response.OK(c, map[string]interface{}{
+		"implants": implants,
+	})
+}
+
 // SelectSellerRequest adalah body untuk select seller.
 type SelectSellerRequest struct {
 	SellerID int64 `json:"seller_id"`
@@ -483,6 +665,60 @@ func (h *Handler) SelectSeller(c echo.Context) error {
 	})
 }
 
+// SelectImplantRequest adalah body untuk select implant.
+type SelectImplantRequest struct {
+	ImplantID int64 `json:"implant_id"`
+}
+
+// SelectImplant memilih implant → return JWT baru dengan id_implant (+id_seller
+// padanan untuk kompatibilitas) yang dipilih.
+// POST /api/v1/kapten/select-implant
+func (h *Handler) SelectImplant(c echo.Context) error {
+	userID, _ := c.Get(appMiddleware.CtxUserID).(int64)
+	username, _ := c.Get(appMiddleware.CtxUsername).(string)
+	if userID == 0 {
+		return response.Error(c, http.StatusUnauthorized, "tidak terautentikasi")
+	}
+
+	var req SelectImplantRequest
+	if err := c.Bind(&req); err != nil || req.ImplantID == 0 {
+		return response.Error(c, http.StatusBadRequest, "implant_id wajib diisi")
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel()
+
+	// Validasi: user punya akses ke implant ini?
+	var count int
+	_ = h.DB.QueryRow(ctx, `
+		SELECT COUNT(*) FROM kapten_implant_map
+		WHERE id_user = $1 AND id_implant = $2
+	`, userID, req.ImplantID).Scan(&count)
+	if count == 0 {
+		return response.Error(c, http.StatusForbidden, "anda tidak memiliki akses ke implant ini")
+	}
+
+	// Padanan seller legacy untuk kompatibilitas (boleh 0 bila tak ada).
+	var sellerID int64
+	_ = h.DB.QueryRow(ctx, `
+		SELECT s.id_seller FROM seller s
+		JOIN implant i ON i.kode_implant = s.kode_seller
+		WHERE i.id_implant = $1`, req.ImplantID).Scan(&sellerID)
+
+	// Generate JWT baru dengan id_implant (+id_seller padanan) yang dipilih
+	token, err := h.jwt.Generate(userID, username, "kapten", 0, sellerID, req.ImplantID)
+	if err != nil {
+		log.Printf("[Kapten] gagal generate token implant untuk user %d: %v", userID, err)
+		return response.Error(c, http.StatusInternalServerError, "gagal membuat token")
+	}
+
+	return response.OK(c, map[string]interface{}{
+		"token":      token,
+		"implant_id": req.ImplantID,
+		"seller_id":  sellerID,
+	})
+}
+
 // ConfirmPickupRequest adalah body konfirmasi driver pengambil oleh kapten.
 // Satu konfirmasi menautkan SEMUA input hari ini yang masih NULL dalam grup
 // (seller kapten + jenis_ritase + ritase_ke) ke satu ritase (trip) SEKALIGUS
@@ -506,6 +742,10 @@ type ConfirmPickupRequest struct {
 	DiambilEcerHVJKT int `json:"diambil_ecer_hv_jkt"`
 	DiambilEcerHVSEG int `json:"diambil_ecer_hv_seg"`
 	DiambilEcerHVBTN int `json:"diambil_ecer_hv_btn"`
+	// Opsi A: alias gabungan ("HV AWB" = pengganti Ecer HV, satuan sama).
+	DiambilKoliHV int `json:"diambil_koli_hv"`
+	DiambilHvAwb  int `json:"diambil_hv_awb"`
+	DiambilEcerHV int `json:"diambil_ecer_hv"`
 
 	FotoPenjemputanURL string `json:"foto_penjemputan_url"` // opsional
 	Catatan            string `json:"catatan"`              // opsional (mis. barang sisa)
@@ -515,9 +755,11 @@ type ConfirmPickupRequest struct {
 // dan mencatat realisasi pengambilan (jumlah + foto + catatan).
 // POST /api/v1/kapten/confirm-pickup
 func (h *Handler) ConfirmPickup(c echo.Context) error {
-	sellerID, _ := c.Get(appMiddleware.CtxSellerID).(int64)
-	if sellerID == 0 {
-		return response.Error(c, http.StatusBadRequest, "akun kapten tidak terkait dengan seller")
+	ctx0, cancel0 := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel0()
+	implantID, sellerID := h.lokasiKapten(ctx0, c)
+	if implantID == 0 && sellerID == 0 {
+		return response.Error(c, http.StatusBadRequest, "akun kapten tidak terkait dengan implant/seller")
 	}
 
 	var req ConfirmPickupRequest
@@ -553,6 +795,11 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 	req.DiambilEcerHVJKT = clamp(req.DiambilEcerHVJKT)
 	req.DiambilEcerHVSEG = clamp(req.DiambilEcerHVSEG)
 	req.DiambilEcerHVBTN = clamp(req.DiambilEcerHVBTN)
+	// Opsi A: alias gabungan menang bila > 0 (disimpan di jkt, seg/btn = 0).
+	req.DiambilKoliHVJKT, req.DiambilKoliHVSEG, req.DiambilKoliHVBTN =
+		normalisasiHV(req.DiambilKoliHV, 0, req.DiambilKoliHVJKT, req.DiambilKoliHVSEG, req.DiambilKoliHVBTN)
+	req.DiambilEcerHVJKT, req.DiambilEcerHVSEG, req.DiambilEcerHVBTN =
+		normalisasiHV(req.DiambilHvAwb, req.DiambilEcerHV, req.DiambilEcerHVJKT, req.DiambilEcerHVSEG, req.DiambilEcerHVBTN)
 
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
 	defer cancel()
@@ -563,21 +810,21 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 	}
 	defer tx.Rollback(ctx)
 
-	// 1. Validasi: ritase harus ada, belum selesai, singgah di seller kapten,
+	// 1. Validasi: ritase harus ada, belum selesai, singgah di lokasi kapten,
 	//    dan jenis + ritase_ke-nya sama dengan grup yang dikonfirmasi.
 	var foundID int64
 	err = tx.QueryRow(ctx, `
 		SELECT r.id_ritase FROM ritase r
-		JOIN ritase_stop rs ON rs.id_ritase = r.id_ritase AND rs.id_seller = $1
-		WHERE r.id_ritase = $2
+		JOIN ritase_stop rs ON rs.id_ritase = r.id_ritase AND (rs.id_implant = $1 OR rs.id_seller = $2)
+		WHERE r.id_ritase = $3
 		  AND r.status != 'selesai'
-		  AND r.jenis_ritase = $3 AND r.ritase_ke = $4
+		  AND r.jenis_ritase = $4 AND r.ritase_ke = $5
 		  AND r.tanggal BETWEEN ((now() AT TIME ZONE 'Asia/Jakarta')::date - 1)
 		                    AND ((now() AT TIME ZONE 'Asia/Jakarta')::date + 1)
-	`, sellerID, req.IDRitase, req.JenisRitase, req.RitaseKe).Scan(&foundID)
+	`, implantID, sellerID, req.IDRitase, req.JenisRitase, req.RitaseKe).Scan(&foundID)
 	if err != nil {
-		log.Printf("[Kapten] konfirmasi ditolak seller %d -> ritase %d: %v", sellerID, req.IDRitase, err)
-		return response.Error(c, http.StatusBadRequest, "ritase tidak valid untuk seller ini (bukan jadwal yang singgah ke sini)")
+		log.Printf("[Kapten] konfirmasi ditolak implant %d seller %d -> ritase %d: %v", implantID, sellerID, req.IDRitase, err)
+		return response.Error(c, http.StatusBadRequest, "ritase tidak valid untuk lokasi ini (bukan jadwal yang singgah ke sini)")
 	}
 
 	// 2. Catat kejadian serah terima (realisasi pengambilan).
@@ -594,9 +841,16 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 		catatan = req.Catatan
 	}
 	var idKonfirmasi int64
+	var colImplant, colSeller interface{}
+	if implantID > 0 {
+		colImplant = implantID
+	}
+	if sellerID > 0 {
+		colSeller = sellerID
+	}
 	err = tx.QueryRow(ctx, `
 		INSERT INTO konfirmasi_penjemputan (
-			id_ritase, id_seller, id_user, jenis_ritase, ritase_ke,
+			id_ritase, id_seller, id_implant, id_user, jenis_ritase, ritase_ke,
 			jumlah_awb,
 			koli_jkt, koli_seg, koli_btn,
 			ecer_jkt, ecer_seg, ecer_btn,
@@ -604,11 +858,11 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 			ecer_hv_jkt, ecer_hv_seg, ecer_hv_btn,
 			foto_penjemputan_url, catatan
 		) VALUES (
-			$1, $2, $3, $4, $5,
-			$6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-			$19, $20
+			$1, $2, $3, $4, $5, $6,
+			$7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+			$20, $21
 		) RETURNING id
-	`, req.IDRitase, sellerID, userID, req.JenisRitase, req.RitaseKe,
+	`, req.IDRitase, colSeller, colImplant, userID, req.JenisRitase, req.RitaseKe,
 		req.DiambilAWB,
 		req.DiambilKoliJKT, req.DiambilKoliSEG, req.DiambilKoliBTN,
 		req.DiambilEcerJKT, req.DiambilEcerSEG, req.DiambilEcerBTN,
@@ -626,10 +880,10 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 	tag, err := tx.Exec(ctx, `
 		UPDATE input_kapten
 		SET id_ritase = $1, updated_at = NOW()
-		WHERE id_seller = $2 AND jenis_ritase = $3 AND ritase_ke = $4
+		WHERE (id_implant = $2 OR id_seller = $3) AND jenis_ritase = $4 AND ritase_ke = $5
 		  AND id_ritase IS NULL
 		  AND (created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
-	`, req.IDRitase, sellerID, req.JenisRitase, req.RitaseKe)
+	`, req.IDRitase, implantID, sellerID, req.JenisRitase, req.RitaseKe)
 	if err != nil {
 		log.Printf("[Kapten] gagal link input saat confirm-pickup: %v", err)
 		return response.Error(c, http.StatusInternalServerError, "gagal menautkan input")
@@ -647,9 +901,9 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 		       COALESCE(SUM(koli_hv_jkt), 0), COALESCE(SUM(koli_hv_seg), 0), COALESCE(SUM(koli_hv_btn), 0),
 		       COALESCE(SUM(ecer_hv_jkt), 0), COALESCE(SUM(ecer_hv_seg), 0), COALESCE(SUM(ecer_hv_btn), 0)
 		FROM input_kapten
-		WHERE id_seller = $1 AND jenis_ritase = $2 AND ritase_ke = $3
+		WHERE (id_implant = $1 OR id_seller = $2) AND jenis_ritase = $3 AND ritase_ke = $4
 		  AND (created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
-	`, sellerID, req.JenisRitase, req.RitaseKe).Scan(
+	`, implantID, sellerID, req.JenisRitase, req.RitaseKe).Scan(
 		&inAWB, &inKJ, &inKS, &inKB, &inEJ, &inES, &inEB,
 		&inKHJ, &inKHS, &inKHB, &inEHJ, &inEHS, &inEHB)
 
@@ -662,9 +916,9 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 		       COALESCE(SUM(koli_hv_jkt), 0), COALESCE(SUM(koli_hv_seg), 0), COALESCE(SUM(koli_hv_btn), 0),
 		       COALESCE(SUM(ecer_hv_jkt), 0), COALESCE(SUM(ecer_hv_seg), 0), COALESCE(SUM(ecer_hv_btn), 0)
 		FROM konfirmasi_penjemputan
-		WHERE id_seller = $1 AND jenis_ritase = $2 AND ritase_ke = $3
+		WHERE (id_implant = $1 OR id_seller = $2) AND jenis_ritase = $3 AND ritase_ke = $4
 		  AND (created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
-	`, sellerID, req.JenisRitase, req.RitaseKe).Scan(
+	`, implantID, sellerID, req.JenisRitase, req.RitaseKe).Scan(
 		&tkAWB, &tkKJ, &tkKS, &tkKB, &tkEJ, &tkES, &tkEB,
 		&tkKHJ, &tkKHS, &tkKHB, &tkEHJ, &tkEHS, &tkEHB)
 
@@ -677,7 +931,7 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 	sisaKJ, sisaKS, sisaKB := inKJ-tkKJ, inKS-tkKS, inKB-tkKB
 	sisaEJ, sisaES, sisaEB := inEJ-tkEJ, inES-tkES, inEB-tkEB
 	sisaKHJ, sisaKHS, sisaKHB := inKHJ-tkKHJ, inKHS-tkKHS, inKHB-tkKHB
-	sisaEHJ, sisaEHS, sisaEHB := inEHJ-tkEHJ, inES-tkEHS, inEB-tkEB
+	sisaEHJ, sisaEHS, sisaEHB := inEHJ-tkEHJ, inEHS-tkEHS, inEHB-tkEHB
 	log.Printf("[Kapten] seller %d konfirmasi ritase %d (%s rit %d): %d baris ter-link, sisa koli=%d",
 		sellerID, req.IDRitase, req.JenisRitase, req.RitaseKe, linked,
 		sisaKJ+sisaKS+sisaKB)
@@ -694,6 +948,8 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 			"ecer_jkt": sisaEJ, "ecer_seg": sisaES, "ecer_btn": sisaEB,
 			"koli_hv_jkt": sisaKHJ, "koli_hv_seg": sisaKHS, "koli_hv_btn": sisaKHB,
 			"ecer_hv_jkt": sisaEHJ, "ecer_hv_seg": sisaEHS, "ecer_hv_btn": sisaEHB,
+			"koli_hv": sisaKHJ + sisaKHS + sisaKHB,
+			"hv_awb":  sisaEHJ + sisaEHS + sisaEHB,
 			"total_koli": sisaKJ + sisaKS + sisaKB,
 			"total_ecer": sisaEJ + sisaES + sisaEB,
 			"total_hv":   sisaKHJ + sisaKHS + sisaKHB + sisaEHJ + sisaEHS + sisaEHB,
@@ -701,13 +957,15 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 	})
 }
 
-// GetPendingConfirmations mengambil grup input hari ini (WIB) milik seller kapten
+// GetPendingConfirmations mengambil grup input hari ini (WIB) milik lokasi kapten
 // yang belum ter-link ke ritase — bahan layar "Konfirmasi Pengambilan".
 // GET /api/v1/kapten/pending-confirmations
 func (h *Handler) GetPendingConfirmations(c echo.Context) error {
-	sellerID, _ := c.Get(appMiddleware.CtxSellerID).(int64)
-	if sellerID == 0 {
-		return response.Error(c, http.StatusBadRequest, "akun kapten tidak terkait dengan seller")
+	ctx0, cancel0 := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel0()
+	implantID, sellerID := h.lokasiKapten(ctx0, c)
+	if implantID == 0 && sellerID == 0 {
+		return response.Error(c, http.StatusBadRequest, "akun kapten tidak terkait dengan implant/seller")
 	}
 
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
@@ -725,13 +983,13 @@ func (h *Handler) GetPendingConfirmations(c echo.Context) error {
 		       COALESCE(SUM(ecer_hv_jkt), 0), COALESCE(SUM(ecer_hv_seg), 0), COALESCE(SUM(ecer_hv_btn), 0),
 		       MAX(created_at)
 		FROM input_kapten
-		WHERE id_seller = $1 AND id_ritase IS NULL
+		WHERE (id_implant = $1 OR id_seller = $2) AND id_ritase IS NULL
 		  AND (created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
 		GROUP BY jenis_ritase, ritase_ke
 		ORDER BY ritase_ke ASC
-	`, sellerID)
+	`, implantID, sellerID)
 	if err != nil {
-		log.Printf("[Kapten] gagal ambil pending seller %d: %v", sellerID, err)
+		log.Printf("[Kapten] gagal ambil pending implant %d seller %d: %v", implantID, sellerID, err)
 		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data pending")
 	}
 	defer rows.Close()
@@ -770,12 +1028,14 @@ func (h *Handler) GetPendingConfirmations(c echo.Context) error {
 }
 
 // GetKonfirmasiPenjemputan mengambil riwayat serah terima hari ini (WIB) milik
-// seller kapten — lengkap dengan trip, driver, jumlah diambil, foto, catatan.
+// lokasi kapten — lengkap dengan trip, driver, jumlah diambil, foto, catatan.
 // GET /api/v1/kapten/konfirmasi-penjemputan
 func (h *Handler) GetKonfirmasiPenjemputan(c echo.Context) error {
-	sellerID, _ := c.Get(appMiddleware.CtxSellerID).(int64)
-	if sellerID == 0 {
-		return response.Error(c, http.StatusBadRequest, "akun kapten tidak terkait dengan seller")
+	ctx0, cancel0 := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel0()
+	implantID, sellerID := h.lokasiKapten(ctx0, c)
+	if implantID == 0 && sellerID == 0 {
+		return response.Error(c, http.StatusBadRequest, "akun kapten tidak terkait dengan implant/seller")
 	}
 
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
@@ -796,12 +1056,12 @@ func (h *Handler) GetKonfirmasiPenjemputan(c echo.Context) error {
 		FROM konfirmasi_penjemputan kp
 		LEFT JOIN ritase r ON r.id_ritase = kp.id_ritase
 		LEFT JOIN driver d ON d.id_driver = r.id_driver
-		WHERE kp.id_seller = $1
+		WHERE (kp.id_implant = $1 OR kp.id_seller = $2)
 		  AND (kp.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
 		ORDER BY kp.created_at DESC
-	`, sellerID)
+	`, implantID, sellerID)
 	if err != nil {
-		log.Printf("[Kapten] gagal ambil riwayat penjemputan seller %d: %v", sellerID, err)
+		log.Printf("[Kapten] gagal ambil riwayat penjemputan implant %d seller %d: %v", implantID, sellerID, err)
 		return response.Error(c, http.StatusInternalServerError, "gagal mengambil riwayat")
 	}
 	defer rows.Close()
@@ -855,7 +1115,7 @@ func (h *Handler) GetKonfirmasiPenjemputan(c echo.Context) error {
 			       COALESCE(SUM(t.koli_hv_jkt), 0) AS w_khj, COALESCE(SUM(t.koli_hv_seg), 0) AS w_khs, COALESCE(SUM(t.koli_hv_btn), 0) AS w_khb,
 			       COALESCE(SUM(t.ecer_hv_jkt), 0) AS w_ehj, COALESCE(SUM(t.ecer_hv_seg), 0) AS w_ehs, COALESCE(SUM(t.ecer_hv_btn), 0) AS w_ehb
 			FROM input_kapten t
-			WHERE t.id_seller = $1
+			WHERE (t.id_implant = $1 OR t.id_seller = $2)
 			  AND (t.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
 			GROUP BY t.jenis_ritase, t.ritase_ke
 		),
@@ -871,7 +1131,7 @@ func (h *Handler) GetKonfirmasiPenjemputan(c echo.Context) error {
 			       COALESCE(SUM(t.koli_hv_jkt), 0) AS w_khj, COALESCE(SUM(t.koli_hv_seg), 0) AS w_khs, COALESCE(SUM(t.koli_hv_btn), 0) AS w_khb,
 			       COALESCE(SUM(t.ecer_hv_jkt), 0) AS w_ehj, COALESCE(SUM(t.ecer_hv_seg), 0) AS w_ehs, COALESCE(SUM(t.ecer_hv_btn), 0) AS w_ehb
 			FROM konfirmasi_penjemputan t
-			WHERE t.id_seller = $1
+			WHERE (t.id_implant = $1 OR t.id_seller = $2)
 			  AND (t.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
 			GROUP BY t.jenis_ritase, t.ritase_ke
 		)
@@ -895,7 +1155,7 @@ func (h *Handler) GetKonfirmasiPenjemputan(c echo.Context) error {
 		FROM inp i
 		FULL OUTER JOIN amb a USING (jenis_ritase, ritase_ke)
 		ORDER BY 2
-	`, sellerID)
+	`, implantID, sellerID)
 	if err == nil {
 		defer sRows.Close()
 		for sRows.Next() {
@@ -922,6 +1182,8 @@ func (h *Handler) GetKonfirmasiPenjemputan(c echo.Context) error {
 				"sisa_ecer_jkt": sEj, "sisa_ecer_seg": sEs, "sisa_ecer_btn": sEb,
 				"sisa_koli_hv_jkt": sKhj, "sisa_koli_hv_seg": sKhs, "sisa_koli_hv_btn": sKhb,
 				"sisa_ecer_hv_jkt": sEhj, "sisa_ecer_hv_seg": sEhs, "sisa_ecer_hv_btn": sEhb,
+				"sisa_koli_hv": sKhj + sKhs + sKhb,
+				"sisa_hv_awb":  sEhj + sEhs + sEhb,
 			})
 		}
 	} else {
@@ -947,9 +1209,12 @@ func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	kapten.GET("/my-seller-ritase", h.GetMySellerRitase)
 	kapten.POST("/cargo-input", h.PostCargoInput)
 	kapten.GET("/seller-info", h.GetSellerInfo)
+	kapten.GET("/implant-info", h.GetImplantInfo)
 	kapten.GET("/today-cargo", h.GetTodayCargo)
 	kapten.GET("/my-sellers", h.GetMySellers)
 	kapten.POST("/select-seller", h.SelectSeller)
+	kapten.GET("/my-implants", h.GetMyImplants)
+	kapten.POST("/select-implant", h.SelectImplant)
 	kapten.POST("/confirm-pickup", h.ConfirmPickup)
 	kapten.GET("/pending-confirmations", h.GetPendingConfirmations)
 	kapten.GET("/konfirmasi-penjemputan", h.GetKonfirmasiPenjemputan)

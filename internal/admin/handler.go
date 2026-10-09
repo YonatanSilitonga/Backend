@@ -38,6 +38,12 @@ func (h *Handler) RegisterRoutes(g *echo.Group) {
 	g.PUT("/sellers/:id", h.UpdateSeller)
 	g.DELETE("/sellers/:id", h.DeleteSeller)
 
+	// Implant (master lokasi implant, terpisah dari seller)
+	g.GET("/implants", h.ListImplant)
+	g.POST("/implants", h.CreateImplant)
+	g.PUT("/implants/:id", h.UpdateImplant)
+	g.DELETE("/implants/:id", h.DeleteImplant)
+
 	// Gudang
 	g.GET("/gudang", h.ListGudang)
 	g.POST("/gudang", h.CreateGudang)
@@ -57,6 +63,13 @@ func (h *Handler) RegisterRoutes(g *echo.Group) {
 	g.PUT("/users/:id/status", h.UpdateUserStatus)
 	g.POST("/users/:id/reset-password", h.ResetPassword)
 	g.DELETE("/users/:id", h.DeleteUser)
+
+	// Kapten (profil + akun + mapping seller)
+	g.GET("/kapten", h.ListKapten)
+	g.POST("/kapten", h.CreateKapten)
+	g.GET("/kapten/:id", h.GetKapten)
+	g.PUT("/kapten/:id", h.UpdateKapten)
+	g.DELETE("/kapten/:id", h.DeleteKapten)
 }
 
 // ──────── Driver ────────
@@ -219,6 +232,62 @@ func (h *Handler) DeleteSeller(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "gagal menonaktifkan seller")
 	}
 	return response.OK(c, map[string]string{"message": "seller dinonaktifkan"})
+}
+
+// ──────── Implant (master lokasi implant, terpisah dari seller) ────────
+
+func (h *Handler) ListImplant(c echo.Context) error {
+	data, err := h.svc.ListImplant(c.Request().Context())
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data implant")
+	}
+	return response.OK(c, data)
+}
+
+func (h *Handler) CreateImplant(c echo.Context) error {
+	var req ImplantRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
+	}
+	if req.KodeImplant == "" || req.NamaImplant == "" {
+		return response.Error(c, http.StatusBadRequest, "kode_implant dan nama_implant wajib diisi")
+	}
+	if req.Status == "" {
+		req.Status = "aktif"
+	}
+	createdBy := c.Get(middleware.CtxUserID).(int64)
+	id, err := h.svc.CreateImplant(c.Request().Context(), req, createdBy)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal membuat implant")
+	}
+	return response.Created(c, map[string]any{"id_implant": id})
+}
+
+func (h *Handler) UpdateImplant(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "id tidak valid")
+	}
+	var req ImplantRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
+	}
+	updatedBy := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.UpdateImplant(c.Request().Context(), id, req, updatedBy); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal update implant")
+	}
+	return response.OK(c, map[string]string{"message": "implant diperbarui"})
+}
+
+func (h *Handler) DeleteImplant(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "id tidak valid")
+	}
+	if err := h.svc.DeleteImplant(c.Request().Context(), id); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal menonaktifkan implant")
+	}
+	return response.OK(c, map[string]string{"message": "implant dinonaktifkan"})
 }
 
 // ──────── Gudang ────────
@@ -429,4 +498,73 @@ func (h *Handler) DeleteUser(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "gagal menghapus user")
 	}
 	return response.OK(c, map[string]string{"message": "user dihapus"})
+}
+
+// ──────── Kapten ────────
+
+func (h *Handler) ListKapten(c echo.Context) error {
+	data, err := h.svc.ListKapten(c.Request().Context())
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data kapten")
+	}
+	if data == nil {
+		data = []Kapten{}
+	}
+	return response.OK(c, data)
+}
+
+func (h *Handler) GetKapten(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "id tidak valid")
+	}
+	data, err := h.svc.GetKapten(c.Request().Context(), id)
+	if err != nil {
+		return response.Error(c, http.StatusNotFound, "kapten tidak ditemukan")
+	}
+	return response.OK(c, data)
+}
+
+func (h *Handler) CreateKapten(c echo.Context) error {
+	var req KaptenRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
+	}
+	createdBy := c.Get(middleware.CtxUserID).(int64)
+	res, err := h.svc.CreateKapten(c.Request().Context(), req, createdBy)
+	if err != nil {
+		if errors.Is(err, ErrUsernameExists) {
+			return response.Error(c, http.StatusConflict, "username sudah digunakan")
+		}
+		return response.Error(c, http.StatusBadRequest, err.Error())
+	}
+	return response.Created(c, res)
+}
+
+func (h *Handler) UpdateKapten(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "id tidak valid")
+	}
+	var req KaptenRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
+	}
+	updatedBy := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.UpdateKapten(c.Request().Context(), id, req, updatedBy); err != nil {
+		return response.Error(c, http.StatusBadRequest, err.Error())
+	}
+	return response.OK(c, map[string]string{"message": "kapten diperbarui"})
+}
+
+func (h *Handler) DeleteKapten(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "id tidak valid")
+	}
+	updatedBy := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.DeleteKapten(c.Request().Context(), id, updatedBy); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal menghapus kapten")
+	}
+	return response.OK(c, map[string]string{"message": "kapten dihapus, akun dinonaktifkan"})
 }

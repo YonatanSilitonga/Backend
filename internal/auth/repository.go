@@ -26,7 +26,7 @@ func (r *Repository) FindByUsername(ctx context.Context, username string) (*User
 	query := `
 		SELECT u.id_user, u.username, COALESCE(k.nama, u.username) AS name,
 		       u.role, u.karyawan_id, u.id_driver,
-		       COALESCE(u.seller_id, 0)
+		       COALESCE(u.seller_id, 0), COALESCE(u.status, 'aktif')
 		FROM users u
 		LEFT JOIN karyawan k ON k.id_karyawan = u.karyawan_id
 		WHERE LOWER(u.username) = LOWER($1)
@@ -34,7 +34,7 @@ func (r *Repository) FindByUsername(ctx context.Context, username string) (*User
 	var u User
 	var pwHash string
 	var idSeller int64
-	err := r.db.QueryRow(ctx, query, username).Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.KaryawanID, &u.IDDriver, &idSeller)
+	err := r.db.QueryRow(ctx, query, username).Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.KaryawanID, &u.IDDriver, &idSeller, &u.Status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, "", ErrNotFound
 	}

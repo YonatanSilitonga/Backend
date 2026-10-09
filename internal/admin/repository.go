@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -176,6 +177,81 @@ func (r *Repository) DeleteSeller(ctx context.Context, id int64) error {
 	return err
 }
 
+// ──────── Implant (master lokasi implant, terpisah dari seller) ────────
+
+func (r *Repository) ListImplant(ctx context.Context) ([]Implant, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT i.id_implant, i.kode_implant, i.nama_implant, i.alamat, i.kota, i.area, i.no_hp,
+		       i.jam_mulai_pickup::text, i.jam_selesai_pickup::text,
+		       i.forecast_harian, i.status, i.latitude, i.longitude,
+		       i.jarak_tempuh_km, i.jarak_dc_km, COALESCE(i.jumlah_manpower, 0),
+		       i.created_at, i.updated_at
+		FROM implant i
+		ORDER BY i.id_implant`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Implant
+	for rows.Next() {
+		var im Implant
+		if err := rows.Scan(&im.ID, &im.KodeImplant, &im.NamaImplant, &im.Alamat, &im.Kota,
+			&im.Area, &im.NoHP, &im.JamMulaiPickup, &im.JamSelesaiPickup,
+			&im.ForecastHarian, &im.Status, &im.Latitude, &im.Longitude,
+			&im.JarakTempuhKm, &im.JarakDcKm, &im.JumlahManpower,
+			&im.CreatedAt, &im.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, im)
+	}
+	return items, rows.Err()
+}
+
+func (r *Repository) CreateImplant(ctx context.Context, req ImplantRequest) (int64, error) {
+	var manpower *int64 = req.JumlahManpower
+	var zero int64
+	if manpower == nil {
+		zero = 0
+		manpower = &zero
+	}
+	var id int64
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO implant (kode_implant, nama_implant, alamat, kota, area, no_hp,
+		                     jam_mulai_pickup, jam_selesai_pickup, forecast_harian, status,
+		                     latitude, longitude, jarak_tempuh_km, jarak_dc_km, jumlah_manpower)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id_implant`,
+		req.KodeImplant, req.NamaImplant, req.Alamat, req.Kota, req.Area, req.NoHP,
+		req.JamMulaiPickup, req.JamSelesaiPickup, req.ForecastHarian, req.Status,
+		req.Latitude, req.Longitude, req.JarakTempuhKm, req.JarakDcKm, manpower,
+	).Scan(&id)
+	return id, err
+}
+
+func (r *Repository) UpdateImplant(ctx context.Context, id int64, req ImplantRequest) error {
+	var manpower *int64 = req.JumlahManpower
+	var zero int64
+	if manpower == nil {
+		zero = 0
+		manpower = &zero
+	}
+	_, err := r.db.Exec(ctx, `
+		UPDATE implant SET kode_implant=$1, nama_implant=$2, alamat=$3, kota=$4, area=$5,
+		       no_hp=$6, jam_mulai_pickup=$7, jam_selesai_pickup=$8, forecast_harian=$9, status=$10,
+		       latitude=$11, longitude=$12, jarak_tempuh_km=$13, jarak_dc_km=$14, jumlah_manpower=$15,
+		       updated_at=NOW()
+		WHERE id_implant=$16`,
+		req.KodeImplant, req.NamaImplant, req.Alamat, req.Kota, req.Area, req.NoHP,
+		req.JamMulaiPickup, req.JamSelesaiPickup, req.ForecastHarian, req.Status,
+		req.Latitude, req.Longitude, req.JarakTempuhKm, req.JarakDcKm, manpower, id,
+	)
+	return err
+}
+
+func (r *Repository) DeleteImplant(ctx context.Context, id int64) error {
+	_, err := r.db.Exec(ctx, `UPDATE implant SET status='nonaktif', updated_at=NOW() WHERE id_implant=$1`, id)
+	return err
+}
+
 // ──────── Gudang ────────
 
 func (r *Repository) ListGudang(ctx context.Context) ([]Gudang, error) {
@@ -232,13 +308,14 @@ func (r *Repository) DeleteGudang(ctx context.Context, id int64) error {
 
 func (r *Repository) ListUser(ctx context.Context) ([]User, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT u.id_user, u.username, COALESCE(d.nama_driver, '') AS name, u.role, u.id_driver,
+		SELECT u.id_user, u.username, COALESCE(d.nama_driver, kp.nama, '') AS name, u.role, u.id_driver,
 		       CASE WHEN u.last_login IS NOT NULL AND u.last_login > now() - interval '30 minutes' THEN true ELSE false END AS is_active,
 		       COALESCE(u.status, 'aktif') AS status,
 		       u.created_at, u.created_by, COALESCE(uc.username, ''),
 		       u.updated_at, u.updated_by, COALESCE(uu.username, '')
 		FROM users u
 		LEFT JOIN driver d ON d.id_driver = u.id_driver
+		LEFT JOIN kapten kp ON kp.id_user = u.id_user
 		LEFT JOIN users uc ON uc.id_user = u.created_by
 		LEFT JOIN users uu ON uu.id_user = u.updated_by
 		ORDER BY u.id_user`)
@@ -375,4 +452,332 @@ func (r *Repository) UpdateDropPoint(ctx context.Context, id int64, req DropPoin
 func (r *Repository) DeleteDropPoint(ctx context.Context, id int64) error {
 	_, err := r.db.Exec(ctx, `UPDATE drop_point SET status='nonaktif' WHERE id_drop_point=$1`, id)
 	return err
+}
+
+// ──────── Kapten (profil + akun + mapping seller) ────────
+
+// sellersOfUsers mengambil mapping seller untuk beberapa id_user sekaligus.
+func sellersOfUsers(ctx context.Context, q interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}, userIDs []int64) (map[int64][]KaptenSeller, error) {
+	out := map[int64][]KaptenSeller{}
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT ksm.id_user, s.id_seller, COALESCE(s.kode_seller, ''), s.nama_seller
+		FROM kapten_seller_map ksm
+		JOIN seller s ON s.id_seller = ksm.id_seller
+		WHERE ksm.id_user = ANY($1)
+		ORDER BY s.nama_seller`, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uid int64
+		var s KaptenSeller
+		if err := rows.Scan(&uid, &s.IDSeller, &s.KodeSeller, &s.NamaSeller); err != nil {
+			return nil, err
+		}
+		out[uid] = append(out[uid], s)
+	}
+	return out, rows.Err()
+}
+
+// implantsOfUsers mengambil mapping implant (+peran) untuk beberapa id_user sekaligus.
+func implantsOfUsers(ctx context.Context, q interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}, userIDs []int64) (map[int64][]KaptenImplant, error) {
+	out := map[int64][]KaptenImplant{}
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT kim.id_user, i.id_implant, COALESCE(i.kode_implant, ''), i.nama_implant, COALESCE(kim.peran, 'utama')
+		FROM kapten_implant_map kim
+		JOIN implant i ON i.id_implant = kim.id_implant
+		WHERE kim.id_user = ANY($1)
+		ORDER BY i.nama_implant`, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uid int64
+		var im KaptenImplant
+		if err := rows.Scan(&uid, &im.IDImplant, &im.KodeImplant, &im.NamaImplant, &im.Peran); err != nil {
+			return nil, err
+		}
+		out[uid] = append(out[uid], im)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) ListKapten(ctx context.Context) ([]Kapten, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT k.id_kapten, k.id_user, COALESCE(u.username, ''), k.nama, k.no_hp,
+		       COALESCE(k.status, 'aktif'),
+		       k.created_at, k.created_by, COALESCE(uc.username, ''),
+		       k.updated_at, k.updated_by, COALESCE(uu.username, '')
+		FROM kapten k
+		LEFT JOIN users u ON u.id_user = k.id_user
+		LEFT JOIN users uc ON uc.id_user = k.created_by
+		LEFT JOIN users uu ON uu.id_user = k.updated_by
+		ORDER BY k.id_kapten`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Kapten
+	var uids []int64
+	for rows.Next() {
+		var k Kapten
+		if err := rows.Scan(&k.ID, &k.IDUser, &k.Username, &k.Nama, &k.NoHP, &k.Status,
+			&k.CreatedAt, &k.CreatedBy, &k.CreatedByName, &k.UpdatedAt, &k.UpdatedBy, &k.UpdatedByName); err != nil {
+			return nil, err
+		}
+		items = append(items, k)
+		if k.IDUser != nil {
+			uids = append(uids, *k.IDUser)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sellers, err := sellersOfUsers(ctx, r.db, uids)
+	if err != nil {
+		return nil, err
+	}
+	implants, err := implantsOfUsers(ctx, r.db, uids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if items[i].IDUser != nil {
+			items[i].Sellers = sellers[*items[i].IDUser]
+			items[i].Implants = implants[*items[i].IDUser]
+		}
+	}
+	return items, nil
+}
+
+func (r *Repository) GetKapten(ctx context.Context, id int64) (*Kapten, error) {
+	var k Kapten
+	err := r.db.QueryRow(ctx, `
+		SELECT k.id_kapten, k.id_user, COALESCE(u.username, ''), k.nama, k.no_hp,
+		       COALESCE(k.status, 'aktif'),
+		       k.created_at, k.created_by, COALESCE(uc.username, ''),
+		       k.updated_at, k.updated_by, COALESCE(uu.username, '')
+		FROM kapten k
+		LEFT JOIN users u ON u.id_user = k.id_user
+		LEFT JOIN users uc ON uc.id_user = k.created_by
+		LEFT JOIN users uu ON uu.id_user = k.updated_by
+		WHERE k.id_kapten = $1`, id).Scan(
+		&k.ID, &k.IDUser, &k.Username, &k.Nama, &k.NoHP, &k.Status,
+		&k.CreatedAt, &k.CreatedBy, &k.CreatedByName, &k.UpdatedAt, &k.UpdatedBy, &k.UpdatedByName)
+	if err != nil {
+		return nil, err
+	}
+	if k.IDUser != nil {
+		sellers, err := sellersOfUsers(ctx, r.db, []int64{*k.IDUser})
+		if err != nil {
+			return nil, err
+		}
+		k.Sellers = sellers[*k.IDUser]
+		implants, err := implantsOfUsers(ctx, r.db, []int64{*k.IDUser})
+		if err != nil {
+			return nil, err
+		}
+		k.Implants = implants[*k.IDUser]
+	}
+	return &k, nil
+}
+
+// validateSellers memastikan semua id ada & seller aktif.
+func validateSellers(ctx context.Context, q interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	var ok int
+	err := q.QueryRow(ctx, `SELECT COUNT(*) FROM seller WHERE id_seller = ANY($1) AND status = 'aktif'`, ids).Scan(&ok)
+	if err != nil {
+		return err
+	}
+	if ok != len(ids) {
+		return fmt.Errorf("sebagian seller tidak ditemukan / tidak aktif")
+	}
+	return nil
+}
+
+// validateImplants memastikan semua id ada & implant aktif.
+func validateImplants(ctx context.Context, q interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	var ok int
+	err := q.QueryRow(ctx, `SELECT COUNT(*) FROM implant WHERE id_implant = ANY($1) AND status = 'aktif'`, ids).Scan(&ok)
+	if err != nil {
+		return err
+	}
+	if ok != len(ids) {
+		return fmt.Errorf("sebagian implant tidak ditemukan / tidak aktif")
+	}
+	return nil
+}
+
+// peranImplant menormalkan peran (default 'utama', aturan longgar).
+func peranImplant(peran map[int64]string, id int64) (string, error) {
+	p := "utama"
+	if peran != nil {
+		if v, ok := peran[id]; ok && v != "" {
+			p = v
+		}
+	}
+	if p != "utama" && p != "cadangan" {
+		return "", fmt.Errorf("peran implant harus 'utama' atau 'cadangan'")
+	}
+	return p, nil
+}
+
+// CreateKaptenTx membuat akun users (role kapten) + profil kapten + mapping seller & implant.
+func (r *Repository) CreateKaptenTx(ctx context.Context, username, passwordHash, nama string, noHP *string, status string, sellerIDs, implantIDs []int64, implantPeran map[int64]string, createdBy int64) (idKapten, idUser int64, err error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	if err := validateSellers(ctx, tx, sellerIDs); err != nil {
+		return 0, 0, err
+	}
+	if err := validateImplants(ctx, tx, implantIDs); err != nil {
+		return 0, 0, err
+	}
+	err = tx.QueryRow(ctx, `
+		INSERT INTO users (username, password, role, status, created_by)
+		VALUES ($1, $2, 'kapten', $3, $4) RETURNING id_user`,
+		username, passwordHash, status, createdBy,
+	).Scan(&idUser)
+	if err != nil {
+		return 0, 0, err
+	}
+	err = tx.QueryRow(ctx, `
+		INSERT INTO kapten (id_user, nama, no_hp, status, created_by)
+		VALUES ($1, $2, $3, $4, $5) RETURNING id_kapten`,
+		idUser, nama, noHP, status, createdBy,
+	).Scan(&idKapten)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, sid := range sellerIDs {
+		if _, err := tx.Exec(ctx, `INSERT INTO kapten_seller_map (id_user, id_seller) VALUES ($1, $2)`, idUser, sid); err != nil {
+			return 0, 0, err
+		}
+	}
+	for _, iid := range implantIDs {
+		p, err := peranImplant(implantPeran, iid)
+		if err != nil {
+			return 0, 0, err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO kapten_implant_map (id_user, id_implant, peran) VALUES ($1, $2, $3)`, idUser, iid, p); err != nil {
+			return 0, 0, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, err
+	}
+	return idKapten, idUser, nil
+}
+
+// UpdateKaptenTx ubah profil; sellerIDs==nil berarti mapping seller tidak diubah,
+// implantIDs==nil berarti mapping implant tidak diubah.
+// Status selalu disinkronkan ke akun users.
+func (r *Repository) UpdateKaptenTx(ctx context.Context, id int64, nama string, noHP *string, status string, sellerIDs, implantIDs []int64, gantiSeller, gantiImplant bool, implantPeran map[int64]string, updatedBy int64) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var idUser *int64
+	err = tx.QueryRow(ctx, `
+		UPDATE kapten SET nama=$1, no_hp=$2, status=$3, updated_at=NOW(), updated_by=$4
+		WHERE id_kapten=$5 RETURNING id_user`,
+		nama, noHP, status, updatedBy, id,
+	).Scan(&idUser)
+	if err != nil {
+		return err
+	}
+	if idUser != nil {
+		if _, err := tx.Exec(ctx, `UPDATE users SET status=$1, updated_at=NOW(), updated_by=$2 WHERE id_user=$3`, status, updatedBy, *idUser); err != nil {
+			return err
+		}
+	}
+	if gantiSeller {
+		if err := validateSellers(ctx, tx, sellerIDs); err != nil {
+			return err
+		}
+		if idUser != nil {
+			if _, err := tx.Exec(ctx, `DELETE FROM kapten_seller_map WHERE id_user=$1`, *idUser); err != nil {
+				return err
+			}
+			for _, sid := range sellerIDs {
+				if _, err := tx.Exec(ctx, `INSERT INTO kapten_seller_map (id_user, id_seller) VALUES ($1, $2)`, *idUser, sid); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if gantiImplant {
+		if err := validateImplants(ctx, tx, implantIDs); err != nil {
+			return err
+		}
+		if idUser != nil {
+			if _, err := tx.Exec(ctx, `DELETE FROM kapten_implant_map WHERE id_user=$1`, *idUser); err != nil {
+				return err
+			}
+			for _, iid := range implantIDs {
+				p, err := peranImplant(implantPeran, iid)
+				if err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO kapten_implant_map (id_user, id_implant, peran) VALUES ($1, $2, $3)`, *idUser, iid, p); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// DeleteKaptenTx hapus lunak: mapping + profil dihapus, akun dinonaktifkan (riwayat aman).
+func (r *Repository) DeleteKaptenTx(ctx context.Context, id int64, updatedBy int64) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var idUser *int64
+	err = tx.QueryRow(ctx, `DELETE FROM kapten WHERE id_kapten=$1 RETURNING id_user`, id).Scan(&idUser)
+	if err != nil {
+		return err
+	}
+	if idUser != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM kapten_seller_map WHERE id_user=$1`, *idUser); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM kapten_implant_map WHERE id_user=$1`, *idUser); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE users SET status='nonaktif', updated_at=NOW(), updated_by=$1 WHERE id_user=$2`, updatedBy, *idUser); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }

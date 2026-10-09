@@ -187,13 +187,15 @@ func (r *Repository) ListRitase(ctx context.Context, idDriver int64, startDate, 
 // ListStops mengambil daftar titik perhentian (stops) rute penugasan ritase.
 func (r *Repository) ListStops(ctx context.Context, idRitase int64) ([]RitaseStop, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT rs.id_stop, rs.id_ritase, rs.urutan, rs.jenis_stop,
+		SELECT rs.id_stop, rs.id_ritase, rs.urutan,
+		       CASE WHEN rs.id_implant IS NOT NULL THEN 'implant' ELSE rs.jenis_stop END AS jenis_stop,
 		       rs.id_gudang, g.nama_gudang, g.tipe,
 		       rs.id_seller, s.nama_seller,
+		       rs.id_implant, i.nama_implant,
 		       rs.id_drop_point, dp.nama_drop_point,
 		       rs.keterangan,
-		COALESCE(g.latitude, s.latitude, dp.latitude) as latitude,
-		       COALESCE(g.longitude, s.longitude, dp.longitude) as longitude,
+		COALESCE(g.latitude, s.latitude, i.latitude, dp.latitude) as latitude,
+		       COALESCE(g.longitude, s.longitude, i.longitude, dp.longitude) as longitude,
 		       re.jumlah_koli,
 		       re.jumlah_ecer,
 		       re.jumlah_high_value,
@@ -202,6 +204,7 @@ func (r *Repository) ListStops(ctx context.Context, idRitase int64) ([]RitaseSto
 		FROM ritase_stop rs
 		LEFT JOIN gudang g ON rs.id_gudang = g.id_gudang
 		LEFT JOIN seller s ON rs.id_seller = s.id_seller
+		LEFT JOIN implant i ON rs.id_implant = i.id_implant
 		LEFT JOIN drop_point dp ON rs.id_drop_point = dp.id_drop_point
 		LEFT JOIN LATERAL (
 			SELECT 
@@ -214,27 +217,27 @@ func (r *Repository) ListStops(ctx context.Context, idRitase int64) ([]RitaseSto
 					WHERE ev2.id_ritase = rs.id_ritase 
 					AND ev2.status IN ('Tiba', 'Bongkar Muat Barang', 'Muat Barang', 'Bongkar Barang')
 					AND (
-						ev2.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
-						OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev2.nama_lokasi) IN LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
-						OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) IN LOWER(ev2.nama_lokasi)) > 0)
+						ev2.nama_lokasi = COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang)
+						OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev2.nama_lokasi) IN LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
+						OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) IN LOWER(ev2.nama_lokasi)) > 0)
 					)
 				), 0) AS durasi_detik,
 				(SELECT ev2.foto_manifest_url FROM ritase_event ev2
 				 WHERE ev2.id_ritase = rs.id_ritase
 				   AND ev2.foto_manifest_url IS NOT NULL AND ev2.foto_manifest_url != ''
 				   AND (
-				     ev2.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
-				     OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev2.nama_lokasi) in LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
-				     OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(ev2.nama_lokasi)) > 0)
+				     ev2.nama_lokasi = COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang)
+				     OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev2.nama_lokasi) in LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
+				     OR (ev2.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(ev2.nama_lokasi)) > 0)
 				   )
 				 LIMIT 1
 				) AS foto_manifest_url
 			FROM ritase_event ev
 			WHERE ev.id_ritase = rs.id_ritase
 			  AND (
-			    ev.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
-			    OR (ev.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev.nama_lokasi) in LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
-			    OR (ev.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(ev.nama_lokasi)) > 0)
+			    ev.nama_lokasi = COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang)
+			    OR (ev.nama_lokasi IS NOT NULL AND POSITION(LOWER(ev.nama_lokasi) in LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
+			    OR (ev.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(ev.nama_lokasi)) > 0)
 			  )
 		) re ON true
 		WHERE rs.id_ritase = $1
@@ -252,6 +255,7 @@ func (r *Repository) ListStops(ctx context.Context, idRitase int64) ([]RitaseSto
 			&s.IDStop, &s.IDRitase, &s.Urutan, &s.JenisStop,
 			&s.IDGudang, &s.NamaGudang, &s.TipeGudang,
 			&s.IDSeller, &s.NamaSeller,
+			&s.IDImplant, &s.NamaImplant,
 			&s.IDDropPoint, &s.NamaDropPoint,
 			&s.Keterangan, &s.Latitude, &s.Longitude,
 			&s.JumlahKoli, &s.JumlahEcer, &s.JumlahHighValue,
@@ -570,7 +574,7 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 			ORDER BY log.id_log DESC
 			LIMIT 1
 		) ibl ON TRUE
-		WHERE s.latitude IS NOT NULL AND s.longitude IS NOT NULL
+		WHERE s.latitude IS NOT NULL AND s.longitude IS NOT NULL AND s.status = 'aktif'
 		ORDER BY s.id_seller ASC
 	`)
 	if err != nil {
@@ -589,6 +593,64 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 			return nil, err
 		}
 		items = append(items, s)
+	}
+	return items, rows.Err()
+}
+
+// ListImplantLocations mengambil implant aktif yang punya koordinat (untuk peta),
+// termasuk status log barang hari ini. PIC = nama kapten (utama dulu).
+func (r *Repository) ListImplantLocations(ctx context.Context) ([]ImplantLocation, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT i.id_implant, COALESCE(i.kode_implant,''), COALESCE(i.nama_implant,''), COALESCE(i.alamat,''),
+		       COALESCE(i.kota,''), COALESCE(kapten_agg.kapten, ''), COALESCE(i.no_hp,''),
+		       i.latitude, i.longitude, i.jarak_tempuh_km, i.jarak_dc_km,
+		       mu.total_koli, mu.total_ecer, mu.total_hv,
+		       ibl.jumlah_barang, ibl.koli, ibl.ecer, ibl.high_value, ibl.status, ibl.catatan
+		FROM implant i
+		LEFT JOIN (
+			SELECT kim.id_implant, STRING_AGG(k.nama, ', ' ORDER BY CASE WHEN kim.peran = 'utama' THEN 0 ELSE 1 END, k.nama) AS kapten
+			FROM kapten_implant_map kim
+			JOIN kapten k ON k.id_user = kim.id_user
+			GROUP BY kim.id_implant
+		) kapten_agg ON kapten_agg.id_implant = i.id_implant
+		LEFT JOIN (
+			SELECT rs.id_implant,
+			       SUM(re.jumlah_koli) AS total_koli,
+			       SUM(re.jumlah_ecer) AS total_ecer,
+			       SUM(re.jumlah_high_value) AS total_hv
+			FROM ritase_event re
+			JOIN ritase r ON r.id_ritase = re.id_ritase
+			JOIN ritase_stop rs ON rs.id_ritase = re.id_ritase AND rs.id_implant IS NOT NULL
+			WHERE (r.tanggal = CURRENT_DATE OR r.tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE) AND r.status != 'selesai'
+			GROUP BY rs.id_implant
+		) mu ON mu.id_implant = i.id_implant
+		LEFT JOIN LATERAL (
+			SELECT log.jumlah_barang, log.koli, log.ecer, log.high_value, log.status, log.catatan
+			FROM implan_barang_log log
+			WHERE log.id_implant = i.id_implant
+			  AND (log.tanggal = CURRENT_DATE OR log.tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
+			ORDER BY log.id_log DESC
+			LIMIT 1
+		) ibl ON TRUE
+		WHERE i.latitude IS NOT NULL AND i.longitude IS NOT NULL AND i.status = 'aktif'
+		ORDER BY i.id_implant ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []ImplantLocation
+	for rows.Next() {
+		var im ImplantLocation
+		if err := rows.Scan(&im.IDImplant, &im.KodeImplant, &im.NamaImplant, &im.Alamat,
+			&im.Kota, &im.Kapten, &im.NoHP, &im.Latitude, &im.Longitude,
+			&im.JarakTempuhKm, &im.JarakDcKm,
+			&im.TotalKoli, &im.TotalEcer, &im.TotalHighValue,
+			&im.JumlahBarang, &im.Koli, &im.Ecer, &im.HighValue, &im.StatusPickup, &im.CatatanPickup); err != nil {
+			return nil, err
+		}
+		items = append(items, im)
 	}
 	return items, rows.Err()
 }
@@ -713,22 +775,42 @@ func (r *Repository) ListGpsHistory(ctx context.Context, idRitase int64) ([]GpsP
 }
 
 // SaveImplanBarang mencatat atau memperbarui log barang di implan.
+// Dual-write: id_implant sumber baru; id_seller lama diisi bila ada padanan
+// (lookup via kode) agar pembaca lama tetap jalan. Keduanya boleh NULL bila
+// tak ada padanan (implant baru tanpa riwayat seller).
 func (r *Repository) SaveImplanBarang(ctx context.Context, req ImplanBarangInput, createdBy string) error {
 	status := req.Status
 	if status == "" {
 		status = "menunggu"
 	}
+	var idSeller, idImplant *int64
+	if req.IDSeller > 0 {
+		idSeller = &req.IDSeller
+	}
+	if req.IDImplant > 0 {
+		idImplant = &req.IDImplant
+		if idSeller == nil {
+			var sid int64
+			err := r.db.QueryRow(ctx, `
+				SELECT s.id_seller FROM seller s
+				JOIN implant i ON i.kode_implant = s.kode_seller
+				WHERE i.id_implant = $1`, req.IDImplant).Scan(&sid)
+			if err == nil {
+				idSeller = &sid
+			}
+		}
+	}
 	_, err := r.db.Exec(ctx, `
-		INSERT INTO implan_barang_log (id_seller, tanggal, jumlah_barang, koli, ecer, high_value, status, catatan, created_by, updated_at)
-		VALUES ($1, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
-	`, req.IDSeller, req.JumlahBarang, req.Koli, req.Ecer, req.HighValue, status, req.Catatan, createdBy)
+		INSERT INTO implan_barang_log (id_seller, id_implant, tanggal, jumlah_barang, koli, ecer, high_value, status, catatan, created_by, updated_at)
+		VALUES ($1, $2, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+	`, idSeller, idImplant, req.JumlahBarang, req.Koli, req.Ecer, req.HighValue, status, req.Catatan, createdBy)
 	return err
 }
 
 // GetImplanBarangHistory mengambil riwayat status barang untuk satu seller.
 func (r *Repository) GetImplanBarangHistory(ctx context.Context, idSeller int64) ([]ImplanBarangLog, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_log, id_seller, TO_CHAR(tanggal, 'YYYY-MM-DD'), jumlah_barang, COALESCE(koli, 0), COALESCE(ecer, 0), COALESCE(high_value, 0), status,
+		SELECT id_log, id_seller, id_implant, TO_CHAR(tanggal, 'YYYY-MM-DD'), jumlah_barang, COALESCE(koli, 0), COALESCE(ecer, 0), COALESCE(high_value, 0), status,
 		       COALESCE(catatan, ''), COALESCE(created_by, ''), created_at, updated_at
 		FROM implan_barang_log
 		WHERE id_seller = $1
@@ -743,7 +825,34 @@ func (r *Repository) GetImplanBarangHistory(ctx context.Context, idSeller int64)
 	var logs []ImplanBarangLog
 	for rows.Next() {
 		var l ImplanBarangLog
-		if err := rows.Scan(&l.ID, &l.IDSeller, &l.Tanggal, &l.JumlahBarang, &l.Koli, &l.Ecer, &l.HighValue, &l.Status,
+		if err := rows.Scan(&l.ID, &l.IDSeller, &l.IDImplant, &l.Tanggal, &l.JumlahBarang, &l.Koli, &l.Ecer, &l.HighValue, &l.Status,
+			&l.Catatan, &l.CreatedBy, &l.CreatedAt, &l.UpdatedAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, rows.Err()
+}
+
+// GetImplantBarangHistory mengambil riwayat status barang untuk satu implant.
+func (r *Repository) GetImplantBarangHistory(ctx context.Context, idImplant int64) ([]ImplanBarangLog, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id_log, id_seller, id_implant, TO_CHAR(tanggal, 'YYYY-MM-DD'), jumlah_barang, COALESCE(koli, 0), COALESCE(ecer, 0), COALESCE(high_value, 0), status,
+		       COALESCE(catatan, ''), COALESCE(created_by, ''), created_at, updated_at
+		FROM implan_barang_log
+		WHERE id_implant = $1
+		ORDER BY id_log DESC
+		LIMIT 50
+	`, idImplant)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []ImplanBarangLog
+	for rows.Next() {
+		var l ImplanBarangLog
+		if err := rows.Scan(&l.ID, &l.IDSeller, &l.IDImplant, &l.Tanggal, &l.JumlahBarang, &l.Koli, &l.Ecer, &l.HighValue, &l.Status,
 			&l.Catatan, &l.CreatedBy, &l.CreatedAt, &l.UpdatedAt); err != nil {
 			return nil, err
 		}

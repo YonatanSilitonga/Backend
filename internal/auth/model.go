@@ -11,6 +11,7 @@ type User struct {
 	KaryawanID *int64  `json:"karyawan_id,omitempty"`
 	IDDriver   *int64  `json:"id_driver,omitempty"`
 	IDSeller   *int64  `json:"id_seller,omitempty"`
+	Status     string  `json:"status,omitempty"`
 	CreatedAt  time.Time `json:"created_at,omitempty"`
 }
 

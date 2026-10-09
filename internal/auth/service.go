@@ -42,6 +42,11 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*AuthResponse, e
 		return nil, errors.New("username atau password salah")
 	}
 
+	// Akun nonaktif tidak boleh login (diatur admin via Users & Role).
+	if user.Status != "" && user.Status != "aktif" {
+		return nil, errors.New("akun dinonaktifkan, hubungi admin")
+	}
+
 	var idDriver int64
 	if user.IDDriver != nil {
 		idDriver = *user.IDDriver

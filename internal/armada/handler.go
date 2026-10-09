@@ -237,14 +237,15 @@ func (h *Handler) GetGpsHistory(c echo.Context) error {
 	return response.OK(c, data)
 }
 
-// SaveImplanBarang menangani POST /armada/implan/barang
+// SaveImplanBarang menangani POST /armada/implan/barang (legacy, id_seller)
+// dan POST /armada/implant/barang (baru, id_implant).
 func (h *Handler) SaveImplanBarang(c echo.Context) error {
 	var req ImplanBarangInput
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, http.StatusBadRequest, "format data tidak valid")
 	}
-	if req.IDSeller <= 0 {
-		return response.Error(c, http.StatusBadRequest, "id_seller wajib diisi")
+	if req.IDSeller <= 0 && req.IDImplant <= 0 {
+		return response.Error(c, http.StatusBadRequest, "id_seller atau id_implant wajib diisi")
 	}
 	username, _ := c.Get(appMiddleware.CtxUsername).(string)
 	if username == "" {
@@ -256,7 +257,7 @@ func (h *Handler) SaveImplanBarang(c echo.Context) error {
 	return response.OK(c, map[string]string{"message": "status barang implan berhasil disimpan"})
 }
 
-// GetImplanBarangHistory menangani GET /armada/implan/:id/history
+// GetImplanBarangHistory menangani GET /armada/implan/:id/history (legacy id_seller)
 func (h *Handler) GetImplanBarangHistory(c echo.Context) error {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -265,6 +266,19 @@ func (h *Handler) GetImplanBarangHistory(c echo.Context) error {
 	logs, err := h.svc.GetImplanBarangHistory(c.Request().Context(), id)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal mengambil riwayat barang implan")
+	}
+	return response.OK(c, logs)
+}
+
+// GetImplantBarangHistory menangani GET /armada/implant/:id/history (baru id_implant)
+func (h *Handler) GetImplantBarangHistory(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		return response.Error(c, http.StatusBadRequest, "id implant tidak valid")
+	}
+	logs, err := h.svc.GetImplantBarangHistory(c.Request().Context(), id)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil riwayat barang implant")
 	}
 	return response.OK(c, logs)
 }
@@ -373,6 +387,9 @@ func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 
 	g.POST("/armada/implan/barang", h.SaveImplanBarang, authMW)
 	g.GET("/armada/implan/:id/history", h.GetImplanBarangHistory, authMW)
+
+	g.POST("/armada/implant/barang", h.SaveImplanBarang, authMW)
+	g.GET("/armada/implant/:id/history", h.GetImplantBarangHistory, authMW)
 
 	g.GET("/armada/pickup/drivers", h.ListDriverPickups, authMW)
 	g.GET("/armada/pickup/history", h.ListAllDriverPickupHistory, authMW)

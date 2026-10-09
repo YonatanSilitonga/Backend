@@ -126,7 +126,8 @@ type TrackingLive struct {
 
 // ImplanBarangInput payload untuk input/update jumlah barang di implan.
 type ImplanBarangInput struct {
-	IDSeller     int64  `json:"id_seller"`
+	IDSeller     int64  `json:"id_seller,omitempty"`
+	IDImplant    int64  `json:"id_implant,omitempty"`
 	JumlahBarang int    `json:"jumlah_barang"`
 	Koli         int    `json:"koli"`
 	Ecer         int    `json:"ecer"`
@@ -138,7 +139,8 @@ type ImplanBarangInput struct {
 // ImplanBarangLog satu baris riwayat barang di implan.
 type ImplanBarangLog struct {
 	ID           int64     `json:"id_log"`
-	IDSeller     int64     `json:"id_seller"`
+	IDSeller     *int64    `json:"id_seller,omitempty"`
+	IDImplant    *int64    `json:"id_implant,omitempty"`
 	Tanggal      string    `json:"tanggal"`
 	JumlahBarang int       `json:"jumlah_barang"`
 	Koli         int       `json:"koli"`
@@ -216,10 +218,11 @@ type DriverPickupLog struct {
 	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
-// MapTracking gabungan posisi live kendaraan + titik seller + gudang + drop_point + driver pickup (data peta).
+// MapTracking gabungan posisi live kendaraan + titik seller + titik implant + gudang + drop_point + driver pickup (data peta).
 type MapTracking struct {
 	Vehicles      []TrackingLive     `json:"vehicles"`
 	Sellers       []SellerLocation   `json:"sellers"`
+	Implants      []ImplantLocation  `json:"implants,omitempty"`
 	Gudang        []GudangPoint      `json:"gudang"`
 	DropPoints    []DropPointPoi     `json:"drop_points"`
 	DriverPickups []DriverPickupItem `json:"driver_pickups"`
