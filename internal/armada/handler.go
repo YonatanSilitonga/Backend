@@ -254,6 +254,9 @@ func (h *Handler) SaveImplanBarang(c echo.Context) error {
 	if err := h.svc.SaveImplanBarang(c.Request().Context(), req, username); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan status barang implan")
 	}
+	if h.bus != nil {
+		h.bus.Publish("force_refresh", "implan_barang_update")
+	}
 	return response.OK(c, map[string]string{"message": "status barang implan berhasil disimpan"})
 }
 
@@ -308,6 +311,9 @@ func (h *Handler) SaveDriverPickupBarang(c echo.Context) error {
 	if err := h.svc.SaveDriverPickupBarang(c.Request().Context(), req, username); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan muatan driver pickup")
 	}
+	if h.bus != nil {
+		h.bus.Publish("force_refresh", "driver_pickup_update")
+	}
 	return response.OK(c, map[string]string{"message": "muatan driver pickup berhasil disimpan"})
 }
 
@@ -326,6 +332,9 @@ func (h *Handler) SaveDriverPickupBatch(c echo.Context) error {
 	}
 	if err := h.svc.SaveDriverPickupBatch(c.Request().Context(), req, username); err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan muatan driver pickup")
+	}
+	if h.bus != nil {
+		h.bus.Publish("force_refresh", "driver_pickup_batch_update")
 	}
 	return response.OK(c, map[string]string{"message": "seluruh muatan driver pickup berhasil disimpan"})
 }

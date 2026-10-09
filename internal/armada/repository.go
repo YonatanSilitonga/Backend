@@ -28,7 +28,7 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id_kendaraan, plat_nomor, jenis_kendaraan,
-		       kapasitas_kg, status_kendaraan
+		       kapasitas_koli, kapasitas_kg, status_kendaraan
 		FROM kendaraan
 		ORDER BY id_kendaraan
 	`)
@@ -41,7 +41,7 @@ func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	for rows.Next() {
 		var k Kendaraan
 		if err := rows.Scan(&k.ID, &k.PlatNomor, &k.JenisKendaraan,
-			&k.KapasitasKg, &k.StatusKendaraan); err != nil {
+			&k.KapasitasKoli, &k.KapasitasKg, &k.StatusKendaraan); err != nil {
 			return nil, err
 		}
 		items = append(items, k)
@@ -491,7 +491,9 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
 		LEFT JOIN ritase r ON r.id_ritase = t.id_ritase
 		LEFT JOIN driver d ON d.id_driver = t.id_driver
-		LEFT JOIN users u ON u.id_driver = d.id_driver
+		LEFT JOIN LATERAL (
+			SELECT * FROM users WHERE id_driver = t.id_driver ORDER BY id_user DESC LIMIT 1
+		) u ON true
 		LEFT JOIN LATERAL (
 			SELECT ev.nama_lokasi, ev.jumlah_koli, ev.jumlah_ecer, ev.jumlah_high_value
 			FROM ritase_event ev
@@ -546,14 +548,39 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 	return items, rows.Err()
 }
 
-// ListSellerLocations mengambil seller yang punya koordinat (untuk peta), termasuk status log barang hari ini.
+// ListSellerLocations mengambil seller yang punya koordinat (untuk peta), termasuk status log barang hari ini (dari input kapten & implan log).
 func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT s.id_seller, COALESCE(s.kode_seller,''), COALESCE(s.nama_seller,''), COALESCE(s.alamat,''),
 		       COALESCE(s.kota,''), COALESCE(s.pic,''), COALESCE(s.no_hp,''),
 		       s.latitude, s.longitude, s.jarak_tempuh_km, s.jarak_dc_km,
 		       mu.total_koli, mu.total_ecer, mu.total_hv,
-		       ibl.jumlah_barang, ibl.koli, ibl.ecer, ibl.high_value, ibl.status, ibl.catatan
+		       CASE 
+		           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_awb
+		           ELSE COALESCE(ibl.jumlah_barang, 0)
+		       END AS jumlah_barang,
+		       CASE 
+		           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_koli
+		           ELSE COALESCE(ibl.koli, 0)
+		       END AS koli,
+		       CASE 
+		           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_ecer
+		           ELSE COALESCE(ibl.ecer, 0)
+		       END AS ecer,
+		       CASE 
+		           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_hv
+		           ELSE COALESCE(ibl.high_value, 0)
+		       END AS high_value,
+		       CASE 
+		           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0) THEN 
+		               CASE WHEN kap.taken_awb >= kap.kap_awb AND kap.taken_koli >= kap.kap_koli AND kap.taken_awb > 0 THEN 'sudah_diambil' ELSE 'menunggu' END
+		           WHEN ibl.status IS NOT NULL THEN ibl.status
+		           ELSE 'menunggu'
+		       END AS status_pickup,
+		       CASE 
+		           WHEN kap.count_input > 0 AND kap.kap_catatan != '' THEN kap.kap_catatan
+		           ELSE COALESCE(ibl.catatan, '')
+		       END AS catatan_pickup
 		FROM seller s
 		LEFT JOIN (
 			SELECT rs.id_seller,
@@ -566,6 +593,44 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 			WHERE (r.tanggal = CURRENT_DATE OR r.tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE) AND r.status != 'selesai'
 			GROUP BY rs.id_seller
 		) mu ON mu.id_seller = s.id_seller
+		LEFT JOIN LATERAL (
+			SELECT 
+				COALESCE(SUM(ik.jumlah_awb), 0)::int AS kap_awb,
+				COALESCE(SUM(ik.koli_jkt + ik.koli_seg + ik.koli_btn), 0)::int AS kap_koli,
+				COALESCE(SUM(ik.ecer_jkt + ik.ecer_seg + ik.ecer_btn), 0)::int AS kap_ecer,
+				COALESCE(SUM(ik.koli_hv_jkt + ik.koli_hv_seg + ik.koli_hv_btn + ik.ecer_hv_jkt + ik.ecer_hv_seg + ik.ecer_hv_btn), 0)::int AS kap_hv,
+				COALESCE((
+					SELECT ik2.catatan FROM input_kapten ik2 
+					WHERE ik2.id_seller = s.id_seller 
+					  AND (ik2.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+					  AND ik2.catatan IS NOT NULL AND ik2.catatan != ''
+					ORDER BY ik2.id DESC LIMIT 1
+				), '') AS kap_catatan,
+				(COALESCE((
+					SELECT SUM(kp.jumlah_awb) FROM konfirmasi_penjemputan kp
+					WHERE kp.id_seller = s.id_seller
+					  AND (kp.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+				), 0) +
+				COALESCE((
+					SELECT SUM(dpl.jumlah_barang) FROM driver_pickup_log dpl
+					WHERE (LOWER(dpl.asal_seller) = LOWER(s.nama_seller) OR LOWER(dpl.asal_seller) LIKE '%' || LOWER(s.nama_seller) || '%')
+					  AND (dpl.tanggal = CURRENT_DATE OR dpl.tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
+				), 0))::int AS taken_awb,
+				(COALESCE((
+					SELECT SUM(kp.koli_jkt + kp.koli_seg + kp.koli_btn) FROM konfirmasi_penjemputan kp
+					WHERE kp.id_seller = s.id_seller
+					  AND (kp.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+				), 0) +
+				COALESCE((
+					SELECT SUM(dpl.koli) FROM driver_pickup_log dpl
+					WHERE (LOWER(dpl.asal_seller) = LOWER(s.nama_seller) OR LOWER(dpl.asal_seller) LIKE '%' || LOWER(s.nama_seller) || '%')
+					  AND (dpl.tanggal = CURRENT_DATE OR dpl.tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
+				), 0))::int AS taken_koli,
+				COUNT(ik.id) AS count_input
+			FROM input_kapten ik
+			WHERE ik.id_seller = s.id_seller
+			  AND (ik.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+		) kap ON TRUE
 		LEFT JOIN LATERAL (
 			SELECT log.jumlah_barang, log.koli, log.ecer, log.high_value, log.status, log.catatan
 			FROM implan_barang_log log
@@ -724,7 +789,30 @@ func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan, idDri
 	}
 	if tanggal != "" {
 		args = append(args, tanggal)
-		query += " AND (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $" + fmt.Sprint(len(args))
+		// Cross-midnight: return ALL events from any ritase that has ≥1 event on selected date.
+		// This ensures trips spanning midnight show complete logs.
+		if idDriver > 0 {
+			args = append(args, idDriver)
+			query += " AND e.id_ritase IN (" +
+				"SELECT e2.id_ritase FROM ritase_event e2 " +
+				"JOIN ritase r2 ON r2.id_ritase = e2.id_ritase " +
+				"WHERE (e2.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $" + fmt.Sprint(len(args)-1) +
+				" AND r2.id_driver = $" + fmt.Sprint(len(args)) +
+				")"
+		} else if idKendaraan > 0 {
+			args = append(args, idKendaraan)
+			query += " AND e.id_ritase IN (" +
+				"SELECT e2.id_ritase FROM ritase_event e2 " +
+				"JOIN ritase r2 ON r2.id_ritase = e2.id_ritase " +
+				"WHERE (e2.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $" + fmt.Sprint(len(args)-1) +
+				" AND r2.id_kendaraan = $" + fmt.Sprint(len(args)) +
+				")"
+		} else {
+			query += " AND e.id_ritase IN (" +
+				"SELECT e2.id_ritase FROM ritase_event e2 " +
+				"WHERE (e2.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta')::date = $" + fmt.Sprint(len(args)) +
+				")"
+		}
 	}
 	query += " ORDER BY e.created_at DESC, e.id_event DESC"
 

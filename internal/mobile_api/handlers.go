@@ -38,10 +38,10 @@ type LoginRequest struct {
 }
 
 type AppVersionResponse struct {
-	VersionCode int    `json:"version_code"`
-	VersionName string `json:"version_name"`
-	DownloadURL string `json:"download_url"`
-	ForceUpdate bool   `json:"force_update"`
+	VersionCode  int    `json:"version_code"`
+	VersionName  string `json:"version_name"`
+	DownloadURL  string `json:"download_url"`
+	ForceUpdate  bool   `json:"force_update"`
 	ReleaseNotes string `json:"release_notes"`
 }
 
@@ -1301,11 +1301,36 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 		namaLokasi = req.NamaLokasi
 	}
 
-	// 0. Durasi stage AUTHORITATIVE dari server — hitung dari selisih created_at
-	// event terakhir ke sekarang, JANGAN percaya durasi_detik kiriman mobile
-	// (mobile gak bisa memalsukan durasi). Robust juga terhadap layar mati
-	// (timer Dart pause di background). Event terakhir = stage yang baru ditutup.
-	_, _ = h.DB.Exec(ctx, `
+	// Serialize transitions for a trip so saving cargo cannot race the next stage.
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal memulai transaksi status")
+	}
+	defer tx.Rollback(ctx)
+	var lockedID int64
+	if err = tx.QueryRow(ctx, "SELECT id_ritase FROM ritase WHERE id_ritase = $1 FOR UPDATE", idRitase).Scan(&lockedID); err != nil {
+		return response.Error(c, http.StatusBadRequest, "ritase tidak ditemukan")
+	}
+	merged := false
+	if (req.Status == "Muat Barang" || req.Status == "Bongkar Barang") && req.NamaLokasi != "" {
+		tag, updateErr := tx.Exec(ctx, `UPDATE ritase_event SET
+		 jumlah_koli = GREATEST(COALESCE(jumlah_koli,0), $2),
+		 jumlah_ecer = GREATEST(COALESCE(jumlah_ecer,0), $3),
+		 jumlah_high_value = GREATEST(COALESCE(jumlah_high_value,0), $4),
+		 foto_manifest_url = COALESCE(NULLIF($5,''), foto_manifest_url)
+		 WHERE id_event = (SELECT id_event FROM ritase_event WHERE id_ritase=$1 ORDER BY created_at DESC,id_event DESC LIMIT 1)
+		 AND status=$6 AND nama_lokasi=$7`, idRitase, req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue, req.FotoManifestURL, req.Status, req.NamaLokasi)
+		if updateErr != nil {
+			return response.Error(c, http.StatusInternalServerError, "gagal memperbarui muatan")
+		}
+		merged = tag.RowsAffected() > 0
+	}
+	if !merged {
+		// 0. Durasi stage AUTHORITATIVE dari server — hitung dari selisih created_at
+		// event terakhir ke sekarang, JANGAN percaya durasi_detik kiriman mobile
+		// (mobile gak bisa memalsukan durasi). Robust juga terhadap layar mati
+		// (timer Dart pause di background). Event terakhir = stage yang baru ditutup.
+		_, _ = tx.Exec(ctx, `
 		UPDATE ritase_event
 		SET durasi_detik = EXTRACT(EPOCH FROM (now() - created_at))::int
 		WHERE id_event = (
@@ -1316,49 +1341,50 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 		)
 	`, idRitase)
 
-	// 1. Insert ke ritase_event (event baru durasi 0 — dihitung saat stage ditutup)
-	var fotoURL interface{}
-	if req.FotoManifestURL != "" {
-		fotoURL = req.FotoManifestURL
-	}
+		// 1. Insert ke ritase_event (event baru durasi 0 — dihitung saat stage ditutup)
+		var fotoURL interface{}
+		if req.FotoManifestURL != "" {
+			fotoURL = req.FotoManifestURL
+		}
 
-	// Ambil driver_id dari JWT
-	var inputByID interface{}
-	if did, ok := c.Get(middleware.CtxDriverID).(int64); ok && did > 0 {
-		inputByID = did
-	}
+		// Ambil driver_id dari JWT
+		var inputByID interface{}
+		if did, ok := c.Get(middleware.CtxDriverID).(int64); ok && did > 0 {
+			inputByID = did
+		}
 
-	_, err := h.DB.Exec(ctx, `
-		INSERT INTO ritase_event (id_ritase, status, latitude, longitude, nama_lokasi, durasi_detik,
-		                          koli_jkt, koli_seg, koli_btn, ecer_jkt, ecer_seg, ecer_btn,
-		                          koli_hv_jkt, koli_hv_seg, koli_hv_btn, ecer_hv_jkt, ecer_hv_seg, ecer_hv_btn,
-		                          jumlah_koli, jumlah_ecer, jumlah_high_value,
-		                          foto_manifest_url, input_by, input_by_id)
-		VALUES ($1, $2, $3, $4, $5, 0,
-		        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-		        0, 0, 0, $6, 'driver', $7)
-	`, idRitase, req.Status, req.Latitude, req.Longitude, namaLokasi, fotoURL, inputByID)
-	if err != nil {
-		log.Printf("[PostTripStatus] Gagal insert ritase_event: %v", err)
-		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan event: "+err.Error())
+		_, err = tx.Exec(ctx, `
+			INSERT INTO ritase_event (id_ritase, status, latitude, longitude, nama_lokasi, durasi_detik,
+			                          koli_jkt, koli_seg, koli_btn, ecer_jkt, ecer_seg, ecer_btn,
+			                          koli_hv_jkt, koli_hv_seg, koli_hv_btn, ecer_hv_jkt, ecer_hv_seg, ecer_hv_btn,
+			                          jumlah_koli, jumlah_ecer, jumlah_high_value,
+			                          foto_manifest_url, input_by, input_by_id)
+			VALUES ($1, $2, $3, $4, $5, 0,
+			        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			        $6, $7, $8, $9, 'driver', $10)
+		`, idRitase, req.Status, req.Latitude, req.Longitude, namaLokasi, req.JumlahKoli, req.JumlahEcer, req.JumlahHighValue, fotoURL, inputByID)
+		if err != nil {
+			log.Printf("[PostTripStatus] Gagal insert ritase_event: %v", err)
+			return response.Error(c, http.StatusInternalServerError, "gagal menyimpan event: "+err.Error())
+		}
 	}
 
 	// Update status ritase di tabel ritase ke 'berjalan' jika belum selesai
 	if req.Status == "Selesai" {
-		_, _ = h.DB.Exec(ctx, `UPDATE ritase SET status = 'selesai', updated_at = NOW(), updated_by = (SELECT created_by FROM ritase WHERE id_ritase = $1) WHERE id_ritase = $1`, idRitase)
+		_, _ = tx.Exec(ctx, `UPDATE ritase SET status = 'selesai', updated_at = NOW(), updated_by = (SELECT created_by FROM ritase WHERE id_ritase = $1) WHERE id_ritase = $1`, idRitase)
 	} else {
-		_, _ = h.DB.Exec(ctx, `UPDATE ritase SET status = 'berjalan', updated_at = NOW(), updated_by = (SELECT created_by FROM ritase WHERE id_ritase = $1) WHERE id_ritase = $1 AND status != 'selesai'`, idRitase)
+		_, _ = tx.Exec(ctx, `UPDATE ritase SET status = 'berjalan', updated_at = NOW(), updated_by = (SELECT created_by FROM ritase WHERE id_ritase = $1) WHERE id_ritase = $1 AND status != 'selesai'`, idRitase)
 	}
 
 	// Isi jam_berangkat otomatis saat status pertama kali berubah dari direncanakan
-	_, _ = h.DB.Exec(ctx, `
+	_, _ = tx.Exec(ctx, `
 		UPDATE ritase SET jam_berangkat = NOW()
 		WHERE id_ritase = $1 AND jam_berangkat IS NULL AND status != 'direncanakan'
 	`, idRitase)
 
 	// Isi jam_tiba otomatis saat driver tiba atau selesai
 	if req.Status == "Tiba" || req.Status == "Selesai" {
-		_, _ = h.DB.Exec(ctx, `
+		_, _ = tx.Exec(ctx, `
 			UPDATE ritase SET jam_tiba = NOW()
 			WHERE id_ritase = $1 AND jam_tiba IS NULL
 		`, idRitase)
@@ -1366,7 +1392,7 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 
 	// 2. Hitung total akumulasi muatan yang sedang dibawa di ritase ini (SUM dari semua event Muat Barang & Bongkar Muat Barang lama)
 	var totalKoli, totalEcer, totalHV int
-	_ = h.DB.QueryRow(ctx, `
+	_ = tx.QueryRow(ctx, `
 		SELECT 
 			COALESCE(SUM(jumlah_koli), 0),
 			COALESCE(SUM(jumlah_ecer), 0),
@@ -1378,7 +1404,7 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 	// Bug 10: update total_awb di tabel ritase dari akumulasi muatan event
 	// (jumlah_koli dipakai sebagai proxy AWB karena mobile tidak kirim AWB terpisah).
 	if req.Status == "Muat Barang" || req.Status == "Bongkar Muat Barang" || req.Status == "Bongkar Barang" {
-		_, _ = h.DB.Exec(ctx, `
+		_, _ = tx.Exec(ctx, `
 			UPDATE ritase
 			SET total_koli = $1
 			WHERE id_ritase = $2 AND status != 'selesai'
@@ -1387,10 +1413,10 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 
 	// Cari id_kendaraan dan id_driver dari ritase ini
 	var idKendaraan, idDriver int64
-	_ = h.DB.QueryRow(ctx, `SELECT id_kendaraan, id_driver FROM ritase WHERE id_ritase = $1`, idRitase).Scan(&idKendaraan, &idDriver)
+	_ = tx.QueryRow(ctx, `SELECT id_kendaraan, id_driver FROM ritase WHERE id_ritase = $1`, idRitase).Scan(&idKendaraan, &idDriver)
 
 	// Update armada_tracking status & nama_lokasi & total muatan akumulasi
-	_, _ = h.DB.Exec(ctx, `
+	_, _ = tx.Exec(ctx, `
 		UPDATE armada_tracking
 		SET id_ritase = $1,
 		    status = $2,
@@ -1402,6 +1428,9 @@ func (h *APIHandler) PostTripStatus(c echo.Context) error {
 		WHERE id_ritase = $1 OR (id_kendaraan = $7 AND $7 > 0) OR (id_driver = $8 AND $8 > 0)
 	`, idRitase, req.Status, namaLokasi, totalKoli, totalEcer, totalHV, idKendaraan, idDriver)
 
+	if err = tx.Commit(ctx); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan transaksi status")
+	}
 	return response.Created(c, map[string]interface{}{
 		"id_ritase":   idRitase,
 		"status":      req.Status,
