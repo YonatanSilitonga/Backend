@@ -964,6 +964,8 @@ func (r *Repository) ListDriverPickups(ctx context.Context) ([]DriverPickupItem,
 			COALESCE(l.status, 'standby') AS status,
 			COALESCE(l.catatan, '') AS catatan,
 			COALESCE(l.asal_seller, '') AS asal_seller,
+			(u.last_login IS NOT NULL AND u.last_login > now() - interval '12 hours') AS session_online,
+			u.last_login,
 			l.updated_at
 		FROM users u
 		LEFT JOIN driver d ON LOWER(d.nama_driver) = LOWER(u.username)
@@ -1030,7 +1032,8 @@ func (r *Repository) ListDriverPickups(ctx context.Context) ([]DriverPickupItem,
 		if err := rows.Scan(
 			&item.IDUser, &item.Username, &item.NamaDriver, &item.NoHP,
 			&item.JumlahBarang, &item.Koli, &item.Ecer, &item.HighValue,
-			&item.Status, &item.Catatan, &item.AsalSeller, &item.UpdatedAt,
+			&item.Status, &item.Catatan, &item.AsalSeller,
+			&item.SessionOnline, &item.LastLogin, &item.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1046,9 +1049,9 @@ func (r *Repository) SaveDriverPickupBarang(ctx context.Context, req DriverPicku
 		status = "menuju_gudang"
 	}
 	_, err := r.db.Exec(ctx, `
-		INSERT INTO driver_pickup_log (id_user, nama_driver, tanggal, jumlah_barang, koli, ecer, high_value, status, catatan, asal_seller, created_by, updated_at)
-		VALUES ($1, $2, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
-	`, req.IDUser, req.NamaDriver, req.JumlahBarang, req.Koli, req.Ecer, req.HighValue, status, req.Catatan, req.AsalSeller, createdBy)
+		INSERT INTO driver_pickup_log (id_user, nama_driver, tanggal, jumlah_barang, koli, ecer, high_value, status, catatan, asal_seller, foto_url, created_by, updated_at)
+		VALUES ($1, $2, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP)
+	`, req.IDUser, req.NamaDriver, req.JumlahBarang, req.Koli, req.Ecer, req.HighValue, status, req.Catatan, req.AsalSeller, req.FotoURL, createdBy)
 	return err
 }
 
@@ -1074,9 +1077,9 @@ func (r *Repository) SaveDriverPickupBatch(ctx context.Context, req DriverPickup
 			continue
 		}
 		_, err := tx.Exec(ctx, `
-			INSERT INTO driver_pickup_log (id_user, nama_driver, tanggal, jumlah_barang, koli, ecer, high_value, status, catatan, asal_seller, created_by, updated_at)
-			VALUES ($1, $2, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
-		`, req.IDUser, req.NamaDriver, item.JumlahBarang, item.Koli, item.Ecer, item.HighValue, status, req.Catatan, seller, createdBy)
+			INSERT INTO driver_pickup_log (id_user, nama_driver, tanggal, jumlah_barang, koli, ecer, high_value, status, catatan, asal_seller, foto_url, created_by, updated_at)
+			VALUES ($1, $2, (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP)
+		`, req.IDUser, req.NamaDriver, item.JumlahBarang, item.Koli, item.Ecer, item.HighValue, status, req.Catatan, seller, item.FotoURL, createdBy)
 		if err != nil {
 			return err
 		}
@@ -1093,7 +1096,7 @@ func (r *Repository) ListAllDriverPickupHistory(ctx context.Context, idUser int6
 
 	query := `
 		SELECT id_log, id_user, nama_driver, TO_CHAR(tanggal, 'YYYY-MM-DD'), jumlah_barang, COALESCE(koli, 0), COALESCE(ecer, 0), COALESCE(high_value, 0), status,
-		       COALESCE(catatan, ''), COALESCE(asal_seller, ''), COALESCE(created_by, ''), created_at, updated_at
+		       COALESCE(catatan, ''), COALESCE(asal_seller, ''), COALESCE(foto_url, ''), COALESCE(created_by, ''), created_at, updated_at
 		FROM driver_pickup_log
 		WHERE 1=1
 	`
@@ -1134,7 +1137,7 @@ func (r *Repository) ListAllDriverPickupHistory(ctx context.Context, idUser int6
 	for rows.Next() {
 		var l DriverPickupLog
 		if err := rows.Scan(&l.ID, &l.IDUser, &l.NamaDriver, &l.Tanggal, &l.JumlahBarang, &l.Koli, &l.Ecer, &l.HighValue, &l.Status,
-			&l.Catatan, &l.AsalSeller, &l.CreatedBy, &l.CreatedAt, &l.UpdatedAt); err != nil {
+			&l.Catatan, &l.AsalSeller, &l.FotoURL, &l.CreatedBy, &l.CreatedAt, &l.UpdatedAt); err != nil {
 			return nil, err
 		}
 		logs = append(logs, l)
@@ -1146,7 +1149,7 @@ func (r *Repository) ListAllDriverPickupHistory(ctx context.Context, idUser int6
 func (r *Repository) GetDriverPickupHistory(ctx context.Context, idUser int64) ([]DriverPickupLog, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id_log, id_user, nama_driver, TO_CHAR(tanggal, 'YYYY-MM-DD'), jumlah_barang, COALESCE(koli, 0), COALESCE(ecer, 0), COALESCE(high_value, 0), status,
-		       COALESCE(catatan, ''), COALESCE(asal_seller, ''), COALESCE(created_by, ''), created_at, updated_at
+		       COALESCE(catatan, ''), COALESCE(asal_seller, ''), COALESCE(foto_url, ''), COALESCE(created_by, ''), created_at, updated_at
 		FROM driver_pickup_log
 		WHERE id_user = $1
 		ORDER BY id_log DESC
@@ -1161,7 +1164,7 @@ func (r *Repository) GetDriverPickupHistory(ctx context.Context, idUser int64) (
 	for rows.Next() {
 		var l DriverPickupLog
 		if err := rows.Scan(&l.ID, &l.IDUser, &l.NamaDriver, &l.Tanggal, &l.JumlahBarang, &l.Koli, &l.Ecer, &l.HighValue, &l.Status,
-			&l.Catatan, &l.AsalSeller, &l.CreatedBy, &l.CreatedAt, &l.UpdatedAt); err != nil {
+			&l.Catatan, &l.AsalSeller, &l.FotoURL, &l.CreatedBy, &l.CreatedAt, &l.UpdatedAt); err != nil {
 			return nil, err
 		}
 		logs = append(logs, l)
