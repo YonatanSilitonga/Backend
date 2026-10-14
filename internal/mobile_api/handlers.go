@@ -455,6 +455,15 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking: "+err.Error())
 	}
 
+	// Jika driver berganti kendaraan (misal dari kendaraan default fallback ke kendaraan terpilih),
+	// bersihkan baris armada_tracking kendaraan lain untuk driver ini agar tidak muncul ganda (ghost vehicle).
+	if req.IDDriver > 0 && req.IDKendaraan > 0 {
+		_, _ = h.DB.Exec(ctx, `
+			DELETE FROM armada_tracking
+			WHERE id_driver = $1 AND id_kendaraan != $2 AND (id_ritase IS NULL OR id_ritase = 0)
+		`, req.IDDriver, req.IDKendaraan)
+	}
+
 	// Simpan GPS history — setiap titik GPS yang valid dicatat untuk rute di peta.
 	if targetRitaseID > 0 && req.Latitude != 0 && req.Longitude != 0 {
 		_, _ = h.DB.Exec(ctx, `

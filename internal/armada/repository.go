@@ -968,7 +968,16 @@ func (r *Repository) ListDriverPickups(ctx context.Context) ([]DriverPickupItem,
 			u.last_login,
 			l.updated_at
 		FROM users u
-		LEFT JOIN driver d ON LOWER(d.nama_driver) = LOWER(u.username)
+		LEFT JOIN LATERAL (
+			SELECT d.nama_driver, d.no_hp
+			FROM driver d
+			WHERE (u.id_driver IS NOT NULL AND u.id_driver > 0 AND d.id_driver = u.id_driver)
+			   OR LOWER(TRIM(d.nama_driver)) = LOWER(TRIM(u.username))
+			ORDER BY 
+				CASE WHEN u.id_driver IS NOT NULL AND d.id_driver = u.id_driver THEN 0 ELSE 1 END,
+				d.id_driver DESC
+			LIMIT 1
+		) d ON TRUE
 		LEFT JOIN LATERAL (
 			WITH last_selesai AS (
 				SELECT COALESCE(MAX(id_log), 0) AS max_selesai_id
