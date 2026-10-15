@@ -155,18 +155,20 @@ type ImplanBarangLog struct {
 
 // DriverPickupItem mewakili data driver pickup beserta muatan aktifnya hari ini.
 type DriverPickupItem struct {
-	IDUser       int64      `json:"id_user"`
-	Username     string     `json:"username"`
-	NamaDriver   string     `json:"nama_driver"`
-	NoHP         string     `json:"no_hp"`
-	JumlahBarang int        `json:"jumlah_barang"`
-	Koli         int        `json:"koli"`
-	Ecer         int        `json:"ecer"`
-	HighValue    int        `json:"high_value"`
-	Status       string     `json:"status"` // 'menuju_gudang' | 'menuju_seller' | 'selesai' | 'standby'
-	Catatan      string     `json:"catatan"`
-	AsalSeller   string     `json:"asal_seller"`
-	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
+	IDUser        int64      `json:"id_user"`
+	Username      string     `json:"username"`
+	NamaDriver    string     `json:"nama_driver"`
+	NoHP          string     `json:"no_hp"`
+	JumlahBarang  int        `json:"jumlah_barang"`
+	Koli          int        `json:"koli"`
+	Ecer          int        `json:"ecer"`
+	HighValue     int        `json:"high_value"`
+	Status        string     `json:"status"` // 'menuju_gudang' | 'menuju_seller' | 'selesai' | 'standby'
+	Catatan       string     `json:"catatan"`
+	AsalSeller    string     `json:"asal_seller"`
+	SessionOnline bool       `json:"session_online"`
+	LastLogin     *time.Time `json:"last_login,omitempty"`
+	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
 }
 
 // DriverPickupSellerItem satu entri seller pada multi-input driver pickup.
@@ -176,6 +178,7 @@ type DriverPickupSellerItem struct {
 	Koli         int    `json:"koli"`
 	Ecer         int    `json:"ecer"`
 	HighValue    int    `json:"high_value"`
+	FotoURL      string `json:"foto_url,omitempty"`
 }
 
 // DriverPickupBatchInput payload untuk simpan banyak seller sekaligus untuk 1 driver.
@@ -198,6 +201,7 @@ type DriverPickupInput struct {
 	Status       string `json:"status"` // 'menuju_gudang' | 'menuju_seller' | 'selesai' | 'standby'
 	Catatan      string `json:"catatan"`
 	AsalSeller   string `json:"asal_seller"`
+	FotoURL      string `json:"foto_url,omitempty"`
 }
 
 // DriverPickupLog satu baris riwayat muatan driver pickup.
@@ -213,6 +217,7 @@ type DriverPickupLog struct {
 	Status       string     `json:"status"`
 	Catatan      string     `json:"catatan"`
 	AsalSeller   string     `json:"asal_seller"`
+	FotoURL      string     `json:"foto_url,omitempty"`
 	CreatedBy    string     `json:"created_by"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`

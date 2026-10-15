@@ -47,11 +47,11 @@ type AppVersionResponse struct {
 
 func (h *APIHandler) GetAppVersion(c echo.Context) error {
 	return c.JSON(http.StatusOK, AppVersionResponse{
-		VersionCode:  15,
-		VersionName:  "1.2.4",
+		VersionCode:  16,
+		VersionName:  "1.2.5",
 		DownloadURL:  "https://api.controltowerslb.tech/uploads/apk/tower-control-latest.apk",
-		ForceUpdate:  false,
-		ReleaseNotes: "Update v1.2.4: Optimalisasi baterai & GPS distanceFilter, performa CPU lebih ringan, perbaikan modal armada, dan stabilitas tracking.",
+		ForceUpdate:  true,
+		ReleaseNotes: "Update Darurat v1.2.5: Peningkatan presisi GPS tracking pergerakan (10 meter) untuk akurasi posisi armada.",
 	})
 }
 
@@ -453,6 +453,15 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal menyimpan tracking: "+err.Error())
+	}
+
+	// Jika driver berganti kendaraan (misal dari kendaraan default fallback ke kendaraan terpilih),
+	// bersihkan baris armada_tracking kendaraan lain untuk driver ini agar tidak muncul ganda (ghost vehicle).
+	if req.IDDriver > 0 && req.IDKendaraan > 0 {
+		_, _ = h.DB.Exec(ctx, `
+			DELETE FROM armada_tracking
+			WHERE id_driver = $1 AND id_kendaraan != $2 AND (id_ritase IS NULL OR id_ritase = 0)
+		`, req.IDDriver, req.IDKendaraan)
 	}
 
 	// Simpan GPS history — setiap titik GPS yang valid dicatat untuk rute di peta.
