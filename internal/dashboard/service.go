@@ -46,6 +46,11 @@ func (s *Service) GetAnalyticsSellers(ctx context.Context, from, to string) ([]S
 	return s.repo.GetAnalyticsSellers(ctx, from, to)
 }
 
+// GetAnalyticsImplants delegasi ke repository (analitik per implant).
+func (s *Service) GetAnalyticsImplants(ctx context.Context, from, to string) ([]ImplantAnalytics, error) {
+	return s.repo.GetAnalyticsImplants(ctx, from, to)
+}
+
 // ResolveAlert menandai alert sebagai ditangani tower control.
 func (s *Service) ResolveAlert(ctx context.Context, idAlert int64, userID int64) error {
 	return s.repo.ResolveAlert(ctx, idAlert, userID)

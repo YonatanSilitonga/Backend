@@ -86,6 +86,10 @@ type SellerLocation struct {
 	HighValue     *int    `json:"high_value,omitempty"`
 	StatusPickup  *string `json:"status_pickup,omitempty"`
 	CatatanPickup *string `json:"catatan_pickup,omitempty"`
+	// Sisa muatan hari ini (input kapten − sudah diambil/konfirmasi). Dipakai
+	// peta untuk bubble angka: hanya tampil bila > 0.
+	SisaBarang *int `json:"sisa_barang,omitempty"`
+	SisaKoli   *int `json:"sisa_koli,omitempty"`
 }
 
 // ImplantLocation lokasi implant untuk peta (PIC = nama kapten penanggung jawab).
@@ -110,4 +114,8 @@ type ImplantLocation struct {
 	HighValue     *int    `json:"high_value,omitempty"`
 	StatusPickup  *string `json:"status_pickup,omitempty"`
 	CatatanPickup *string `json:"catatan_pickup,omitempty"`
+	// Sisa muatan hari ini (input kapten − sudah diambil/konfirmasi). Dipakai
+	// peta untuk bubble angka: hanya tampil bila > 0.
+	SisaBarang *int `json:"sisa_barang,omitempty"`
+	SisaKoli   *int `json:"sisa_koli,omitempty"`
 }

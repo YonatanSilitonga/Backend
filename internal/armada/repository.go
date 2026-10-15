@@ -485,8 +485,10 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 		       %s AS offline,
 		       (u.last_login IS NOT NULL AND u.last_login > now() - make_interval(hours => %d)) AS session_online,
 		       u.last_login, u.last_open,
-		       COALESCE(u.role, 'driver') AS role_driver,
-		       COALESCE(NULLIF(pl.pickup_awb, 0), r.total_awb, t.jumlah_koli, re.jumlah_koli, 0) AS total_awb
+	       COALESCE(u.role, 'driver') AS role_driver,
+	       -- Muatan dibawa driver: input pickup sendiri + yang dikonfirmasi kapten
+	       -- ke ritase ini. Fallback ke total ritase / tracking / event seperti semula.
+	       COALESCE(NULLIF(COALESCE(pl.pickup_awb, 0) + COALESCE(cf.confirm_awb, 0), 0), r.total_awb, t.jumlah_koli, re.jumlah_koli, 0) AS total_awb
 		FROM armada_tracking t
 		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
 		LEFT JOIN ritase r ON r.id_ritase = t.id_ritase
@@ -517,13 +519,20 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 				  AND (dpl.tanggal = CURRENT_DATE OR dpl.tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
 				  AND dpl.id_log > ls.max_selesai_id
 			)
-			SELECT 
+			SELECT
 				COALESCE(SUM(al.jumlah_barang), 0)::int AS pickup_awb,
 				COALESCE(SUM(al.koli), 0)::int AS pickup_koli,
 				COALESCE(SUM(al.ecer), 0)::int AS pickup_ecer,
 				COALESCE(SUM(al.high_value), 0)::int AS pickup_hv
 			FROM active_logs al
 		) pl ON true
+		LEFT JOIN LATERAL (
+			-- Muatan yang dikonfirmasi kapten ke ritase kendaraan ini hari ini (WIB).
+			SELECT COALESCE(SUM(kp.jumlah_awb), 0)::int AS confirm_awb
+			FROM konfirmasi_penjemputan kp
+			WHERE kp.id_ritase = t.id_ritase
+			  AND (kp.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+		) cf ON true
 		ORDER BY t.last_update DESC
 	`, offlineExpr, sessionHours))
 	if err != nil {
@@ -577,10 +586,22 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 		           WHEN ibl.status IS NOT NULL THEN ibl.status
 		           ELSE 'menunggu'
 		       END AS status_pickup,
-		       CASE 
-		           WHEN kap.count_input > 0 AND kap.kap_catatan != '' THEN kap.kap_catatan
-		           ELSE COALESCE(ibl.catatan, '')
-		       END AS catatan_pickup
+	       CASE 
+	           WHEN kap.count_input > 0 AND kap.kap_catatan != '' THEN kap.kap_catatan
+	           ELSE COALESCE(ibl.catatan, '')
+	       END AS catatan_pickup,
+	       -- Sisa muatan hari ini (total tampil − sudah diambil). Dipakai peta
+	       -- untuk bubble angka; GREATEST + COALESCE menjaga NULL → 0.
+	       GREATEST(
+	           CASE
+	               WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_awb
+	               ELSE COALESCE(ibl.jumlah_barang, 0)
+	           END - COALESCE(kap.taken_awb, 0), 0) AS sisa_barang,
+	       GREATEST(
+	           CASE
+	               WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_koli
+	               ELSE COALESCE(ibl.koli, 0)
+	           END - COALESCE(kap.taken_koli, 0), 0) AS sisa_koli
 		FROM seller s
 		LEFT JOIN (
 			SELECT rs.id_seller,
@@ -598,7 +619,7 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 				COALESCE(SUM(ik.jumlah_awb), 0)::int AS kap_awb,
 				COALESCE(SUM(ik.koli_jkt + ik.koli_seg + ik.koli_btn), 0)::int AS kap_koli,
 				COALESCE(SUM(ik.ecer_jkt + ik.ecer_seg + ik.ecer_btn), 0)::int AS kap_ecer,
-				COALESCE(SUM(ik.koli_hv_jkt + ik.koli_hv_seg + ik.koli_hv_btn + ik.ecer_hv_jkt + ik.ecer_hv_seg + ik.ecer_hv_btn), 0)::int AS kap_hv,
+				COALESCE(SUM(ik.koli_hv_jkt + ik.koli_hv_seg + ik.koli_hv_btn + ik.ecer_hv_jkt + ik.ecer_hv_seg + ik.ecer_hv_btn + ik.awb_hv_jkt + ik.awb_hv_seg + ik.awb_hv_btn), 0)::int AS kap_hv,
 				COALESCE((
 					SELECT ik2.catatan FROM input_kapten ik2 
 					WHERE ik2.id_seller = s.id_seller 
@@ -654,7 +675,8 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 			&s.Kota, &s.PIC, &s.NoHP, &s.Latitude, &s.Longitude,
 			&s.JarakTempuhKm, &s.JarakDcKm,
 			&s.TotalKoli, &s.TotalEcer, &s.TotalHighValue,
-			&s.JumlahBarang, &s.Koli, &s.Ecer, &s.HighValue, &s.StatusPickup, &s.CatatanPickup); err != nil {
+			&s.JumlahBarang, &s.Koli, &s.Ecer, &s.HighValue, &s.StatusPickup, &s.CatatanPickup,
+			&s.SisaBarang, &s.SisaKoli); err != nil {
 			return nil, err
 		}
 		items = append(items, s)
@@ -668,9 +690,47 @@ func (r *Repository) ListImplantLocations(ctx context.Context) ([]ImplantLocatio
 	rows, err := r.db.Query(ctx, `
 		SELECT i.id_implant, COALESCE(i.kode_implant,''), COALESCE(i.nama_implant,''), COALESCE(i.alamat,''),
 		       COALESCE(i.kota,''), COALESCE(kapten_agg.kapten, ''), COALESCE(i.no_hp,''),
-		       i.latitude, i.longitude, i.jarak_tempuh_km, i.jarak_dc_km,
-		       mu.total_koli, mu.total_ecer, mu.total_hv,
-		       ibl.jumlah_barang, ibl.koli, ibl.ecer, ibl.high_value, ibl.status, ibl.catatan
+	       i.latitude, i.longitude, i.jarak_tempuh_km, i.jarak_dc_km,
+	       mu.total_koli, mu.total_ecer, mu.total_hv,
+	       -- Muatan tampil: input kapten hari ini (kalau ada), else log implan terakhir.
+	       CASE
+	           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_awb
+	           ELSE COALESCE(ibl.jumlah_barang, 0)
+	       END AS jumlah_barang,
+	       CASE
+	           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_koli
+	           ELSE COALESCE(ibl.koli, 0)
+	       END AS koli,
+	       CASE
+	           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_ecer
+	           ELSE COALESCE(ibl.ecer, 0)
+	       END AS ecer,
+	       CASE
+	           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_hv
+	           ELSE COALESCE(ibl.high_value, 0)
+	       END AS high_value,
+	       CASE
+	           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0) THEN
+	               CASE WHEN kap.taken_awb >= kap.kap_awb AND kap.taken_koli >= kap.kap_koli AND kap.taken_awb > 0 THEN 'sudah_diambil' ELSE 'menunggu' END
+	           WHEN ibl.status IS NOT NULL THEN ibl.status
+	           ELSE 'menunggu'
+	       END AS status_pickup,
+	       CASE
+	           WHEN kap.count_input > 0 AND kap.kap_catatan != '' THEN kap.kap_catatan
+	           ELSE COALESCE(ibl.catatan, '')
+	       END AS catatan_pickup,
+	       -- Sisa muatan hari ini (total tampil − sudah diambil). Dipakai peta
+	       -- untuk bubble angka; GREATEST + COALESCE menjaga NULL → 0.
+	       GREATEST(
+	           CASE
+	               WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_awb
+	               ELSE COALESCE(ibl.jumlah_barang, 0)
+	           END - COALESCE(kap.taken_awb, 0), 0) AS sisa_barang,
+	       GREATEST(
+	           CASE
+	               WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_koli
+	               ELSE COALESCE(ibl.koli, 0)
+	           END - COALESCE(kap.taken_koli, 0), 0) AS sisa_koli
 		FROM implant i
 		LEFT JOIN (
 			SELECT kim.id_implant, STRING_AGG(k.nama, ', ' ORDER BY CASE WHEN kim.peran = 'utama' THEN 0 ELSE 1 END, k.nama) AS kapten
@@ -697,6 +757,44 @@ func (r *Repository) ListImplantLocations(ctx context.Context) ([]ImplantLocatio
 			ORDER BY log.id_log DESC
 			LIMIT 1
 		) ibl ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT
+				COALESCE(SUM(ik.jumlah_awb), 0)::int AS kap_awb,
+				COALESCE(SUM(ik.koli_jkt + ik.koli_seg + ik.koli_btn), 0)::int AS kap_koli,
+				COALESCE(SUM(ik.ecer_jkt + ik.ecer_seg + ik.ecer_btn), 0)::int AS kap_ecer,
+				COALESCE(SUM(ik.koli_hv_jkt + ik.koli_hv_seg + ik.koli_hv_btn + ik.ecer_hv_jkt + ik.ecer_hv_seg + ik.ecer_hv_btn + ik.awb_hv_jkt + ik.awb_hv_seg + ik.awb_hv_btn), 0)::int AS kap_hv,
+				COALESCE((
+					SELECT ik2.catatan FROM input_kapten ik2
+					WHERE ik2.id_implant = i.id_implant
+					  AND (ik2.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+					  AND ik2.catatan IS NOT NULL AND ik2.catatan != ''
+					ORDER BY ik2.id DESC LIMIT 1
+				), '') AS kap_catatan,
+				(COALESCE((
+					SELECT SUM(kp.jumlah_awb) FROM konfirmasi_penjemputan kp
+					WHERE kp.id_implant = i.id_implant
+					  AND (kp.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+				), 0) +
+				COALESCE((
+					SELECT SUM(dpl.jumlah_barang) FROM driver_pickup_log dpl
+					WHERE LOWER(TRIM(dpl.asal_seller)) = LOWER(TRIM(i.nama_implant))
+					  AND (dpl.tanggal = CURRENT_DATE OR dpl.tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
+				), 0))::int AS taken_awb,
+				(COALESCE((
+					SELECT SUM(kp.koli_jkt + kp.koli_seg + kp.koli_btn) FROM konfirmasi_penjemputan kp
+					WHERE kp.id_implant = i.id_implant
+					  AND (kp.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+				), 0) +
+				COALESCE((
+					SELECT SUM(dpl.koli) FROM driver_pickup_log dpl
+					WHERE LOWER(TRIM(dpl.asal_seller)) = LOWER(TRIM(i.nama_implant))
+					  AND (dpl.tanggal = CURRENT_DATE OR dpl.tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
+				), 0))::int AS taken_koli,
+				COUNT(ik.id) AS count_input
+			FROM input_kapten ik
+			WHERE ik.id_implant = i.id_implant
+			  AND (ik.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+		) kap ON TRUE
 		WHERE i.latitude IS NOT NULL AND i.longitude IS NOT NULL AND i.status = 'aktif'
 		ORDER BY i.id_implant ASC
 	`)
@@ -712,7 +810,8 @@ func (r *Repository) ListImplantLocations(ctx context.Context) ([]ImplantLocatio
 			&im.Kota, &im.Kapten, &im.NoHP, &im.Latitude, &im.Longitude,
 			&im.JarakTempuhKm, &im.JarakDcKm,
 			&im.TotalKoli, &im.TotalEcer, &im.TotalHighValue,
-			&im.JumlahBarang, &im.Koli, &im.Ecer, &im.HighValue, &im.StatusPickup, &im.CatatanPickup); err != nil {
+			&im.JumlahBarang, &im.Koli, &im.Ecer, &im.HighValue, &im.StatusPickup, &im.CatatanPickup,
+			&im.SisaBarang, &im.SisaKoli); err != nil {
 			return nil, err
 		}
 		items = append(items, im)

@@ -141,3 +141,20 @@ type SellerAnalytics struct {
 	// RataBongkar = rata-rata durasi di lokasi (sampai_seller → berangkat_seller), detik.
 	RataBongkar *float64 `json:"rata_bongkar,omitempty"`
 }
+
+// ImplantAnalytics adalah analitik satu implant dalam periode (cermin SellerAnalytics).
+type ImplantAnalytics struct {
+	IDImplant     int64    `json:"id_implant"`
+	KodeImplant   string   `json:"kode_implant"`
+	NamaImplant   string   `json:"nama_implant"`
+	Kota         string   `json:"kota"`
+	JarakTempuhKm *float64 `json:"jarak_tempuh_km,omitempty"`
+	JarakDcKm     *float64 `json:"jarak_dc_km,omitempty"`
+	Kunjungan    int64    `json:"kunjungan"`
+	RitaseSelesai int64   `json:"ritase_selesai"`
+	TotalAWB     int64    `json:"total_awb"`
+	TotalKoli    int64    `json:"total_koli"`
+	TotalHighValue int64  `json:"total_high_value"`
+	TotalEceran   int64   `json:"total_eceran"`
+	RataBongkar *float64 `json:"rata_bongkar,omitempty"`
+}

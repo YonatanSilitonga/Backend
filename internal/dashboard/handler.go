@@ -64,6 +64,15 @@ func (h *Handler) GetAnalyticsSellers(c echo.Context) error {
 	return response.OK(c, data)
 }
 
+// GetAnalyticsImplants menangani GET /dashboard/analytics/implants?from=&to=.
+func (h *Handler) GetAnalyticsImplants(c echo.Context) error {
+	data, err := h.svc.GetAnalyticsImplants(c.Request().Context(), c.QueryParam("from"), c.QueryParam("to"))
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil analitik implant")
+	}
+	return response.OK(c, data)
+}
+
 // RegisterRoutes memasang route dashboard di grup yang diberikan (butuh auth).
 func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	g.GET("/dashboard/summary", h.GetSummary, authMW)
@@ -71,6 +80,7 @@ func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	g.GET("/dashboard/analytics/trend", h.GetAnalyticsTrend, authMW)
 	g.GET("/dashboard/analytics/drivers", h.GetAnalyticsDrivers, authMW)
 	g.GET("/dashboard/analytics/sellers", h.GetAnalyticsSellers, authMW)
+	g.GET("/dashboard/analytics/implants", h.GetAnalyticsImplants, authMW)
 	g.PATCH("/dashboard/alerts/:id/resolve", h.ResolveAlert, authMW)
 	g.GET("/dashboard/alerts/ritase/:id", h.GetAlertsByRitase, authMW)
 }

@@ -77,7 +77,13 @@ func (h *Handler) GetMySellerRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
 	defer cancel()
 
-	hariIni := time.Now().Format("2006-01-02")
+	// Tanggal "hari ini" harus WIB (seperti endpoint lain), bukan zona server,
+	// agar filter tidak salah hari di sekitar tengah malam.
+	wib, _ := time.LoadLocation("Asia/Jakarta")
+	if wib == nil {
+		wib = time.FixedZone("WIB", 7*60*60)
+	}
+	hariIni := time.Now().In(wib).Format("2006-01-02")
 
 	rows, err := h.DB.Query(ctx, `
 		SELECT r.id_ritase, r.kode_ritase, r.ritase_ke, r.status,
@@ -176,19 +182,25 @@ type KaptenCargoInputRequest struct {
 	EcerHVJKT       int     `json:"ecer_hv_jkt"`
 	EcerHVSEG       int     `json:"ecer_hv_seg"`
 	EcerHVBTN       int     `json:"ecer_hv_btn"`
-	// Opsi A: HV gabungan 1 field. Alias baru menang bila > 0,
-	// disimpan ke kolom jkt dengan seg/btn = 0 (skema DB tidak berubah).
-	// HvAwb = label baru "HV AWB" (pengganti Ecer HV, satuan sama).
+	// AWB HV per-wilayah (kolom baru, bukan alias).
+	AwbHvJKT int `json:"awb_hv_jkt"`
+	AwbHvSEG int `json:"awb_hv_seg"`
+	AwbHvBTN int `json:"awb_hv_btn"`
+	// Opsi A (legacy, gabungan 1 field): alias menang hanya bila ketiga
+	// kolom region-nya masih 0 — untuk kompatibilitas app lama.
+	// HvAwb = label lama "HV AWB" (pengganti Ecer HV, satuan sama).
 	KoliHV          int     `json:"koli_hv"`
 	HvAwb           int     `json:"hv_awb"`
 	EcerHV          int     `json:"ecer_hv"`
+	AwbHv           int     `json:"awb_hv"`
 	FotoManifestURL string  `json:"foto_manifest_url"`
 	Catatan         string  `json:"catatan"`
 }
 
-// normalisasiHV menggabungkan alias baru + kolom legacy menjadi nilai jkt
-// tunggal dengan seg/btn = 0. App lama (kirim jkt/seg/btn) tetap didukung:
-// bila alias 0, nilai legacy dipakai apa adanya.
+// normalisasiHV menggabungkan alias lama (Opsi A, 1 field) + kolom per-wilayah.
+// Aturan: bila ketiga kolom region masih 0 dan alias > 0 (app lama),
+// nilai alias dipakai sebagai jkt. Selain itu kolom region dipakai apa adanya
+// (input baru yang sudah dipecah JKT/SEG/BTN).
 func normalisasiHV(alias int, altAlias int, jkt int, seg int, btn int) (int, int, int) {
 	clamp := func(v int) int {
 		if v < 0 {
@@ -196,13 +208,16 @@ func normalisasiHV(alias int, altAlias int, jkt int, seg int, btn int) (int, int
 		}
 		return v
 	}
-	if v := clamp(alias); v > 0 {
-		return v, 0, 0
+	jkt, seg, btn = clamp(jkt), clamp(seg), clamp(btn)
+	if jkt == 0 && seg == 0 && btn == 0 {
+		if v := clamp(alias); v > 0 {
+			return v, 0, 0
+		}
+		if v := clamp(altAlias); v > 0 {
+			return v, 0, 0
+		}
 	}
-	if v := clamp(altAlias); v > 0 {
-		return v, 0, 0
-	}
-	return clamp(jkt), clamp(seg), clamp(btn)
+	return jkt, seg, btn
 }
 
 // PostCargoInput mencatat input data muatan dari kapten ke input_kapten.
@@ -291,7 +306,8 @@ func (h *Handler) PostCargoInput(c echo.Context) error {
 	// konfirmasi manual kapten (POST /kapten/confirm-pickup). Tidak ada auto-link.
 	var idRitase *int64 = nil
 
-	// Opsi A: normalisasi HV gabungan + jepit negatif ke 0.
+	// HV per-wilayah (JKT/SEG/BTN): Koli HV, Ecer HV, AWB HV.
+	// Alias lama (Opsi A) hanya jadi fallback bila ketiga region masih 0.
 	clamp0 := func(v int) int {
 		if v < 0 {
 			return 0
@@ -302,7 +318,8 @@ func (h *Handler) PostCargoInput(c echo.Context) error {
 	req.KoliJKT, req.KoliSEG, req.KoliBTN = clamp0(req.KoliJKT), clamp0(req.KoliSEG), clamp0(req.KoliBTN)
 	req.EcerJKT, req.EcerSEG, req.EcerBTN = clamp0(req.EcerJKT), clamp0(req.EcerSEG), clamp0(req.EcerBTN)
 	hvKoliJkt, hvKoliSeg, hvKoliBtn := normalisasiHV(req.KoliHV, 0, req.KoliHVJKT, req.KoliHVSEG, req.KoliHVBTN)
-	hvAwbJkt, hvAwbSeg, hvAwbBtn := normalisasiHV(req.HvAwb, req.EcerHV, req.EcerHVJKT, req.EcerHVSEG, req.EcerHVBTN)
+	hvEcerJkt, hvEcerSeg, hvEcerBtn := normalisasiHV(req.HvAwb, req.EcerHV, req.EcerHVJKT, req.EcerHVSEG, req.EcerHVBTN)
+	hvAwbJkt, hvAwbSeg, hvAwbBtn := normalisasiHV(req.AwbHv, 0, req.AwbHvJKT, req.AwbHvSEG, req.AwbHvBTN)
 
 	// INSERT ke input_kapten (dual-write: id_implant sumber baru, id_seller legacy)
 	var insertedID int64
@@ -320,17 +337,20 @@ func (h *Handler) PostCargoInput(c echo.Context) error {
 			ecer_jkt, ecer_seg, ecer_btn,
 			koli_hv_jkt, koli_hv_seg, koli_hv_btn,
 			ecer_hv_jkt, ecer_hv_seg, ecer_hv_btn,
+			awb_hv_jkt, awb_hv_seg, awb_hv_btn,
 			foto_manifest_url, nama_lokasi, latitude, longitude,
 			id_ritase
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-			$20, $21, $22, $23, $24
+			$20, $21, $22,
+			$23, $24, $25, $26, $27
 		) RETURNING id
 	`, userID, colSeller, colImplant, req.JenisRitase, req.RitaseKe, catatan,
 		req.JumlahAWB, req.KoliJKT, req.KoliSEG, req.KoliBTN,
 		req.EcerJKT, req.EcerSEG, req.EcerBTN,
 		hvKoliJkt, hvKoliSeg, hvKoliBtn,
+		hvEcerJkt, hvEcerSeg, hvEcerBtn,
 		hvAwbJkt, hvAwbSeg, hvAwbBtn,
 		fotoURL, req.NamaLokasi, req.Latitude, req.Longitude,
 		idRitase,
@@ -342,16 +362,17 @@ func (h *Handler) PostCargoInput(c echo.Context) error {
 	}
 
 	// Hitung total akumulasi untuk lokasi ini hari ini
-	var locAwb, locKoli, locEcer, locHV int
+	var locAwb, locKoli, locEcer, locHV, locAwbHv int
 	_ = h.DB.QueryRow(ctx, `
 		SELECT COALESCE(SUM(jumlah_awb), 0),
 		       COALESCE(SUM(koli_jkt + koli_seg + koli_btn), 0),
 		       COALESCE(SUM(ecer_jkt + ecer_seg + ecer_btn), 0),
-		       COALESCE(SUM(koli_hv_jkt + koli_hv_seg + koli_hv_btn + ecer_hv_jkt + ecer_hv_seg + ecer_hv_btn), 0)
+		       COALESCE(SUM(koli_hv_jkt + koli_hv_seg + koli_hv_btn + ecer_hv_jkt + ecer_hv_seg + ecer_hv_btn + awb_hv_jkt + awb_hv_seg + awb_hv_btn), 0),
+		       COALESCE(SUM(awb_hv_jkt + awb_hv_seg + awb_hv_btn), 0)
 		FROM input_kapten
 		WHERE (id_implant = $1 OR id_seller = $2) AND jenis_ritase = $3 AND ritase_ke = $4
 		  AND DATE(created_at) = CURRENT_DATE
-	`, implantID, sellerID, req.JenisRitase, req.RitaseKe).Scan(&locAwb, &locKoli, &locEcer, &locHV)
+	`, implantID, sellerID, req.JenisRitase, req.RitaseKe).Scan(&locAwb, &locKoli, &locEcer, &locHV, &locAwbHv)
 
 	h.bus.Publish("force_refresh", "kapten_cargo_input")
 
@@ -361,6 +382,7 @@ func (h *Handler) PostCargoInput(c echo.Context) error {
 		"total_koli_lokasi": locKoli,
 		"total_ecer_lokasi": locEcer,
 		"total_hv_lokasi":   locHV,
+		"total_awb_hv_lokasi": locAwbHv,
 	})
 }
 
@@ -471,6 +493,7 @@ func (h *Handler) GetTodayCargo(c echo.Context) error {
 	// Query dari input_kapten (bukan ritase_event)
 	var awb, koliJkt, koliSeg, koliBtn, ecerJkt, ecerSeg, ecerBtn int
 	var koliHvJkt, koliHvSeg, koliHvBtn, ecerHvJkt, ecerHvSeg, ecerHvBtn int
+	var awbHvJkt, awbHvSeg, awbHvBtn int
 	var fotoURL string
 	var catatan string
 	var isAda bool
@@ -480,6 +503,7 @@ func (h *Handler) GetTodayCargo(c echo.Context) error {
 		       COALESCE(SUM(ecer_jkt), 0), COALESCE(SUM(ecer_seg), 0), COALESCE(SUM(ecer_btn), 0),
 		       COALESCE(SUM(koli_hv_jkt), 0), COALESCE(SUM(koli_hv_seg), 0), COALESCE(SUM(koli_hv_btn), 0),
 		       COALESCE(SUM(ecer_hv_jkt), 0), COALESCE(SUM(ecer_hv_seg), 0), COALESCE(SUM(ecer_hv_btn), 0),
+		       COALESCE(SUM(awb_hv_jkt), 0), COALESCE(SUM(awb_hv_seg), 0), COALESCE(SUM(awb_hv_btn), 0),
 		       COALESCE((SELECT foto_manifest_url FROM input_kapten
 		                 WHERE (id_implant = $1 OR id_seller = $2) AND jenis_ritase = $3 AND ritase_ke = $4
 		                   AND DATE(created_at) = CURRENT_DATE AND foto_manifest_url IS NOT NULL
@@ -494,11 +518,12 @@ func (h *Handler) GetTodayCargo(c echo.Context) error {
 	`, implantID, sellerID, jenisRitase, ritaseKe).Scan(&awb, &koliJkt, &koliSeg, &koliBtn,
 		&ecerJkt, &ecerSeg, &ecerBtn,
 		&koliHvJkt, &koliHvSeg, &koliHvBtn,
-		&ecerHvJkt, &ecerHvSeg, &ecerHvBtn, &fotoURL, &catatan)
+		&ecerHvJkt, &ecerHvSeg, &ecerHvBtn,
+		&awbHvJkt, &awbHvSeg, &awbHvBtn, &fotoURL, &catatan)
 
 	totalKoli := koliJkt + koliSeg + koliBtn
 	totalEcer := ecerJkt + ecerSeg + ecerBtn
-	totalHV := koliHvJkt + koliHvSeg + koliHvBtn + ecerHvJkt + ecerHvSeg + ecerHvBtn
+	totalHV := koliHvJkt + koliHvSeg + koliHvBtn + ecerHvJkt + ecerHvSeg + ecerHvBtn + awbHvJkt + awbHvSeg + awbHvBtn
 	if err == nil && (totalKoli > 0 || totalEcer > 0 || totalHV > 0 || awb > 0) {
 		isAda = true
 	}
@@ -510,8 +535,11 @@ func (h *Handler) GetTodayCargo(c echo.Context) error {
 		"ecer_jkt": ecerJkt, "ecer_seg": ecerSeg, "ecer_btn": ecerBtn,
 		"koli_hv_jkt": koliHvJkt, "koli_hv_seg": koliHvSeg, "koli_hv_btn": koliHvBtn,
 		"ecer_hv_jkt": ecerHvJkt, "ecer_hv_seg": ecerHvSeg, "ecer_hv_btn": ecerHvBtn,
+		"awb_hv_jkt": awbHvJkt, "awb_hv_seg": awbHvSeg, "awb_hv_btn": awbHvBtn,
 		"koli_hv": koliHvJkt + koliHvSeg + koliHvBtn,
 		"hv_awb":  ecerHvJkt + ecerHvSeg + ecerHvBtn,
+		"ecer_hv": ecerHvJkt + ecerHvSeg + ecerHvBtn,
+		"awb_hv":  awbHvJkt + awbHvSeg + awbHvBtn,
 		"foto_url":    fotoURL,
 		"catatan":     catatan,
 		"is_ada_data": isAda,
@@ -742,10 +770,14 @@ type ConfirmPickupRequest struct {
 	DiambilEcerHVJKT int `json:"diambil_ecer_hv_jkt"`
 	DiambilEcerHVSEG int `json:"diambil_ecer_hv_seg"`
 	DiambilEcerHVBTN int `json:"diambil_ecer_hv_btn"`
-	// Opsi A: alias gabungan ("HV AWB" = pengganti Ecer HV, satuan sama).
+	DiambilAwbHVJKT int `json:"diambil_awb_hv_jkt"`
+	DiambilAwbHVSEG int `json:"diambil_awb_hv_seg"`
+	DiambilAwbHVBTN int `json:"diambil_awb_hv_btn"`
+	// Alias lama (Opsi A, gabungan): menang hanya bila ketiga region masih 0.
 	DiambilKoliHV int `json:"diambil_koli_hv"`
 	DiambilHvAwb  int `json:"diambil_hv_awb"`
 	DiambilEcerHV int `json:"diambil_ecer_hv"`
+	DiambilAwbHv  int `json:"diambil_awb_hv"`
 
 	FotoPenjemputanURL string `json:"foto_penjemputan_url"` // opsional
 	Catatan            string `json:"catatan"`              // opsional (mis. barang sisa)
@@ -795,11 +827,16 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 	req.DiambilEcerHVJKT = clamp(req.DiambilEcerHVJKT)
 	req.DiambilEcerHVSEG = clamp(req.DiambilEcerHVSEG)
 	req.DiambilEcerHVBTN = clamp(req.DiambilEcerHVBTN)
-	// Opsi A: alias gabungan menang bila > 0 (disimpan di jkt, seg/btn = 0).
+	req.DiambilAwbHVJKT = clamp(req.DiambilAwbHVJKT)
+	req.DiambilAwbHVSEG = clamp(req.DiambilAwbHVSEG)
+	req.DiambilAwbHVBTN = clamp(req.DiambilAwbHVBTN)
+	// Alias lama menang hanya bila ketiga region masih 0 (kompatibilitas app lama).
 	req.DiambilKoliHVJKT, req.DiambilKoliHVSEG, req.DiambilKoliHVBTN =
 		normalisasiHV(req.DiambilKoliHV, 0, req.DiambilKoliHVJKT, req.DiambilKoliHVSEG, req.DiambilKoliHVBTN)
 	req.DiambilEcerHVJKT, req.DiambilEcerHVSEG, req.DiambilEcerHVBTN =
 		normalisasiHV(req.DiambilHvAwb, req.DiambilEcerHV, req.DiambilEcerHVJKT, req.DiambilEcerHVSEG, req.DiambilEcerHVBTN)
+	req.DiambilAwbHVJKT, req.DiambilAwbHVSEG, req.DiambilAwbHVBTN =
+		normalisasiHV(req.DiambilAwbHv, 0, req.DiambilAwbHVJKT, req.DiambilAwbHVSEG, req.DiambilAwbHVBTN)
 
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
 	defer cancel()
@@ -856,11 +893,13 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 			ecer_jkt, ecer_seg, ecer_btn,
 			koli_hv_jkt, koli_hv_seg, koli_hv_btn,
 			ecer_hv_jkt, ecer_hv_seg, ecer_hv_btn,
+			awb_hv_jkt, awb_hv_seg, awb_hv_btn,
 			foto_penjemputan_url, catatan
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-			$20, $21
+			$20, $21, $22,
+			$23, $24
 		) RETURNING id
 	`, req.IDRitase, colSeller, colImplant, userID, req.JenisRitase, req.RitaseKe,
 		req.DiambilAWB,
@@ -868,6 +907,7 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 		req.DiambilEcerJKT, req.DiambilEcerSEG, req.DiambilEcerBTN,
 		req.DiambilKoliHVJKT, req.DiambilKoliHVSEG, req.DiambilKoliHVBTN,
 		req.DiambilEcerHVJKT, req.DiambilEcerHVSEG, req.DiambilEcerHVBTN,
+		req.DiambilAwbHVJKT, req.DiambilAwbHVSEG, req.DiambilAwbHVBTN,
 		fotoURL, catatan,
 	).Scan(&idKonfirmasi)
 	if err != nil {
@@ -894,33 +934,37 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 	//    kejadian hari ini dalam grup, boleh negatif = selisih lebih ambil).
 	var inAWB, inKJ, inKS, inKB, inEJ, inES, inEB int
 	var inKHJ, inKHS, inKHB, inEHJ, inEHS, inEHB int
+	var inAHJ, inAHS, inAHB int
 	_ = tx.QueryRow(ctx, `
 		SELECT COALESCE(SUM(jumlah_awb), 0),
 		       COALESCE(SUM(koli_jkt), 0), COALESCE(SUM(koli_seg), 0), COALESCE(SUM(koli_btn), 0),
 		       COALESCE(SUM(ecer_jkt), 0), COALESCE(SUM(ecer_seg), 0), COALESCE(SUM(ecer_btn), 0),
 		       COALESCE(SUM(koli_hv_jkt), 0), COALESCE(SUM(koli_hv_seg), 0), COALESCE(SUM(koli_hv_btn), 0),
-		       COALESCE(SUM(ecer_hv_jkt), 0), COALESCE(SUM(ecer_hv_seg), 0), COALESCE(SUM(ecer_hv_btn), 0)
+		       COALESCE(SUM(ecer_hv_jkt), 0), COALESCE(SUM(ecer_hv_seg), 0), COALESCE(SUM(ecer_hv_btn), 0),
+		       COALESCE(SUM(awb_hv_jkt), 0), COALESCE(SUM(awb_hv_seg), 0), COALESCE(SUM(awb_hv_btn), 0)
 		FROM input_kapten
 		WHERE (id_implant = $1 OR id_seller = $2) AND jenis_ritase = $3 AND ritase_ke = $4
 		  AND (created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
 	`, implantID, sellerID, req.JenisRitase, req.RitaseKe).Scan(
 		&inAWB, &inKJ, &inKS, &inKB, &inEJ, &inES, &inEB,
-		&inKHJ, &inKHS, &inKHB, &inEHJ, &inEHS, &inEHB)
+		&inKHJ, &inKHS, &inKHB, &inEHJ, &inEHS, &inEHB, &inAHJ, &inAHS, &inAHB)
 
 	var tkAWB, tkKJ, tkKS, tkKB, tkEJ, tkES, tkEB int
 	var tkKHJ, tkKHS, tkKHB, tkEHJ, tkEHS, tkEHB int
+	var tkAHJ, tkAHS, tkAHB int
 	_ = tx.QueryRow(ctx, `
 		SELECT COALESCE(SUM(jumlah_awb), 0),
 		       COALESCE(SUM(koli_jkt), 0), COALESCE(SUM(koli_seg), 0), COALESCE(SUM(koli_btn), 0),
 		       COALESCE(SUM(ecer_jkt), 0), COALESCE(SUM(ecer_seg), 0), COALESCE(SUM(ecer_btn), 0),
 		       COALESCE(SUM(koli_hv_jkt), 0), COALESCE(SUM(koli_hv_seg), 0), COALESCE(SUM(koli_hv_btn), 0),
-		       COALESCE(SUM(ecer_hv_jkt), 0), COALESCE(SUM(ecer_hv_seg), 0), COALESCE(SUM(ecer_hv_btn), 0)
+		       COALESCE(SUM(ecer_hv_jkt), 0), COALESCE(SUM(ecer_hv_seg), 0), COALESCE(SUM(ecer_hv_btn), 0),
+		       COALESCE(SUM(awb_hv_jkt), 0), COALESCE(SUM(awb_hv_seg), 0), COALESCE(SUM(awb_hv_btn), 0)
 		FROM konfirmasi_penjemputan
 		WHERE (id_implant = $1 OR id_seller = $2) AND jenis_ritase = $3 AND ritase_ke = $4
 		  AND (created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
 	`, implantID, sellerID, req.JenisRitase, req.RitaseKe).Scan(
 		&tkAWB, &tkKJ, &tkKS, &tkKB, &tkEJ, &tkES, &tkEB,
-		&tkKHJ, &tkKHS, &tkKHB, &tkEHJ, &tkEHS, &tkEHB)
+		&tkKHJ, &tkKHS, &tkKHB, &tkEHJ, &tkEHS, &tkEHB, &tkAHJ, &tkAHS, &tkAHB)
 
 	if err := tx.Commit(ctx); err != nil {
 		log.Printf("[Kapten] gagal commit confirm-pickup: %v", err)
@@ -932,6 +976,7 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 	sisaEJ, sisaES, sisaEB := inEJ-tkEJ, inES-tkES, inEB-tkEB
 	sisaKHJ, sisaKHS, sisaKHB := inKHJ-tkKHJ, inKHS-tkKHS, inKHB-tkKHB
 	sisaEHJ, sisaEHS, sisaEHB := inEHJ-tkEHJ, inEHS-tkEHS, inEHB-tkEHB
+	sisaAHJ, sisaAHS, sisaAHB := inAHJ-tkAHJ, inAHS-tkAHS, inAHB-tkAHB
 	log.Printf("[Kapten] seller %d konfirmasi ritase %d (%s rit %d): %d baris ter-link, sisa koli=%d",
 		sellerID, req.IDRitase, req.JenisRitase, req.RitaseKe, linked,
 		sisaKJ+sisaKS+sisaKB)
@@ -948,11 +993,14 @@ func (h *Handler) ConfirmPickup(c echo.Context) error {
 			"ecer_jkt": sisaEJ, "ecer_seg": sisaES, "ecer_btn": sisaEB,
 			"koli_hv_jkt": sisaKHJ, "koli_hv_seg": sisaKHS, "koli_hv_btn": sisaKHB,
 			"ecer_hv_jkt": sisaEHJ, "ecer_hv_seg": sisaEHS, "ecer_hv_btn": sisaEHB,
+			"awb_hv_jkt": sisaAHJ, "awb_hv_seg": sisaAHS, "awb_hv_btn": sisaAHB,
 			"koli_hv": sisaKHJ + sisaKHS + sisaKHB,
 			"hv_awb":  sisaEHJ + sisaEHS + sisaEHB,
+			"ecer_hv": sisaEHJ + sisaEHS + sisaEHB,
+			"awb_hv":  sisaAHJ + sisaAHS + sisaAHB,
 			"total_koli": sisaKJ + sisaKS + sisaKB,
 			"total_ecer": sisaEJ + sisaES + sisaEB,
-			"total_hv":   sisaKHJ + sisaKHS + sisaKHB + sisaEHJ + sisaEHS + sisaEHB,
+			"total_hv":   sisaKHJ + sisaKHS + sisaKHB + sisaEHJ + sisaEHS + sisaEHB + sisaAHJ + sisaAHS + sisaAHB,
 		},
 	})
 }
@@ -976,11 +1024,12 @@ func (h *Handler) GetPendingConfirmations(c echo.Context) error {
 		       COALESCE(SUM(jumlah_awb), 0),
 		       COALESCE(SUM(koli_jkt + koli_seg + koli_btn), 0),
 		       COALESCE(SUM(ecer_jkt + ecer_seg + ecer_btn), 0),
-		       COALESCE(SUM(koli_hv_jkt + koli_hv_seg + koli_hv_btn + ecer_hv_jkt + ecer_hv_seg + ecer_hv_btn), 0),
+		       COALESCE(SUM(koli_hv_jkt + koli_hv_seg + koli_hv_btn + ecer_hv_jkt + ecer_hv_seg + ecer_hv_btn + awb_hv_jkt + awb_hv_seg + awb_hv_btn), 0),
 		       COALESCE(SUM(koli_jkt), 0), COALESCE(SUM(koli_seg), 0), COALESCE(SUM(koli_btn), 0),
 		       COALESCE(SUM(ecer_jkt), 0), COALESCE(SUM(ecer_seg), 0), COALESCE(SUM(ecer_btn), 0),
 		       COALESCE(SUM(koli_hv_jkt), 0), COALESCE(SUM(koli_hv_seg), 0), COALESCE(SUM(koli_hv_btn), 0),
 		       COALESCE(SUM(ecer_hv_jkt), 0), COALESCE(SUM(ecer_hv_seg), 0), COALESCE(SUM(ecer_hv_btn), 0),
+		       COALESCE(SUM(awb_hv_jkt), 0), COALESCE(SUM(awb_hv_seg), 0), COALESCE(SUM(awb_hv_btn), 0),
 		       MAX(created_at)
 		FROM input_kapten
 		WHERE (id_implant = $1 OR id_seller = $2) AND id_ritase IS NULL
@@ -1001,10 +1050,12 @@ func (h *Handler) GetPendingConfirmations(c echo.Context) error {
 		var awb, koli, ecer, hv int
 		var koliJkt, koliSeg, koliBtn, ecerJkt, ecerSeg, ecerBtn int
 		var koliHvJkt, koliHvSeg, koliHvBtn, ecerHvJkt, ecerHvSeg, ecerHvBtn int
+		var awbHvJkt, awbHvSeg, awbHvBtn int
 		var lastAt time.Time
 		if err := rows.Scan(&jenis, &ritKe, &count, &awb, &koli, &ecer, &hv,
 			&koliJkt, &koliSeg, &koliBtn, &ecerJkt, &ecerSeg, &ecerBtn,
 			&koliHvJkt, &koliHvSeg, &koliHvBtn, &ecerHvJkt, &ecerHvSeg, &ecerHvBtn,
+			&awbHvJkt, &awbHvSeg, &awbHvBtn,
 			&lastAt); err != nil {
 			log.Printf("[Kapten] scan pending error (seller %d): %v", sellerID, err)
 			continue
@@ -1021,6 +1072,7 @@ func (h *Handler) GetPendingConfirmations(c echo.Context) error {
 			"ecer_jkt": ecerJkt, "ecer_seg": ecerSeg, "ecer_btn": ecerBtn,
 			"koli_hv_jkt": koliHvJkt, "koli_hv_seg": koliHvSeg, "koli_hv_btn": koliHvBtn,
 			"ecer_hv_jkt": ecerHvJkt, "ecer_hv_seg": ecerHvSeg, "ecer_hv_btn": ecerHvBtn,
+			"awb_hv_jkt": awbHvJkt, "awb_hv_seg": awbHvSeg, "awb_hv_btn": awbHvBtn,
 		})
 	}
 
@@ -1048,6 +1100,7 @@ func (h *Handler) GetKonfirmasiPenjemputan(c echo.Context) error {
 		       COALESCE(kp.ecer_jkt, 0), COALESCE(kp.ecer_seg, 0), COALESCE(kp.ecer_btn, 0),
 		       COALESCE(kp.koli_hv_jkt, 0), COALESCE(kp.koli_hv_seg, 0), COALESCE(kp.koli_hv_btn, 0),
 		       COALESCE(kp.ecer_hv_jkt, 0), COALESCE(kp.ecer_hv_seg, 0), COALESCE(kp.ecer_hv_btn, 0),
+		       COALESCE(kp.awb_hv_jkt, 0), COALESCE(kp.awb_hv_seg, 0), COALESCE(kp.awb_hv_btn, 0),
 		       COALESCE(kp.foto_penjemputan_url, ''),
 		       COALESCE(kp.catatan, ''),
 		       kp.created_at,
@@ -1071,18 +1124,18 @@ func (h *Handler) GetKonfirmasiPenjemputan(c echo.Context) error {
 		var id, idRitase int64
 		var jenis string
 		var ritKe int
-		var awb, kj, ks, kb, ej, es, eb, khj, khs, khb, ehj, ehs, ehb int
+		var awb, kj, ks, kb, ej, es, eb, khj, khs, khb, ehj, ehs, ehb, ahj, ahs, ahb int
 		var foto, catatan, kode, driver string
 		var createdAt time.Time
 		if err := rows.Scan(&id, &idRitase, &jenis, &ritKe,
-			&awb, &kj, &ks, &kb, &ej, &es, &eb, &khj, &khs, &khb, &ehj, &ehs, &ehb,
+			&awb, &kj, &ks, &kb, &ej, &es, &eb, &khj, &khs, &khb, &ehj, &ehs, &ehb, &ahj, &ahs, &ahb,
 			&foto, &catatan, &createdAt, &kode, &driver); err != nil {
 			log.Printf("[Kapten] scan riwayat penjemputan error (seller %d): %v", sellerID, err)
 			continue
 		}
 		tKoli := kj + ks + kb
 		tEcer := ej + es + eb
-		tHV := khj + khs + khb + ehj + ehs + ehb
+		tHV := khj + khs + khb + ehj + ehs + ehb + ahj + ahs + ahb
 		list = append(list, map[string]interface{}{
 			"id": id, "id_ritase": idRitase,
 			"jenis_ritase": jenis, "ritase_ke": ritKe,
@@ -1091,6 +1144,8 @@ func (h *Handler) GetKonfirmasiPenjemputan(c echo.Context) error {
 			"ecer_jkt": ej, "ecer_seg": es, "ecer_btn": eb,
 			"koli_hv_jkt": khj, "koli_hv_seg": khs, "koli_hv_btn": khb,
 			"ecer_hv_jkt": ehj, "ecer_hv_seg": ehs, "ecer_hv_btn": ehb,
+			"awb_hv_jkt": ahj, "awb_hv_seg": ahs, "awb_hv_btn": ahb,
+			"awb_hv": ahj + ahs + ahb,
 			"total_koli": tKoli, "total_ecer": tEcer, "total_hv": tHV,
 			"foto_penjemputan_url": foto,
 			"catatan":              catatan,
@@ -1108,12 +1163,13 @@ func (h *Handler) GetKonfirmasiPenjemputan(c echo.Context) error {
 			       COALESCE(SUM(t.jumlah_awb), 0) AS awb,
 			       COALESCE(SUM(t.koli_jkt + t.koli_seg + t.koli_btn), 0) AS koli,
 			       COALESCE(SUM(t.ecer_jkt + t.ecer_seg + t.ecer_btn), 0) AS ecer,
-			       COALESCE(SUM(t.koli_hv_jkt + t.koli_hv_seg + t.koli_hv_btn + t.ecer_hv_jkt + t.ecer_hv_seg + t.ecer_hv_btn), 0) AS hv,
+			       COALESCE(SUM(t.koli_hv_jkt + t.koli_hv_seg + t.koli_hv_btn + t.ecer_hv_jkt + t.ecer_hv_seg + t.ecer_hv_btn + t.awb_hv_jkt + t.awb_hv_seg + t.awb_hv_btn), 0) AS hv,
 			       COALESCE(SUM(t.jumlah_awb), 0) AS w_awb,
 			       COALESCE(SUM(t.koli_jkt), 0) AS w_kj, COALESCE(SUM(t.koli_seg), 0) AS w_ks, COALESCE(SUM(t.koli_btn), 0) AS w_kb,
 			       COALESCE(SUM(t.ecer_jkt), 0) AS w_ej, COALESCE(SUM(t.ecer_seg), 0) AS w_es, COALESCE(SUM(t.ecer_btn), 0) AS w_eb,
 			       COALESCE(SUM(t.koli_hv_jkt), 0) AS w_khj, COALESCE(SUM(t.koli_hv_seg), 0) AS w_khs, COALESCE(SUM(t.koli_hv_btn), 0) AS w_khb,
-			       COALESCE(SUM(t.ecer_hv_jkt), 0) AS w_ehj, COALESCE(SUM(t.ecer_hv_seg), 0) AS w_ehs, COALESCE(SUM(t.ecer_hv_btn), 0) AS w_ehb
+			       COALESCE(SUM(t.ecer_hv_jkt), 0) AS w_ehj, COALESCE(SUM(t.ecer_hv_seg), 0) AS w_ehs, COALESCE(SUM(t.ecer_hv_btn), 0) AS w_ehb,
+			       COALESCE(SUM(t.awb_hv_jkt), 0) AS w_ahj, COALESCE(SUM(t.awb_hv_seg), 0) AS w_ahs, COALESCE(SUM(t.awb_hv_btn), 0) AS w_ahb
 			FROM input_kapten t
 			WHERE (t.id_implant = $1 OR t.id_seller = $2)
 			  AND (t.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
@@ -1124,12 +1180,13 @@ func (h *Handler) GetKonfirmasiPenjemputan(c echo.Context) error {
 			       COALESCE(SUM(t.jumlah_awb), 0) AS awb,
 			       COALESCE(SUM(t.koli_jkt + t.koli_seg + t.koli_btn), 0) AS koli,
 			       COALESCE(SUM(t.ecer_jkt + t.ecer_seg + t.ecer_btn), 0) AS ecer,
-			       COALESCE(SUM(t.koli_hv_jkt + t.koli_hv_seg + t.koli_hv_btn + t.ecer_hv_jkt + t.ecer_hv_seg + t.ecer_hv_btn), 0) AS hv,
+			       COALESCE(SUM(t.koli_hv_jkt + t.koli_hv_seg + t.koli_hv_btn + t.ecer_hv_jkt + t.ecer_hv_seg + t.ecer_hv_btn + t.awb_hv_jkt + t.awb_hv_seg + t.awb_hv_btn), 0) AS hv,
 			       COALESCE(SUM(t.jumlah_awb), 0) AS w_awb,
 			       COALESCE(SUM(t.koli_jkt), 0) AS w_kj, COALESCE(SUM(t.koli_seg), 0) AS w_ks, COALESCE(SUM(t.koli_btn), 0) AS w_kb,
 			       COALESCE(SUM(t.ecer_jkt), 0) AS w_ej, COALESCE(SUM(t.ecer_seg), 0) AS w_es, COALESCE(SUM(t.ecer_btn), 0) AS w_eb,
 			       COALESCE(SUM(t.koli_hv_jkt), 0) AS w_khj, COALESCE(SUM(t.koli_hv_seg), 0) AS w_khs, COALESCE(SUM(t.koli_hv_btn), 0) AS w_khb,
-			       COALESCE(SUM(t.ecer_hv_jkt), 0) AS w_ehj, COALESCE(SUM(t.ecer_hv_seg), 0) AS w_ehs, COALESCE(SUM(t.ecer_hv_btn), 0) AS w_ehb
+			       COALESCE(SUM(t.ecer_hv_jkt), 0) AS w_ehj, COALESCE(SUM(t.ecer_hv_seg), 0) AS w_ehs, COALESCE(SUM(t.ecer_hv_btn), 0) AS w_ehb,
+			       COALESCE(SUM(t.awb_hv_jkt), 0) AS w_ahj, COALESCE(SUM(t.awb_hv_seg), 0) AS w_ahs, COALESCE(SUM(t.awb_hv_btn), 0) AS w_ahb
 			FROM konfirmasi_penjemputan t
 			WHERE (t.id_implant = $1 OR t.id_seller = $2)
 			  AND (t.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
@@ -1151,7 +1208,10 @@ func (h *Handler) GetKonfirmasiPenjemputan(c echo.Context) error {
 		       COALESCE(i.w_khb, 0) - COALESCE(a.w_khb, 0),
 		       COALESCE(i.w_ehj, 0) - COALESCE(a.w_ehj, 0),
 		       COALESCE(i.w_ehs, 0) - COALESCE(a.w_ehs, 0),
-		       COALESCE(i.w_ehb, 0) - COALESCE(a.w_ehb, 0)
+		       COALESCE(i.w_ehb, 0) - COALESCE(a.w_ehb, 0),
+		       COALESCE(i.w_ahj, 0) - COALESCE(a.w_ahj, 0),
+		       COALESCE(i.w_ahs, 0) - COALESCE(a.w_ahs, 0),
+		       COALESCE(i.w_ahb, 0) - COALESCE(a.w_ahb, 0)
 		FROM inp i
 		FULL OUTER JOIN amb a USING (jenis_ritase, ritase_ke)
 		ORDER BY 2
@@ -1164,10 +1224,11 @@ func (h *Handler) GetKonfirmasiPenjemputan(c echo.Context) error {
 			var inAwb, inKoli, inEcer, inHV, amAwb, amKoli, amEcer, amHV int
 			var sAwb, sKj, sKs, sKb, sEj, sEs, sEb int
 			var sKhj, sKhs, sKhb, sEhj, sEhs, sEhb int
+			var sAhj, sAhs, sAhb int
 			if err := sRows.Scan(&jenis, &ritKe,
 				&inAwb, &inKoli, &inEcer, &inHV, &amAwb, &amKoli, &amEcer, &amHV,
 				&sAwb, &sKj, &sKs, &sKb, &sEj, &sEs, &sEb,
-				&sKhj, &sKhs, &sKhb, &sEhj, &sEhs, &sEhb); err != nil {
+				&sKhj, &sKhs, &sKhb, &sEhj, &sEhs, &sEhb, &sAhj, &sAhs, &sAhb); err != nil {
 				log.Printf("[Kapten] scan sisa grup error (seller %d): %v", sellerID, err)
 				continue
 			}
@@ -1182,8 +1243,11 @@ func (h *Handler) GetKonfirmasiPenjemputan(c echo.Context) error {
 				"sisa_ecer_jkt": sEj, "sisa_ecer_seg": sEs, "sisa_ecer_btn": sEb,
 				"sisa_koli_hv_jkt": sKhj, "sisa_koli_hv_seg": sKhs, "sisa_koli_hv_btn": sKhb,
 				"sisa_ecer_hv_jkt": sEhj, "sisa_ecer_hv_seg": sEhs, "sisa_ecer_hv_btn": sEhb,
+				"sisa_awb_hv_jkt": sAhj, "sisa_awb_hv_seg": sAhs, "sisa_awb_hv_btn": sAhb,
 				"sisa_koli_hv": sKhj + sKhs + sKhb,
 				"sisa_hv_awb":  sEhj + sEhs + sEhb,
+				"sisa_ecer_hv": sEhj + sEhs + sEhb,
+				"sisa_awb_hv":  sAhj + sAhs + sAhb,
 			})
 		}
 	} else {

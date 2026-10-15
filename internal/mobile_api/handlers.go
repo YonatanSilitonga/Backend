@@ -480,56 +480,30 @@ func parseJam(s string) (time.Time, error) {
 	return time.Parse("15:04", s)
 }
 
-// hitungWindowMenit menghitung rentang menit [startMin, endMin] (0-1439, endMin bisa > 1440
-// kalau window melewati tengah malam) untuk sebuah jadwal ritase, SUDAH TERMASUK toleransi
-// mulai 2 jam lebih awal dari jam_mulai resmi.
-func hitungWindowMenit(jamMulaiStr, jamSelesaiStr string) (startMin, endMin int, err error) {
+// tripEndTime menghitung waktu-habis aktual sebuah ritase:
+// tanggal + jam_selesai (+1 hari kalau melewati tengah malam).
+// Return false bila tanggal/jam tidak bisa diparse (tidak bisa dinilai).
+func tripEndTime(tanggalStr, jamMulaiStr, jamSelesaiStr string, loc *time.Location) (time.Time, bool) {
+	tgl, err := time.ParseInLocation("2006-01-02", tanggalStr, loc)
+	if err != nil {
+		return time.Time{}, false
+	}
 	mulai, err := parseJam(jamMulaiStr)
 	if err != nil {
-		return 0, 0, err
+		return time.Time{}, false
 	}
 	selesai, err := parseJam(jamSelesaiStr)
 	if err != nil {
-		return 0, 0, err
+		return time.Time{}, false
 	}
-
-	mulaiMin := mulai.Hour()*60 + mulai.Minute()
-	selesaiMin := selesai.Hour()*60 + selesai.Minute()
-
-	startMin = mulaiMin - 120 // toleransi 2 jam lebih awal
-	if startMin < 0 {
-		startMin += 1440
+	end := time.Date(tgl.Year(), tgl.Month(), tgl.Day(),
+		selesai.Hour(), selesai.Minute(), 0, 0, loc)
+	start := time.Date(tgl.Year(), tgl.Month(), tgl.Day(),
+		mulai.Hour(), mulai.Minute(), 0, 0, loc)
+	if !end.After(start) {
+		end = end.Add(24 * time.Hour)
 	}
-
-	endMin = selesaiMin
-	if endMin == 0 {
-		// jam_selesai "00:00:00" berarti akhir hari (tengah malam)
-		endMin = 1440
-	}
-	if endMin <= startMin {
-		endMin += 1440
-	}
-
-	return startMin, endMin, nil
-}
-
-// cocokDenganSekarang cek apakah nowMin (0-1439) berada di dalam window [startMin, endMin].
-func cocokDenganSekarang(nowMin, startMin, endMin int) bool {
-	n := nowMin
-	if n < startMin {
-		n += 1440
-	}
-	return n >= startMin && n <= endMin
-}
-
-// hitungJamBoleh mengembalikan jam (HH:MM) paling awal driver boleh mulai (2 jam sebelum jam_mulai resmi).
-func hitungJamBoleh(jamMulaiStr string) string {
-	mulai, err := parseJam(jamMulaiStr)
-	if err != nil {
-		return jamMulaiStr
-	}
-	boleh := mulai.Add(-2 * time.Hour)
-	return boleh.Format("15:04")
+	return end, true
 }
 
 // ritaseCandidate menampung 1 baris ritase kandidat (belum selesai) milik seorang driver hari ini.
@@ -542,6 +516,7 @@ type ritaseCandidate struct {
 	JenisKendaraan string
 	RitaseKe       int
 	JenisRitase    *string
+	Tanggal        *string
 	JamMulai       *string
 	JamSelesai     *string
 }
@@ -569,6 +544,7 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		SELECT r.id_ritase, r.id_kendaraan, r.status, r.kode_ritase,
 			COALESCE(k.plat_nomor, ''), COALESCE(k.jenis_kendaraan, ''),
 			r.ritase_ke, r.jenis_ritase,
+			TO_CHAR(r.tanggal, 'YYYY-MM-DD'),
 			TO_CHAR(r.jam_mulai, 'HH24:MI:SS'), TO_CHAR(r.jam_selesai, 'HH24:MI:SS')
 		FROM ritase r
 		LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
@@ -591,7 +567,7 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 	for rowsCand.Next() {
 		var rc ritaseCandidate
 		if err := rowsCand.Scan(&rc.IDRitase, &rc.IDKendaraan, &rc.Status, &rc.KodeRitase,
-			&rc.PlatNomor, &rc.JenisKendaraan, &rc.RitaseKe, &rc.JenisRitase, &rc.JamMulai, &rc.JamSelesai); err == nil {
+			&rc.PlatNomor, &rc.JenisKendaraan, &rc.RitaseKe, &rc.JenisRitase, &rc.Tanggal, &rc.JamMulai, &rc.JamSelesai); err == nil {
 			candidates = append(candidates, rc)
 		}
 	}
@@ -627,80 +603,73 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		})
 	}
 
-	// 2. Cari kandidat yang jendela waktunya cocok dengan jam sekarang (WIB)
+	// 2. Pilih trip — tiga lapis, tanpa penguncian jam:
+	//  Lapis 1: yang sedang 'berjalan' selalu menang (tidak diganggu).
+	//  Lapis 2: dari sisanya, buka yang waktu-habisnya paling dekat.
+	//  Lapis 3: yang sudah lewat jam-habis tapi belum selesai = kadaluarsa,
+	//           disembunyikan dari sopir (pengawas yang bereskan).
 	now := time.Now().In(loc)
-	nowMin := now.Hour()*60 + now.Minute()
 
 	var picked *ritaseCandidate
-	var isEarly bool
-	var nextInfo *ritaseCandidate
-	nextStartMin := 999999
+	var bestEnd time.Time
+	var timeless *ritaseCandidate
 
 	for i := range candidates {
 		cand := &candidates[i]
 
-		// Jika ritase sudah dalam status 'berjalan', selalu prioritaskan tanpa cek jam
+		// Lapis 1: yang berjalan langsung menang.
 		if cand.Status == "berjalan" {
 			picked = cand
-			isEarly = false
 			break
 		}
 
-		if cand.JamMulai == nil || cand.JamSelesai == nil {
-			if picked == nil {
-				picked = cand
-				isEarly = false
+		// Tanpa info waktu → tidak bisa dinilai kadaluarsa; jadikan cadangan.
+		if cand.Tanggal == nil || cand.JamMulai == nil || cand.JamSelesai == nil {
+			if timeless == nil {
+				timeless = cand
 			}
 			continue
 		}
 
-		startMin, endMin, errW := hitungWindowMenit(*cand.JamMulai, *cand.JamSelesai)
-		if errW != nil {
+		end, ok := tripEndTime(*cand.Tanggal, *cand.JamMulai, *cand.JamSelesai, loc)
+		if !ok {
+			if timeless == nil {
+				timeless = cand
+			}
 			continue
 		}
 
-		if cocokDenganSekarang(nowMin, startMin, endMin) {
-			if picked == nil {
-				picked = cand
-				n := nowMin
-				if n < startMin {
-					n += 1440
-				}
-				mulaiMinAdj := startMin + 120
-				isEarly = n < mulaiMinAdj
-			}
-		} else if picked == nil {
-			// Pilih jadwal berikutnya yang paling chronologically dekat (jam_mulai terkecil di masa depan)
-			if startMin > nowMin && (nextInfo == nil || startMin < nextStartMin) {
-				nextInfo = cand
-				nextStartMin = startMin
-			}
+		// Lapis 3: sudah lewat jam-habis → kadaluarsa, lewati.
+		if now.After(end) {
+			log.Printf("   ⏭️ Ritase %d (ID: %d) kadaluarsa (habis %s), disembunyikan",
+				cand.RitaseKe, cand.IDRitase, end.Format("2006-01-02 15:04"))
+			continue
+		}
+
+		// Lapis 2: yang habisnya paling dekat menang.
+		if picked == nil || end.Before(bestEnd) {
+			picked = cand
+			bestEnd = end
 		}
 	}
 
+	// Cadangan tanpa info waktu hanya dipakai bila tidak ada kandidat berwaktu.
 	if picked == nil {
-		resp := map[string]interface{}{
+		picked = timeless
+	}
+
+	if picked == nil {
+		var countFinishedToday int
+		_ = h.DB.QueryRow(ctx, `
+			SELECT COUNT(*) FROM ritase
+			WHERE id_driver = $1 AND status = 'selesai' AND tanggal = $2
+		`, idDriver, hariIni).Scan(&countFinishedToday)
+
+		return response.OK(c, map[string]interface{}{
 			"has_active_ritase": false,
-			"all_completed":     false,
-			"schedule_blocked":  true,
+			"all_completed":     countFinishedToday > 0,
 			"message":           "Tidak ada jadwal ritase tersisa hari ini.",
-		}
-		if nextInfo != nil {
-			nextSchedule := map[string]interface{}{}
-			if nextInfo.JamMulai != nil {
-				nextSchedule["jam_mulai"] = *nextInfo.JamMulai
-			}
-			if nextInfo.JamSelesai != nil {
-				nextSchedule["jam_selesai"] = *nextInfo.JamSelesai
-			}
-			if nextInfo.JenisRitase != nil {
-				nextSchedule["jenis_ritase"] = *nextInfo.JenisRitase
-			}
-			nextSchedule["ritase_ke"] = nextInfo.RitaseKe
-			nextSchedule["kode_ritase"] = nextInfo.KodeRitase
-			resp["next_schedule"] = nextSchedule
-		}
-		return response.OK(c, resp)
+		})
 	}
 
 	idRitase := picked.IDRitase
@@ -710,19 +679,22 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 	platNomor := picked.PlatNomor
 	jenisKendaraan := picked.JenisKendaraan
 
-	// 3. Ambil Urutan Stop
+	// 3. Ambil Urutan Stop (termasuk implant: join tabel implant agar stop
+	// implant tidak jatuh ke fallback 'Gudang OG' tanpa koordinat)
 	rows, err := h.DB.Query(ctx, `
-		SELECT 
-			rs.id_stop, rs.urutan, rs.jenis_stop, 
-			rs.id_seller, rs.id_drop_point, rs.id_gudang, rs.keterangan,
-			COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, 'Gudang OG') AS nama_lokasi,
-			COALESCE(s.alamat, dp.alamat, g.alamat, 'Gudang Outgoing Utama') AS alamat,
-			COALESCE(s.no_hp, '-') AS no_hp,
-			COALESCE(s.latitude, g.latitude) AS latitude,
-			COALESCE(s.longitude, g.longitude) AS longitude,
-			COALESCE(s.is_implant, FALSE) AS is_implant
+		SELECT
+			rs.id_stop, rs.urutan,
+			CASE WHEN rs.id_implant IS NOT NULL THEN 'implant' ELSE rs.jenis_stop END AS jenis_stop,
+			rs.id_seller, rs.id_implant, rs.id_drop_point, rs.id_gudang, rs.keterangan,
+			COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, 'Gudang OG') AS nama_lokasi,
+			COALESCE(i.alamat, s.alamat, dp.alamat, g.alamat, 'Gudang Outgoing Utama') AS alamat,
+			COALESCE(i.no_hp, s.no_hp, '-') AS no_hp,
+			COALESCE(i.latitude, s.latitude, g.latitude) AS latitude,
+			COALESCE(i.longitude, s.longitude, g.longitude) AS longitude,
+			(COALESCE(s.is_implant, FALSE) OR rs.id_implant IS NOT NULL) AS is_implant
 		FROM ritase_stop rs
 		LEFT JOIN seller s ON s.id_seller = rs.id_seller
+		LEFT JOIN implant i ON i.id_implant = rs.id_implant
 		LEFT JOIN drop_point dp ON dp.id_drop_point = rs.id_drop_point
 		LEFT JOIN gudang g ON g.id_gudang = rs.id_gudang
 		WHERE rs.id_ritase = $1
@@ -740,17 +712,18 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		var idStop int64
 		var urutan int
 		var jenisStop, namaLokasi, alamat, noHp string
-		var idSeller, idDropPoint, idGudang *int64
+		var idSeller, idImplant, idDropPoint, idGudang *int64
 		var keterangan *string
 		var latitude, longitude *float64
 		var isImplant bool
 
-		if err := rows.Scan(&idStop, &urutan, &jenisStop, &idSeller, &idDropPoint, &idGudang, &keterangan, &namaLokasi, &alamat, &noHp, &latitude, &longitude, &isImplant); err == nil {
+		if err := rows.Scan(&idStop, &urutan, &jenisStop, &idSeller, &idImplant, &idDropPoint, &idGudang, &keterangan, &namaLokasi, &alamat, &noHp, &latitude, &longitude, &isImplant); err == nil {
 			stop := map[string]interface{}{
 				"id_stop":       idStop,
 				"urutan":        urutan,
 				"jenis_stop":    jenisStop,
 				"id_seller":     idSeller,
+				"id_implant":    idImplant,
 				"id_drop_point": idDropPoint,
 				"id_gudang":     idGudang,
 				"keterangan":    keterangan,
@@ -861,14 +834,6 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		"jenis_ritase":       picked.JenisRitase,
 		"jam_mulai":          picked.JamMulai,
 		"jam_selesai":        picked.JamSelesai,
-		"is_early_start":     isEarly,
-	}
-
-	if isEarly && picked.JamMulai != nil {
-		resp["schedule_warning"] = fmt.Sprintf(
-			"Anda memulai Ritase %d lebih awal dari jadwal resmi (jam %s). Diperbolehkan mulai maksimal 2 jam sebelumnya.",
-			picked.RitaseKe, (*picked.JamMulai)[0:5],
-		)
 	}
 
 	return response.OK(c, resp)
@@ -909,11 +874,19 @@ func (h *APIHandler) StartFreeTrip(c echo.Context) error {
 func (h *APIHandler) AddRitaseStop(c echo.Context) error {
 	ctx := c.Request().Context()
 	var req struct {
-		IdRitase int64 `json:"id_ritase"`
-		IdSeller int64 `json:"id_seller"`
+		IdRitase  int64 `json:"id_ritase"`
+		IdSeller  int64 `json:"id_seller"`
+		IdImplant int64 `json:"id_implant"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, http.StatusBadRequest, "Invalid request payload")
+	}
+	if req.IdRitase <= 0 || (req.IdSeller <= 0 && req.IdImplant <= 0) {
+		return response.Error(c, http.StatusBadRequest, "id_ritase dan id_seller/id_implant harus diisi")
+	}
+	jenisStop := "seller"
+	if req.IdImplant > 0 {
+		jenisStop = "implant"
 	}
 
 	// Get max urutan
@@ -928,10 +901,10 @@ func (h *APIHandler) AddRitaseStop(c echo.Context) error {
 
 	var newIdStop int64
 	err = h.DB.QueryRow(ctx, `
-		INSERT INTO ritase_stop (id_ritase, urutan, jenis_stop, id_seller)
-		VALUES ($1, $2, 'seller', $3)
+		INSERT INTO ritase_stop (id_ritase, urutan, jenis_stop, id_seller, id_implant)
+		VALUES ($1, $2, $3, NULLIF($4, 0), NULLIF($5, 0))
 		RETURNING id_stop
-	`, req.IdRitase, newUrutan, req.IdSeller).Scan(&newIdStop)
+	`, req.IdRitase, newUrutan, jenisStop, req.IdSeller, req.IdImplant).Scan(&newIdStop)
 
 	if err != nil {
 		log.Printf("Failed to add ritase stop: %v", err)
@@ -993,11 +966,12 @@ func (h *APIHandler) FinishRitase(c echo.Context) error {
 
 		if lastLoc == "" {
 			_ = h.DB.QueryRow(ctx, `
-				SELECT COALESCE(dp.nama_drop_point, g.nama_gudang, s.nama_seller, 'Selesai')
+				SELECT COALESCE(i.nama_implant, dp.nama_drop_point, g.nama_gudang, s.nama_seller, 'Selesai')
 				FROM ritase_stop rs
 				LEFT JOIN drop_point dp ON dp.id_drop_point = rs.id_drop_point
 				LEFT JOIN gudang g ON g.id_gudang = rs.id_gudang
 				LEFT JOIN seller s ON s.id_seller = rs.id_seller
+				LEFT JOIN implant i ON i.id_implant = rs.id_implant
 				WHERE rs.id_ritase = $1
 				ORDER BY rs.urutan DESC LIMIT 1
 			`, req.IdRitase).Scan(&lastLoc)
@@ -1164,9 +1138,9 @@ func (h *APIHandler) GetDriverHistoryDetail(c echo.Context) error {
 
 	stopsRows, err := h.DB.Query(ctx, `
 		SELECT rs.id_stop, rs.urutan, rs.jenis_stop,
-		       COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, rs.keterangan, 'Lokasi') AS nama_lokasi,
-		       COALESCE(s.alamat, dp.alamat, g.alamat, '') AS alamat,
-		       COALESCE(s.no_hp, '') AS no_hp,
+		       COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, rs.keterangan, 'Lokasi') AS nama_lokasi,
+		       COALESCE(i.alamat, s.alamat, dp.alamat, g.alamat, '') AS alamat,
+		       COALESCE(i.no_hp, s.no_hp, '') AS no_hp,
 		       COALESCE(ev.koli, 0) AS koli,
 		       COALESCE(ev.ecer, 0) AS ecer,
 		       COALESCE(ev.hv, 0) AS hv,
@@ -1174,6 +1148,7 @@ func (h *APIHandler) GetDriverHistoryDetail(c echo.Context) error {
 		FROM ritase_stop rs
 		LEFT JOIN ritase r ON r.id_ritase = rs.id_ritase
 		LEFT JOIN seller s ON s.id_seller = rs.id_seller
+		LEFT JOIN implant i ON i.id_implant = rs.id_implant
 		LEFT JOIN drop_point dp ON (dp.id_drop_point = rs.id_drop_point OR (rs.jenis_stop = 'gateway' AND rs.id_drop_point IS NULL AND dp.id_drop_point = r.id_drop_point))
 		LEFT JOIN gudang g ON g.id_gudang = rs.id_gudang
 		LEFT JOIN LATERAL (
@@ -1184,9 +1159,9 @@ func (h *APIHandler) GetDriverHistoryDetail(c echo.Context) error {
 			FROM ritase_event re
 			WHERE re.id_ritase = rs.id_ritase 
 			  AND (
-			    re.nama_lokasi = COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang)
-			    OR (re.nama_lokasi IS NOT NULL AND POSITION(LOWER(re.nama_lokasi) in LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
-			    OR (re.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(re.nama_lokasi)) > 0)
+			    re.nama_lokasi = COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang)
+			    OR (re.nama_lokasi IS NOT NULL AND POSITION(LOWER(re.nama_lokasi) in LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0)
+			    OR (re.nama_lokasi IS NOT NULL AND POSITION(LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER(re.nama_lokasi)) > 0)
 			    OR re.status IN ('Bongkar Muat Barang', 'Muat Barang', 'Bongkar Barang')
 			  )
 		) ev ON true
@@ -1517,13 +1492,14 @@ func (h *APIHandler) UploadManifest(c echo.Context) error {
 				SELECT rs.id_stop
 				FROM ritase_stop rs
 				LEFT JOIN seller s ON s.id_seller = rs.id_seller
+				LEFT JOIN implant i ON i.id_implant = rs.id_implant
 				LEFT JOIN drop_point dp ON dp.id_drop_point = rs.id_drop_point
 				LEFT JOIN gudang g ON g.id_gudang = rs.id_gudang
 				WHERE rs.id_ritase = $2
 				  AND (
-				    COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang) = $3
-				    OR POSITION(LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER($3)) > 0
-				    OR POSITION(LOWER($3) in LOWER(COALESCE(s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0
+				    COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang) = $3
+				    OR POSITION(LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, '')) in LOWER($3)) > 0
+				    OR POSITION(LOWER($3) in LOWER(COALESCE(i.nama_implant, s.nama_seller, dp.nama_drop_point, g.nama_gudang, ''))) > 0
 				  )
 				LIMIT 1
 			)

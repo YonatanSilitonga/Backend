@@ -742,6 +742,81 @@ func (r *Repository) GetAnalyticsSellers(ctx context.Context, from, to string) (
 	return items, rows.Err()
 }
 
+// GetAnalyticsImplants menghitung analitik per implant dalam periode
+// (cermin GetAnalyticsSellers; join via id_implant agar stop implant terbaca).
+func (r *Repository) GetAnalyticsImplants(ctx context.Context, from, to string) ([]ImplantAnalytics, error) {
+	from, to = defaultRange(from, to)
+
+	rows, err := r.db.Query(ctx, `
+		WITH active_ritase AS (
+			SELECT id_ritase, tanggal, status, total_awb
+			FROM ritase
+			WHERE tanggal BETWEEN $1 AND $2
+			  AND status IN ('selesai', 'berjalan')
+		),
+		stepped_events AS (
+			SELECT id_ritase, status, created_at,
+			       LEAD(status) OVER (PARTITION BY id_ritase ORDER BY created_at) AS next_status,
+			       LEAD(created_at) OVER (PARTITION BY id_ritase ORDER BY created_at) AS next_time
+			FROM ritase_event
+			WHERE id_ritase IN (SELECT id_ritase FROM active_ritase)
+		),
+		loc_dur AS (
+			SELECT id_ritase,
+			       avg(EXTRACT(EPOCH FROM (next_time - created_at))) FILTER (WHERE status = 'Tiba' AND next_status = 'Sedang Menuju') AS dur
+			FROM stepped_events
+			GROUP BY id_ritase
+		),
+		muatan AS (
+			SELECT ev.id_ritase,
+			       sum(ev.jumlah_koli) AS koli,
+			       sum(ev.jumlah_high_value) AS hv,
+			       sum(ev.jumlah_ecer) AS ecer
+			FROM ritase_event ev
+			WHERE ev.status IN ('Bongkar Muat Barang', 'Muat Barang')
+			  AND ev.id_ritase IN (SELECT id_ritase FROM active_ritase)
+			GROUP BY ev.id_ritase
+		)
+		SELECT i.id_implant, COALESCE(i.kode_implant,''), COALESCE(i.nama_implant,''), COALESCE(i.kota,''),
+		       i.jarak_tempuh_km, i.jarak_dc_km,
+		       count(DISTINCT r.id_ritase),
+		       count(DISTINCT r.id_ritase) FILTER (WHERE LOWER(r.status) IN ('selesai','completed','done')),
+		       COALESCE(sum(r.total_awb),0),
+		       COALESCE(sum(m.koli),0),
+		       COALESCE(sum(m.hv),0),
+		       COALESCE(sum(m.ecer),0),
+		       avg(ld.dur)
+		FROM implant i
+		JOIN ritase_stop rs ON rs.id_implant = i.id_implant
+		JOIN active_ritase r ON r.id_ritase = rs.id_ritase
+		LEFT JOIN loc_dur ld ON ld.id_ritase = r.id_ritase
+		LEFT JOIN muatan m ON m.id_ritase = r.id_ritase
+		GROUP BY i.id_implant, i.kode_implant, i.nama_implant, i.kota, i.jarak_tempuh_km, i.jarak_dc_km
+		ORDER BY count(DISTINCT r.id_ritase) DESC
+	`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []ImplantAnalytics
+	for rows.Next() {
+		var s ImplantAnalytics
+		var bongkar sql.NullFloat64
+		if err := rows.Scan(&s.IDImplant, &s.KodeImplant, &s.NamaImplant, &s.Kota,
+			&s.JarakTempuhKm, &s.JarakDcKm,
+			&s.Kunjungan, &s.RitaseSelesai, &s.TotalAWB, &s.TotalKoli,
+			&s.TotalHighValue, &s.TotalEceran, &bongkar); err != nil {
+			return nil, err
+		}
+		if bongkar.Valid {
+			s.RataBongkar = &bongkar.Float64
+		}
+		items = append(items, s)
+	}
+	return items, rows.Err()
+}
+
 // ResolveAlert menandai alert sebagai sudah ditangani oleh tower control.
 func (r *Repository) ResolveAlert(ctx context.Context, idAlert int64, userID int64) error {
 	_, err := r.db.Exec(ctx, `

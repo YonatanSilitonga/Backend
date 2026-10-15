@@ -137,6 +137,7 @@ func (h *APIHandler) GetJadwalConfig(c echo.Context) error {
 			         CASE
 			           WHEN st.kolom_lokasi = 'id_gudang' THEN (SELECT nama_gudang FROM gudang WHERE id_gudang = st.id_lokasi)
 			           WHEN st.kolom_lokasi = 'id_seller' THEN (SELECT nama_seller FROM seller WHERE id_seller = st.id_lokasi)
+			           WHEN st.kolom_lokasi = 'id_implant' THEN (SELECT nama_implant FROM implant WHERE id_implant = st.id_lokasi)
 			           WHEN st.kolom_lokasi = 'id_drop_point' THEN (SELECT nama_drop_point FROM drop_point WHERE id_drop_point = st.id_lokasi)
 			           ELSE 'Lokasi #' || st.id_lokasi
 			         END,
@@ -350,6 +351,8 @@ func (h *APIHandler) CreateRouteTemplate(c echo.Context) error {
 				stop.KolomLokasi = "id_gudang"
 			} else if stop.Jenis == "seller" {
 				stop.KolomLokasi = "id_seller"
+			} else if stop.Jenis == "implant" {
+				stop.KolomLokasi = "id_implant"
 			} else {
 				stop.KolomLokasi = "id_drop_point"
 			}
@@ -411,6 +414,8 @@ func (h *APIHandler) UpdateRouteTemplate(c echo.Context) error {
 				stop.KolomLokasi = "id_gudang"
 			} else if stop.Jenis == "seller" {
 				stop.KolomLokasi = "id_seller"
+			} else if stop.Jenis == "implant" {
+				stop.KolomLokasi = "id_implant"
 			} else {
 				stop.KolomLokasi = "id_drop_point"
 			}

@@ -307,6 +307,7 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 	vehicles := make(map[int64]string)
 	gudangs := make(map[int64]string)
 	sellers := make(map[int64]string)
+	implants := make(map[int64]string)
 	dropPoints := make(map[int64]string)
 
 	// Fetch Drivers
@@ -352,6 +353,17 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 		}
 	}
 	rowsS.Close()
+
+	// Fetch Implant
+	rowsI, _ := h.DB.Query(ctx, "SELECT id_implant, nama_implant FROM implant")
+	for rowsI.Next() {
+		var id int64
+		var name string
+		if err := rowsI.Scan(&id, &name); err == nil {
+			implants[id] = name
+		}
+	}
+	rowsI.Close()
 
 	// Fetch Drop Point
 	rowsDP, _ := h.DB.Query(ctx, "SELECT id_drop_point, nama_drop_point FROM drop_point")
@@ -417,6 +429,10 @@ func (h *APIHandler) AdminPreviewGenerateDailyRitase(c echo.Context) error {
 				}
 			} else if fs.Jenis == "seller" {
 				if n, ok := sellers[fs.IDLokasi]; ok {
+					locName = n
+				}
+			} else if fs.Jenis == "implant" {
+				if n, ok := implants[fs.IDLokasi]; ok {
 					locName = n
 				}
 			} else if fs.Jenis == "drop_point" || fs.Jenis == "gateway" {
@@ -1508,6 +1524,9 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 					COALESCE(ev.ecer_hv_jkt, 0) AS ecer_hv_jkt,
 					COALESCE(ev.ecer_hv_seg, 0) AS ecer_hv_seg,
 					COALESCE(ev.ecer_hv_btn, 0) AS ecer_hv_btn,
+					0 AS awb_hv_jkt,
+					0 AS awb_hv_seg,
+					0 AS awb_hv_btn,
 					COALESCE(ev.jumlah_koli, 0) AS jumlah_koli,
 					COALESCE(ev.jumlah_ecer, 0) AS jumlah_ecer,
 					COALESCE(ev.jumlah_high_value, 0) AS jumlah_high_value,
@@ -1560,6 +1579,9 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 					COALESCE(ik.ecer_hv_jkt, 0) AS ecer_hv_jkt,
 					COALESCE(ik.ecer_hv_seg, 0) AS ecer_hv_seg,
 					COALESCE(ik.ecer_hv_btn, 0) AS ecer_hv_btn,
+					COALESCE(ik.awb_hv_jkt, 0) AS awb_hv_jkt,
+					COALESCE(ik.awb_hv_seg, 0) AS awb_hv_seg,
+					COALESCE(ik.awb_hv_btn, 0) AS awb_hv_btn,
 					0 AS jumlah_koli, 0 AS jumlah_ecer, 0 AS jumlah_high_value,
 					0 AS durasi_detik,
 					COALESCE(ik.foto_manifest_url, '') AS foto_manifest_url,
@@ -1631,6 +1653,7 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 		var awb, durasiDetik int
 		var koliJkt, koliSeg, koliBtn, ecerJkt, ecerSeg, ecerBtn int
 		var koliHvJkt, koliHvSeg, koliHvBtn, ecerHvJkt, ecerHvSeg, ecerHvBtn int
+		var awbHvJkt, awbHvSeg, awbHvBtn int
 		var jumlahKoli, jumlahEcer, jumlahHighValue int
 		var createdAt time.Time
 		var inputBy, inputByName string
@@ -1647,6 +1670,7 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 			&ecerJkt, &ecerSeg, &ecerBtn,
 			&koliHvJkt, &koliHvSeg, &koliHvBtn,
 			&ecerHvJkt, &ecerHvSeg, &ecerHvBtn,
+			&awbHvJkt, &awbHvSeg, &awbHvBtn,
 			&jumlahKoli, &jumlahEcer, &jumlahHighValue,
 			&durasiDetik,
 			&fotoURL, &createdAt,
@@ -1665,7 +1689,7 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 		if totalEcer == 0 {
 			totalEcer = jumlahEcer
 		}
-		totalHV := koliHvJkt + koliHvSeg + koliHvBtn + ecerHvJkt + ecerHvSeg + ecerHvBtn
+		totalHV := koliHvJkt + koliHvSeg + koliHvBtn + ecerHvJkt + ecerHvSeg + ecerHvBtn + awbHvJkt + awbHvSeg + awbHvBtn
 		if totalHV == 0 {
 			totalHV = jumlahHighValue
 		}
@@ -1689,6 +1713,8 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 			"ecer_jkt": ecerJkt, "ecer_seg": ecerSeg, "ecer_btn": ecerBtn,
 			"koli_hv_jkt": koliHvJkt, "koli_hv_seg": koliHvSeg, "koli_hv_btn": koliHvBtn,
 			"ecer_hv_jkt": ecerHvJkt, "ecer_hv_seg": ecerHvSeg, "ecer_hv_btn": ecerHvBtn,
+			"awb_hv_jkt": awbHvJkt, "awb_hv_seg": awbHvSeg, "awb_hv_btn": awbHvBtn,
+			"awb_hv":          awbHvJkt + awbHvSeg + awbHvBtn,
 			"total_koli":        totalKoli,
 			"total_ecer":        totalEcer,
 			"total_hv":          totalHV,
@@ -1728,7 +1754,7 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 			       COALESCE(SUM(t.jumlah_awb), 0) AS awb,
 			       COALESCE(SUM(t.koli_jkt + t.koli_seg + t.koli_btn), 0) AS koli,
 			       COALESCE(SUM(t.ecer_jkt + t.ecer_seg + t.ecer_btn), 0) AS ecer,
-			       COALESCE(SUM(t.koli_hv_jkt + t.koli_hv_seg + t.koli_hv_btn + t.ecer_hv_jkt + t.ecer_hv_seg + t.ecer_hv_btn), 0) AS hv
+			       COALESCE(SUM(t.koli_hv_jkt + t.koli_hv_seg + t.koli_hv_btn + t.ecer_hv_jkt + t.ecer_hv_seg + t.ecer_hv_btn + t.awb_hv_jkt + t.awb_hv_seg + t.awb_hv_btn), 0) AS hv
 			FROM input_kapten t
 			WHERE 1=1
 	`
@@ -1746,7 +1772,7 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 			       COALESCE(SUM(t.jumlah_awb), 0) AS awb,
 			       COALESCE(SUM(t.koli_jkt + t.koli_seg + t.koli_btn), 0) AS koli,
 			       COALESCE(SUM(t.ecer_jkt + t.ecer_seg + t.ecer_btn), 0) AS ecer,
-			       COALESCE(SUM(t.koli_hv_jkt + t.koli_hv_seg + t.koli_hv_btn + t.ecer_hv_jkt + t.ecer_hv_seg + t.ecer_hv_btn), 0) AS hv
+			       COALESCE(SUM(t.koli_hv_jkt + t.koli_hv_seg + t.koli_hv_btn + t.ecer_hv_jkt + t.ecer_hv_seg + t.ecer_hv_btn + t.awb_hv_jkt + t.awb_hv_seg + t.awb_hv_btn), 0) AS hv
 			FROM konfirmasi_penjemputan t
 			WHERE 1=1
 	`
@@ -1823,11 +1849,12 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 		       COALESCE(kp.jumlah_awb, 0),
 		       COALESCE(kp.koli_jkt + kp.koli_seg + kp.koli_btn, 0),
 		       COALESCE(kp.ecer_jkt + kp.ecer_seg + kp.ecer_btn, 0),
-		       COALESCE(kp.koli_hv_jkt + kp.koli_hv_seg + kp.koli_hv_btn + kp.ecer_hv_jkt + kp.ecer_hv_seg + kp.ecer_hv_btn, 0),
+		       COALESCE(kp.koli_hv_jkt + kp.koli_hv_seg + kp.koli_hv_btn + kp.ecer_hv_jkt + kp.ecer_hv_seg + kp.ecer_hv_btn + kp.awb_hv_jkt + kp.awb_hv_seg + kp.awb_hv_btn, 0),
 		       COALESCE(kp.koli_jkt, 0), COALESCE(kp.koli_seg, 0), COALESCE(kp.koli_btn, 0),
 		       COALESCE(kp.ecer_jkt, 0), COALESCE(kp.ecer_seg, 0), COALESCE(kp.ecer_btn, 0),
 		       COALESCE(kp.koli_hv_jkt, 0), COALESCE(kp.koli_hv_seg, 0), COALESCE(kp.koli_hv_btn, 0),
 		       COALESCE(kp.ecer_hv_jkt, 0), COALESCE(kp.ecer_hv_seg, 0), COALESCE(kp.ecer_hv_btn, 0),
+		       COALESCE(kp.awb_hv_jkt, 0), COALESCE(kp.awb_hv_seg, 0), COALESCE(kp.awb_hv_btn, 0),
 		       COALESCE(kp.foto_penjemputan_url, ''),
 		       COALESCE(kp.catatan, ''),
 		       kp.created_at
@@ -1873,11 +1900,11 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 		var kode, tanggal, jenis, namaLokasi, namaDriver, foto, catatan string
 		var ritKe int
 		var awb, koli, ecer, hv int
-		var kj, ks, kb, ej, es, eb, khj, khs, khb, ehj, ehs, ehb int
+		var kj, ks, kb, ej, es, eb, khj, khs, khb, ehj, ehs, ehb, ahj, ahs, ahb int
 		var createdAt time.Time
 		if err := wRows.Scan(&id, &idRitase, &kode, &tanggal, &ritKe, &jenis,
 			&idSeller, &namaLokasi, &namaDriver, &awb, &koli, &ecer, &hv,
-			&kj, &ks, &kb, &ej, &es, &eb, &khj, &khs, &khb, &ehj, &ehs, &ehb,
+			&kj, &ks, &kb, &ej, &es, &eb, &khj, &khs, &khb, &ehj, &ehs, &ehb, &ahj, &ahs, &ahb,
 			&foto, &catatan, &createdAt); err != nil {
 			log.Printf("[ManifestPenjemputan] scan riwayat error: %v", err)
 			continue
@@ -1891,6 +1918,8 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 			"ecer_jkt": ej, "ecer_seg": es, "ecer_btn": eb,
 			"koli_hv_jkt": khj, "koli_hv_seg": khs, "koli_hv_btn": khb,
 			"ecer_hv_jkt": ehj, "ecer_hv_seg": ehs, "ecer_hv_btn": ehb,
+			"awb_hv_jkt": ahj, "awb_hv_seg": ahs, "awb_hv_btn": ahb,
+			"awb_hv": ahj + ahs + ahb,
 			"foto_penjemputan_url": foto, "catatan": catatan,
 			"created_at": createdAt.Format(time.RFC3339),
 		})
