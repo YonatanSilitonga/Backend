@@ -489,7 +489,11 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 		       COALESCE(NULLIF(pl.pickup_hv, 0), t.jumlah_high_value, re.jumlah_high_value, 0),
 		       t.last_update,
 		       %s AS offline,
-		       (u.last_login IS NOT NULL AND u.last_login > now() - make_interval(hours => %d)) AS session_online,
+		       (
+		           (u.last_login IS NOT NULL AND u.last_login > now() - make_interval(hours => %d))
+		           OR (u.last_open IS NOT NULL AND u.last_open > now() - make_interval(hours => %d))
+		           OR (t.last_update IS NOT NULL AND t.last_update > now() - interval '15 minutes')
+		       ) AS session_online,
 		       u.last_login, u.last_open,
 	       COALESCE(u.role, 'driver') AS role_driver,
 	       -- Muatan dibawa driver: input pickup sendiri + yang dikonfirmasi kapten
@@ -540,7 +544,7 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 			  AND (kp.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
 		) cf ON true
 		ORDER BY t.last_update DESC
-	`, offlineExpr, sessionHours))
+	`, offlineExpr, sessionHours, sessionHours))
 	if err != nil {
 		return nil, err
 	}
@@ -1069,7 +1073,10 @@ func (r *Repository) ListDriverPickups(ctx context.Context) ([]DriverPickupItem,
 			COALESCE(l.status, 'standby') AS status,
 			COALESCE(l.catatan, '') AS catatan,
 			COALESCE(l.asal_seller, '') AS asal_seller,
-			(u.last_login IS NOT NULL AND u.last_login > now() - interval '12 hours') AS session_online,
+			(
+				(u.last_login IS NOT NULL AND u.last_login > now() - interval '12 hours')
+				OR (u.last_open IS NOT NULL AND u.last_open > now() - interval '12 hours')
+			) AS session_online,
 			u.last_login,
 			l.updated_at
 		FROM users u
