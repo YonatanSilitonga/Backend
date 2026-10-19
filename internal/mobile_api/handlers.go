@@ -47,11 +47,11 @@ type AppVersionResponse struct {
 
 func (h *APIHandler) GetAppVersion(c echo.Context) error {
 	return c.JSON(http.StatusOK, AppVersionResponse{
-		VersionCode:  16,
-		VersionName:  "1.2.5",
+		VersionCode:  17,
+		VersionName:  "1.2.6",
 		DownloadURL:  "https://api.controltowerslb.tech/uploads/apk/tower-control-latest.apk",
 		ForceUpdate:  true,
-		ReleaseNotes: "Update Darurat v1.2.5: Peningkatan presisi GPS tracking pergerakan (10 meter) untuk akurasi posisi armada.",
+		ReleaseNotes: "Update v1.2.6: Optimasi tracking GPS 10 detik / 5 meter, perbaikan alur tombol kembali ke gudang, penyaringan riwayat pickup hari ini, dan penghapusan input koli.",
 	})
 }
 
