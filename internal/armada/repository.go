@@ -464,9 +464,15 @@ func (r *Repository) CreateTracking(ctx context.Context, req CreateTrackingReque
 func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, sessionHours int, sessionRequired bool) ([]TrackingLive, error) {
 	offlineExpr := fmt.Sprintf("(t.last_update < now() - make_interval(mins => %d))", offlineMin)
 	if sessionRequired {
+		// Driver dianggap ONLINE jika salah satu terpenuhi:
+		// 1. last_login masih fresh (dalam sessionHours terakhir)
+		// 2. last_open masih fresh (GPS background masih aktif, meskipun last_login NULL)
 		offlineExpr = fmt.Sprintf(
-			"((t.last_update < now() - make_interval(mins => %d)) OR (u.last_login IS NULL OR u.last_login < now() - make_interval(hours => %d)))",
-			offlineMin, sessionHours,
+			"((t.last_update < now() - make_interval(mins => %d)) OR ("+
+				"(u.last_login IS NULL OR u.last_login < now() - make_interval(hours => %d))"+
+				" AND (u.last_open IS NULL OR u.last_open < now() - make_interval(hours => %d))"+
+				"))",
+			offlineMin, sessionHours, sessionHours,
 		)
 	}
 
