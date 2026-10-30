@@ -72,11 +72,11 @@ func (h *APIHandler) GetAppVersion(c echo.Context) error {
 		releaseNotes = "Update Darurat v1.2.5: Peningkatan presisi GPS tracking pergerakan (10 meter) untuk akurasi posisi armada."
 	}
 	return c.JSON(http.StatusOK, AppVersionResponse{
-		VersionCode:  versionCode,
-		VersionName:  versionName,
-		DownloadURL:  downloadURL,
-		ForceUpdate:  forceUpdate,
-		ReleaseNotes: releaseNotes,
+		VersionCode:  17,
+		VersionName:  "1.2.6",
+		DownloadURL:  "https://api.controltowerslb.tech/uploads/apk/tower-control-latest.apk",
+		ForceUpdate:  true,
+		ReleaseNotes: "Update v1.2.6: Optimasi tracking GPS 10 detik / 5 meter, perbaikan alur tombol kembali ke gudang, penyaringan riwayat pickup hari ini, dan penghapusan input koli.",
 	})
 }
 
@@ -482,10 +482,22 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 
 	// Jika driver berganti kendaraan (misal dari kendaraan default fallback ke kendaraan terpilih),
 	// bersihkan baris armada_tracking kendaraan lain untuk driver ini agar tidak muncul ganda (ghost vehicle).
+	// Fix: kondisi sebelumnya hanya hapus kalau id_ritase NULL/0 — kendaraan lama yang ritasenya sudah
+	// 'selesai' tetap lolos. Sekarang hapus juga kalau ritase sudah selesai.
 	if req.IDDriver > 0 && req.IDKendaraan > 0 {
 		_, _ = h.DB.Exec(ctx, `
-			DELETE FROM armada_tracking
-			WHERE id_driver = $1 AND id_kendaraan != $2 AND (id_ritase IS NULL OR id_ritase = 0)
+			DELETE FROM armada_tracking at_ghost
+			WHERE at_ghost.id_driver = $1
+			  AND at_ghost.id_kendaraan != $2
+			  AND (
+			      at_ghost.id_ritase IS NULL
+			      OR at_ghost.id_ritase = 0
+			      OR EXISTS (
+			          SELECT 1 FROM ritase r
+			          WHERE r.id_ritase = at_ghost.id_ritase
+			            AND r.status = 'selesai'
+			      )
+			  )
 		`, req.IDDriver, req.IDKendaraan)
 	}
 
@@ -495,6 +507,16 @@ func (h *APIHandler) PostTracking(c echo.Context) error {
 			INSERT INTO armada_gps_history (id_ritase, id_kendaraan, id_driver, latitude, longitude, kecepatan)
 			VALUES ($1, $2, $3, $4, $5, $6)
 		`, targetRitaseID, req.IDKendaraan, req.IDDriver, req.Latitude, req.Longitude, req.Kecepatan)
+	}
+
+	// Update last_open driver agar tidak dianggap "offline" oleh dashboard
+	// selama GPS masih dikirim — meskipun last_login sudah NULL/expired.
+	// Penting untuk driver_pickup yang background tracking tetap jalan walau app di-minimize.
+	if req.IDDriver > 0 {
+		_, _ = h.DB.Exec(ctx, `
+			UPDATE users SET last_open = now()
+			WHERE id_driver = $1
+		`, req.IDDriver)
 	}
 
 	h.bus.Publish("force_refresh", "mobile_tracking_update")

@@ -385,7 +385,8 @@ func (h *Handler) GetDriverPickupHistory(c echo.Context) error {
 	if err != nil || id <= 0 {
 		return response.Error(c, http.StatusBadRequest, "id driver tidak valid")
 	}
-	logs, err := h.svc.GetDriverPickupHistory(c.Request().Context(), id)
+	tanggal := c.QueryParam("tanggal")
+	logs, err := h.svc.GetDriverPickupHistory(c.Request().Context(), id, tanggal)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal mengambil riwayat muatan driver pickup")
 	}

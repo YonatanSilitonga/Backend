@@ -466,9 +466,15 @@ func (r *Repository) CreateTracking(ctx context.Context, req CreateTrackingReque
 func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, sessionHours int, sessionRequired bool) ([]TrackingLive, error) {
 	offlineExpr := fmt.Sprintf("(t.last_update < now() - make_interval(mins => %d))", offlineMin)
 	if sessionRequired {
+		// Driver dianggap ONLINE jika salah satu terpenuhi:
+		// 1. last_login masih fresh (dalam sessionHours terakhir)
+		// 2. last_open masih fresh (GPS background masih aktif, meskipun last_login NULL)
 		offlineExpr = fmt.Sprintf(
-			"((t.last_update < now() - make_interval(mins => %d)) OR (u.last_login IS NULL OR u.last_login < now() - make_interval(hours => %d)))",
-			offlineMin, sessionHours,
+			"((t.last_update < now() - make_interval(mins => %d)) OR ("+
+				"(u.last_login IS NULL OR u.last_login < now() - make_interval(hours => %d))"+
+				" AND (u.last_open IS NULL OR u.last_open < now() - make_interval(hours => %d))"+
+				"))",
+			offlineMin, sessionHours, sessionHours,
 		)
 	}
 
@@ -485,7 +491,11 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 		       COALESCE(NULLIF(COALESCE(pl.pickup_hv, 0) + COALESCE(cf.confirm_hv, 0), 0), t.jumlah_high_value, re.jumlah_high_value, 0),
 		       t.last_update,
 		       %s AS offline,
-		       (u.last_login IS NOT NULL AND u.last_login > now() - make_interval(hours => %d)) AS session_online,
+		       (
+		           (u.last_login IS NOT NULL AND u.last_login > now() - make_interval(hours => %d))
+		           OR (u.last_open IS NOT NULL AND u.last_open > now() - make_interval(hours => %d))
+		           OR (t.last_update IS NOT NULL AND t.last_update > now() - interval '15 minutes')
+		       ) AS session_online,
 		       u.last_login, u.last_open,
 	       COALESCE(u.role, 'driver') AS role_driver,
 	       -- Muatan dibawa driver: input pickup sendiri + yang dikonfirmasi kapten
@@ -547,7 +557,7 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 			  AND (kp.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
 		) cf ON true
 		ORDER BY t.last_update DESC
-	`, offlineExpr, sessionHours))
+	`, offlineExpr, sessionHours, sessionHours))
 	if err != nil {
 		return nil, err
 	}
@@ -1411,7 +1421,10 @@ func (r *Repository) ListDriverPickups(ctx context.Context) ([]DriverPickupItem,
 			COALESCE(l.status, 'standby') AS status,
 			COALESCE(l.catatan, '') AS catatan,
 			COALESCE(l.asal_seller, '') AS asal_seller,
-			(u.last_login IS NOT NULL AND u.last_login > now() - interval '12 hours') AS session_online,
+			(
+				(u.last_login IS NOT NULL AND u.last_login > now() - interval '12 hours')
+				OR (u.last_open IS NOT NULL AND u.last_open > now() - interval '12 hours')
+			) AS session_online,
 			u.last_login,
 			l.updated_at
 		FROM users u
@@ -1602,15 +1615,28 @@ func (r *Repository) ListAllDriverPickupHistory(ctx context.Context, idUser int6
 }
 
 // GetDriverPickupHistory mengambil riwayat muatan untuk satu driver pickup.
-func (r *Repository) GetDriverPickupHistory(ctx context.Context, idUser int64) ([]DriverPickupLog, error) {
-	rows, err := r.db.Query(ctx, `
-		SELECT id_log, id_user, nama_driver, TO_CHAR(tanggal, 'YYYY-MM-DD'), jumlah_barang, COALESCE(koli, 0), COALESCE(ecer, 0), COALESCE(high_value, 0), status,
-		       COALESCE(catatan, ''), COALESCE(asal_seller, ''), COALESCE(foto_url, ''), COALESCE(created_by, ''), created_at, updated_at
-		FROM driver_pickup_log
-		WHERE id_user = $1
-		ORDER BY id_log DESC
-		LIMIT 50
-	`, idUser)
+func (r *Repository) GetDriverPickupHistory(ctx context.Context, idUser int64, tanggal string) ([]DriverPickupLog, error) {
+	var rows pgx.Rows
+	var err error
+	if tanggal != "" {
+		rows, err = r.db.Query(ctx, `
+			SELECT id_log, id_user, nama_driver, TO_CHAR(tanggal, 'YYYY-MM-DD'), jumlah_barang, COALESCE(koli, 0), COALESCE(ecer, 0), COALESCE(high_value, 0), status,
+			       COALESCE(catatan, ''), COALESCE(asal_seller, ''), COALESCE(foto_url, ''), COALESCE(created_by, ''), created_at, updated_at
+			FROM driver_pickup_log
+			WHERE id_user = $1 AND tanggal = $2::DATE
+			ORDER BY id_log DESC
+			LIMIT 100
+		`, idUser, tanggal)
+	} else {
+		rows, err = r.db.Query(ctx, `
+			SELECT id_log, id_user, nama_driver, TO_CHAR(tanggal, 'YYYY-MM-DD'), jumlah_barang, COALESCE(koli, 0), COALESCE(ecer, 0), COALESCE(high_value, 0), status,
+			       COALESCE(catatan, ''), COALESCE(asal_seller, ''), COALESCE(foto_url, ''), COALESCE(created_by, ''), created_at, updated_at
+			FROM driver_pickup_log
+			WHERE id_user = $1
+			ORDER BY id_log DESC
+			LIMIT 50
+		`, idUser)
+	}
 	if err != nil {
 		return nil, err
 	}

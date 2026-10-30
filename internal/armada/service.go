@@ -149,6 +149,6 @@ func (s *Service) ListAllDriverPickupHistory(ctx context.Context, idUser int64, 
 	return s.repo.ListAllDriverPickupHistory(ctx, idUser, startDate, endDate, status, limit)
 }
 
-func (s *Service) GetDriverPickupHistory(ctx context.Context, idUser int64) ([]DriverPickupLog, error) {
-	return s.repo.GetDriverPickupHistory(ctx, idUser)
+func (s *Service) GetDriverPickupHistory(ctx context.Context, idUser int64, tanggal string) ([]DriverPickupLog, error) {
+	return s.repo.GetDriverPickupHistory(ctx, idUser, tanggal)
 }
