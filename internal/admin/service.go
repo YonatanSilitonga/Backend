@@ -35,40 +35,80 @@ func checkRole(role string) error {
 }
 
 // ──────── Driver ────────
-func (s *Service) ListDriver(ctx context.Context) ([]Driver, error)                                   { return s.repo.ListDriver(ctx) }
-func (s *Service) CreateDriver(ctx context.Context, r DriverRequest, createdBy int64) (int64, error)   { return s.repo.CreateDriver(ctx, r, createdBy) }
-func (s *Service) UpdateDriver(ctx context.Context, id int64, r DriverRequest, updatedBy int64) error  { return s.repo.UpdateDriver(ctx, id, r, updatedBy) }
-func (s *Service) DeleteDriver(ctx context.Context, id int64) error                                    { return s.repo.DeleteDriver(ctx, id) }
+func (s *Service) ListDriver(ctx context.Context) ([]Driver, error) { return s.repo.ListDriver(ctx) }
+func (s *Service) CreateDriver(ctx context.Context, r DriverRequest, createdBy int64) (int64, error) {
+	return s.repo.CreateDriver(ctx, r, createdBy)
+}
+func (s *Service) UpdateDriver(ctx context.Context, id int64, r DriverRequest, updatedBy int64) error {
+	return s.repo.UpdateDriver(ctx, id, r, updatedBy)
+}
+func (s *Service) DeleteDriver(ctx context.Context, id int64) error {
+	return s.repo.DeleteDriver(ctx, id)
+}
 
 // ──────── Kendaraan ────────
-func (s *Service) ListKendaraan(ctx context.Context) ([]Kendaraan, error)                                        { return s.repo.ListKendaraan(ctx) }
-func (s *Service) CreateKendaraan(ctx context.Context, r KendaraanRequest, createdBy int64) (int64, error)        { return s.repo.CreateKendaraan(ctx, r, createdBy) }
-func (s *Service) UpdateKendaraan(ctx context.Context, id int64, r KendaraanRequest, updatedBy int64) error       { return s.repo.UpdateKendaraan(ctx, id, r, updatedBy) }
-func (s *Service) DeleteKendaraan(ctx context.Context, id int64) error                                            { return s.repo.DeleteKendaraan(ctx, id) }
+func (s *Service) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
+	return s.repo.ListKendaraan(ctx)
+}
+func (s *Service) CreateKendaraan(ctx context.Context, r KendaraanRequest, createdBy int64) (int64, error) {
+	return s.repo.CreateKendaraan(ctx, r, createdBy)
+}
+func (s *Service) UpdateKendaraan(ctx context.Context, id int64, r KendaraanRequest, updatedBy int64) error {
+	return s.repo.UpdateKendaraan(ctx, id, r, updatedBy)
+}
+func (s *Service) DeleteKendaraan(ctx context.Context, id int64) error {
+	return s.repo.DeleteKendaraan(ctx, id)
+}
 
 // ──────── Seller ────────
-func (s *Service) ListSeller(ctx context.Context) ([]Seller, error)                                     { return s.repo.ListSeller(ctx) }
-func (s *Service) CreateSeller(ctx context.Context, r SellerRequest, createdBy int64) (int64, error)    { return s.repo.CreateSeller(ctx, r, createdBy) }
-func (s *Service) UpdateSeller(ctx context.Context, id int64, r SellerRequest, updatedBy int64) error   { return s.repo.UpdateSeller(ctx, id, r, updatedBy) }
-func (s *Service) DeleteSeller(ctx context.Context, id int64) error                                     { return s.repo.DeleteSeller(ctx, id) }
+func (s *Service) ListSeller(ctx context.Context) ([]Seller, error) { return s.repo.ListSeller(ctx) }
+func (s *Service) CreateSeller(ctx context.Context, r SellerRequest, createdBy int64) (int64, error) {
+	return s.repo.CreateSeller(ctx, r, createdBy)
+}
+func (s *Service) UpdateSeller(ctx context.Context, id int64, r SellerRequest, updatedBy int64) error {
+	return s.repo.UpdateSeller(ctx, id, r, updatedBy)
+}
+func (s *Service) DeleteSeller(ctx context.Context, id int64) error {
+	return s.repo.DeleteSeller(ctx, id)
+}
 
 // ──────── Implant (master lokasi implant, terpisah dari seller) ────────
-func (s *Service) ListImplant(ctx context.Context) ([]Implant, error)                                   { return s.repo.ListImplant(ctx) }
-func (s *Service) CreateImplant(ctx context.Context, r ImplantRequest, createdBy int64) (int64, error)   { return s.repo.CreateImplant(ctx, r) }
-func (s *Service) UpdateImplant(ctx context.Context, id int64, r ImplantRequest, updatedBy int64) error  { return s.repo.UpdateImplant(ctx, id, r) }
-func (s *Service) DeleteImplant(ctx context.Context, id int64) error                                    { return s.repo.DeleteImplant(ctx, id) }
+func (s *Service) ListImplant(ctx context.Context) ([]Implant, error) { return s.repo.ListImplant(ctx) }
+func (s *Service) CreateImplant(ctx context.Context, r ImplantRequest, createdBy int64) (int64, error) {
+	return s.repo.CreateImplant(ctx, r)
+}
+func (s *Service) UpdateImplant(ctx context.Context, id int64, r ImplantRequest, updatedBy int64) error {
+	return s.repo.UpdateImplant(ctx, id, r)
+}
+func (s *Service) DeleteImplant(ctx context.Context, id int64) error {
+	return s.repo.DeleteImplant(ctx, id)
+}
 
 // ──────── Gudang ────────
-func (s *Service) ListGudang(ctx context.Context) ([]Gudang, error)                                     { return s.repo.ListGudang(ctx) }
-func (s *Service) CreateGudang(ctx context.Context, r GudangRequest, createdBy int64) (int64, error)    { return s.repo.CreateGudang(ctx, r, createdBy) }
-func (s *Service) UpdateGudang(ctx context.Context, id int64, r GudangRequest, updatedBy int64) error   { return s.repo.UpdateGudang(ctx, id, r, updatedBy) }
-func (s *Service) DeleteGudang(ctx context.Context, id int64) error                                     { return s.repo.DeleteGudang(ctx, id) }
+func (s *Service) ListGudang(ctx context.Context) ([]Gudang, error) { return s.repo.ListGudang(ctx) }
+func (s *Service) CreateGudang(ctx context.Context, r GudangRequest, createdBy int64) (int64, error) {
+	return s.repo.CreateGudang(ctx, r, createdBy)
+}
+func (s *Service) UpdateGudang(ctx context.Context, id int64, r GudangRequest, updatedBy int64) error {
+	return s.repo.UpdateGudang(ctx, id, r, updatedBy)
+}
+func (s *Service) DeleteGudang(ctx context.Context, id int64) error {
+	return s.repo.DeleteGudang(ctx, id)
+}
 
 // ──────── DropPoint ────────
-func (s *Service) ListDropPoint(ctx context.Context) ([]DropPoint, error)                                        { return s.repo.ListDropPoint(ctx) }
-func (s *Service) CreateDropPoint(ctx context.Context, r DropPointRequest, createdBy int64) (int64, error)       { return s.repo.CreateDropPoint(ctx, r, createdBy) }
-func (s *Service) UpdateDropPoint(ctx context.Context, id int64, r DropPointRequest, updatedBy int64) error      { return s.repo.UpdateDropPoint(ctx, id, r, updatedBy) }
-func (s *Service) DeleteDropPoint(ctx context.Context, id int64) error                                           { return s.repo.DeleteDropPoint(ctx, id) }
+func (s *Service) ListDropPoint(ctx context.Context) ([]DropPoint, error) {
+	return s.repo.ListDropPoint(ctx)
+}
+func (s *Service) CreateDropPoint(ctx context.Context, r DropPointRequest, createdBy int64) (int64, error) {
+	return s.repo.CreateDropPoint(ctx, r, createdBy)
+}
+func (s *Service) UpdateDropPoint(ctx context.Context, id int64, r DropPointRequest, updatedBy int64) error {
+	return s.repo.UpdateDropPoint(ctx, id, r, updatedBy)
+}
+func (s *Service) DeleteDropPoint(ctx context.Context, id int64) error {
+	return s.repo.DeleteDropPoint(ctx, id)
+}
 
 // ──────── User ────────
 func (s *Service) ListUser(ctx context.Context) ([]User, error) { return s.repo.ListUser(ctx) }
@@ -187,11 +227,12 @@ func (s *Service) CreateKapten(ctx context.Context, r KaptenRequest, createdBy i
 	if err != nil {
 		return nil, err
 	}
-	// Implant wajib: kapten baru harus memegang minimal 1 implant.
-	if len(r.ImplantIDs) == 0 {
-		return nil, fmt.Errorf("kapten wajib memegang minimal 1 implant")
+	// Kapten aktif wajib memegang minimal 1 implant. Kapten nonaktif tidak
+	// menyimpan mapping agar implant bisa dipakai kapten lain.
+	if status == "aktif" && len(r.ImplantIDs) == 0 {
+		return nil, fmt.Errorf("kapten aktif wajib memegang minimal 1 implant")
 	}
-	idKapten, idUser, err := s.repo.CreateKaptenTx(ctx, username, string(hash), strings.TrimSpace(r.Nama), r.NoHP, status, r.SellerIDs, r.ImplantIDs, r.ImplantPeran, createdBy)
+	idKapten, idUser, err := s.repo.CreateKaptenTx(ctx, username, string(hash), strings.TrimSpace(r.Nama), r.NoHP, status, r.SellerIDs, r.ImplantIDs, r.ImplantPeran, r.ImplantTitik, createdBy)
 	if err != nil {
 		return nil, err
 	}
@@ -219,10 +260,10 @@ func (s *Service) UpdateKapten(ctx context.Context, id int64, r KaptenRequest, u
 	if status != "aktif" && status != "nonaktif" {
 		return fmt.Errorf("status harus 'aktif' atau 'nonaktif'")
 	}
-	if r.ImplantIDs != nil && len(r.ImplantIDs) == 0 {
-		return fmt.Errorf("kapten wajib memegang minimal 1 implant")
+	if status == "aktif" && r.ImplantIDs != nil && len(r.ImplantIDs) == 0 {
+		return fmt.Errorf("kapten aktif wajib memegang minimal 1 implant")
 	}
-	return s.repo.UpdateKaptenTx(ctx, id, strings.TrimSpace(r.Nama), r.NoHP, status, r.SellerIDs, r.ImplantIDs, r.SellerIDs != nil, r.ImplantIDs != nil, r.ImplantPeran, updatedBy)
+	return s.repo.UpdateKaptenTx(ctx, id, strings.TrimSpace(r.Nama), r.NoHP, status, r.SellerIDs, r.ImplantIDs, r.SellerIDs != nil, r.ImplantIDs != nil, r.ImplantPeran, r.ImplantTitik, updatedBy)
 }
 
 func (s *Service) DeleteKapten(ctx context.Context, id int64, updatedBy int64) error {

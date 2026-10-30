@@ -2,18 +2,18 @@ package admin
 
 // Driver — admin CRUD.
 type Driver struct {
-	ID             int64   `json:"id_driver"`
-	NamaDriver     string  `json:"nama_driver"`
-	NoHP           *string `json:"no_hp,omitempty"`
-	NoSIM          *string `json:"no_sim,omitempty"`
-	JenisSIM       *string `json:"jenis_sim,omitempty"`
-	StatusDriver   string  `json:"status_driver"`
-	CreatedAt      *string `json:"created_at,omitempty"`
-	CreatedBy      *int64  `json:"created_by,omitempty"`
-	CreatedByName  string  `json:"created_by_name,omitempty"`
-	UpdatedAt      *string `json:"updated_at,omitempty"`
-	UpdatedBy      *int64  `json:"updated_by,omitempty"`
-	UpdatedByName  string  `json:"updated_by_name,omitempty"`
+	ID            int64   `json:"id_driver"`
+	NamaDriver    string  `json:"nama_driver"`
+	NoHP          *string `json:"no_hp,omitempty"`
+	NoSIM         *string `json:"no_sim,omitempty"`
+	JenisSIM      *string `json:"jenis_sim,omitempty"`
+	StatusDriver  string  `json:"status_driver"`
+	CreatedAt     *string `json:"created_at,omitempty"`
+	CreatedBy     *int64  `json:"created_by,omitempty"`
+	CreatedByName string  `json:"created_by_name,omitempty"`
+	UpdatedAt     *string `json:"updated_at,omitempty"`
+	UpdatedBy     *int64  `json:"updated_by,omitempty"`
+	UpdatedByName string  `json:"updated_by_name,omitempty"`
 }
 
 type DriverRequest struct {
@@ -211,10 +211,12 @@ type KaptenSeller struct {
 }
 
 type KaptenImplant struct {
-	IDImplant   int64  `json:"id_implant"`
-	KodeImplant string `json:"kode_implant,omitempty"`
-	NamaImplant string `json:"nama_implant"`
-	Peran       string `json:"peran,omitempty"`
+	IDImplant        int64  `json:"id_implant"`
+	KodeImplant      string `json:"kode_implant,omitempty"`
+	NamaImplant      string `json:"nama_implant"`
+	Peran            string `json:"peran,omitempty"`
+	IDTitikImplant   int64  `json:"id_titik_implant"`
+	NamaTitikImplant string `json:"nama_titik_implant,omitempty"`
 }
 
 type KaptenRequest struct {
@@ -228,13 +230,16 @@ type KaptenRequest struct {
 	// Peran per implant (kunci = id_implant, nilai utama|cadangan).
 	// Kosong = 'utama'. Aturan longgar: tidak ada constraint jumlah utama.
 	ImplantPeran map[int64]string `json:"implant_peran,omitempty"`
+	// Titik penjemputan per implant (kunci = id_implant sumber, nilai = host).
+	// Kosong = implant menjadi titik sendiri.
+	ImplantTitik map[int64]int64 `json:"implant_titik,omitempty"`
 }
 
 type KaptenCreated struct {
-	IDKapten      int64  `json:"id_kapten"`
-	IDUser        int64  `json:"id_user"`
-	Username      string `json:"username"`
-	PasswordAwal  string `json:"password_awal"`
-	SellerCount   int    `json:"seller_count"`
-	ImplantCount  int    `json:"implant_count"`
+	IDKapten     int64  `json:"id_kapten"`
+	IDUser       int64  `json:"id_user"`
+	Username     string `json:"username"`
+	PasswordAwal string `json:"password_awal"`
+	SellerCount  int    `json:"seller_count"`
+	ImplantCount int    `json:"implant_count"`
 }

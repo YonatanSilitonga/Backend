@@ -75,6 +75,16 @@ func (s *Service) GetTrackingMap(ctx context.Context) (*MapTracking, error) {
 	if err != nil {
 		return nil, err
 	}
+	implantsWithCoordinate := make([]ImplantLocation, 0, len(implants))
+	for _, implant := range implants {
+		if implant.HasCoordinate {
+			implantsWithCoordinate = append(implantsWithCoordinate, implant)
+		}
+	}
+	implantPoints, err := s.repo.ListImplantPoints(ctx, implants)
+	if err != nil {
+		return nil, err
+	}
 	gudang, err := s.repo.ListGudangLocations(ctx)
 	if err != nil {
 		return nil, err
@@ -90,7 +100,8 @@ func (s *Service) GetTrackingMap(ctx context.Context) (*MapTracking, error) {
 	return &MapTracking{
 		Vehicles:      vehicles,
 		Sellers:       sellers,
-		Implants:      implants,
+		Implants:      implantsWithCoordinate,
+		ImplantPoints: implantPoints,
 		Gudang:        gudang,
 		DropPoints:    drops,
 		DriverPickups: driverPickups,
@@ -103,6 +114,11 @@ func (s *Service) GetTrackingHistory(ctx context.Context, idKendaraan, idDriver 
 
 func (s *Service) GetGpsHistory(ctx context.Context, idRitase int64) ([]GpsPoint, error) {
 	return s.repo.ListGpsHistory(ctx, idRitase)
+}
+
+// GetMuatanDetail delegasi ke repository (rincian muatan satu titik ritase).
+func (s *Service) GetMuatanDetail(ctx context.Context, idRitase int64, namaLokasi string) (*MuatanDetail, error) {
+	return s.repo.GetMuatanDetail(ctx, idRitase, namaLokasi)
 }
 
 func (s *Service) SaveImplanBarang(ctx context.Context, req ImplanBarangInput, createdBy string) error {

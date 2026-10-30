@@ -15,6 +15,7 @@ import (
 	"backend/internal/database"
 	"backend/internal/driver"
 	"backend/internal/eventbus"
+	"backend/internal/gudang"
 	"backend/internal/kapten"
 	"backend/internal/kendaraan"
 	"backend/internal/mobile_api"
@@ -42,6 +43,8 @@ func main() {
 	_, _ = db.Exec(ctx, `
 		ALTER TABLE ritase_event ADD COLUMN IF NOT EXISTS nama_lokasi VARCHAR(255);
 		ALTER TABLE armada_tracking ADD COLUMN IF NOT EXISTS nama_lokasi VARCHAR(255);
+		ALTER TABLE input_kapten ADD COLUMN IF NOT EXISTS id_gudang BIGINT REFERENCES gudang(id_gudang);
+		ALTER TABLE konfirmasi_penjemputan ADD COLUMN IF NOT EXISTS id_gudang BIGINT REFERENCES gudang(id_gudang);
 	`)
 
 	// Auto-recalculate armada_tracking muatan dari ritase_event (sync data)
@@ -184,6 +187,10 @@ func main() {
 
 	// Kapten endpoints (seller implant) — butuh JWT + role kapten
 	kaptenH.RegisterRoutes(v1, authMW)
+
+	// Muatan gudang (koor gudang) — butuh JWT + role koor_gudang/admin
+	gudangH := gudang.NewHandler(db, eventBus)
+	gudangH.RegisterRoutes(v1, authMW, appMiddleware.RequireRoles("koor_gudang", "admin"))
 
 	// GPS tracker hardware — sumber posisi cadangan saat HP mati.
 	// Tanpa JWT (device tidak login), dilindungi header X-Tracker-Key.

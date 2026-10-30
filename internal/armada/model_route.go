@@ -47,6 +47,16 @@ type GudangPoint struct {
 	Tipe       string  `json:"tipe"` // outgoing | incoming
 	Latitude   float64 `json:"latitude"`
 	Longitude  float64 `json:"longitude"`
+	// Muatan hari ini dari input koor gudang (mirror seller/implant).
+	JumlahBarang  *int    `json:"jumlah_barang,omitempty"`
+	Koli          *int    `json:"koli,omitempty"`
+	Ecer          *int    `json:"ecer,omitempty"`
+	HighValue     *int    `json:"high_value,omitempty"`
+	StatusPickup  *string `json:"status_pickup,omitempty"`
+	CatatanPickup *string `json:"catatan_pickup,omitempty"`
+	// Sisa muatan hari ini (input − sudah diambil). Bubble peta hanya tampil bila > 0.
+	SisaBarang *int `json:"sisa_barang,omitempty"`
+	SisaKoli   *int `json:"sisa_koli,omitempty"`
 }
 
 // DropPointPoi posisi drop_point (Gateway JKT/SEG) untuk peta.
@@ -94,28 +104,31 @@ type SellerLocation struct {
 
 // ImplantLocation lokasi implant untuk peta (PIC = nama kapten penanggung jawab).
 type ImplantLocation struct {
-	IDImplant   int64   `json:"id_implant"`
-	KodeImplant string  `json:"kode_implant,omitempty"`
-	NamaImplant string  `json:"nama_implant"`
-	Alamat      string  `json:"alamat"`
-	Kota        string  `json:"kota"`
-	Kapten      string  `json:"kapten,omitempty"`
-	NoHP        string  `json:"no_hp,omitempty"`
-	Latitude    float64 `json:"latitude"`
-	Longitude   float64 `json:"longitude"`
-	JarakTempuhKm *float64 `json:"jarak_tempuh_km,omitempty"`
-	JarakDcKm     *float64 `json:"jarak_dc_km,omitempty"`
-	TotalKoli      *int `json:"total_koli,omitempty"`
-	TotalEcer      *int `json:"total_ecer,omitempty"`
-	TotalHighValue *int `json:"total_high_value,omitempty"`
-	JumlahBarang  *int    `json:"jumlah_barang,omitempty"`
-	Koli          *int    `json:"koli,omitempty"`
-	Ecer          *int    `json:"ecer,omitempty"`
-	HighValue     *int    `json:"high_value,omitempty"`
-	StatusPickup  *string `json:"status_pickup,omitempty"`
-	CatatanPickup *string `json:"catatan_pickup,omitempty"`
+	IDImplant      int64    `json:"id_implant"`
+	KodeImplant    string   `json:"kode_implant,omitempty"`
+	NamaImplant    string   `json:"nama_implant"`
+	Alamat         string   `json:"alamat"`
+	Kota           string   `json:"kota"`
+	Kapten         string   `json:"kapten,omitempty"`
+	NoHP           string   `json:"no_hp,omitempty"`
+	Latitude       float64  `json:"latitude"`
+	Longitude      float64  `json:"longitude"`
+	HasCoordinate  bool     `json:"-"`
+	JarakTempuhKm  *float64 `json:"jarak_tempuh_km,omitempty"`
+	JarakDcKm      *float64 `json:"jarak_dc_km,omitempty"`
+	TotalKoli      *int     `json:"total_koli,omitempty"`
+	TotalEcer      *int     `json:"total_ecer,omitempty"`
+	TotalHighValue *int     `json:"total_high_value,omitempty"`
+	JumlahBarang   *int     `json:"jumlah_barang,omitempty"`
+	Koli           *int     `json:"koli,omitempty"`
+	Ecer           *int     `json:"ecer,omitempty"`
+	HighValue      *int     `json:"high_value,omitempty"`
+	StatusPickup   *string  `json:"status_pickup,omitempty"`
+	CatatanPickup  *string  `json:"catatan_pickup,omitempty"`
 	// Sisa muatan hari ini (input kapten − sudah diambil/konfirmasi). Dipakai
 	// peta untuk bubble angka: hanya tampil bila > 0.
 	SisaBarang *int `json:"sisa_barang,omitempty"`
 	SisaKoli   *int `json:"sisa_koli,omitempty"`
+	// Anggota berisi nama implant yang digabung ke titik ini (khusus marker titik).
+	Anggota []string `json:"anggota,omitempty"`
 }

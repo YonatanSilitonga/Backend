@@ -224,6 +224,21 @@ func (h *Handler) GetTrackingHistory(c echo.Context) error {
 	return response.OK(c, data)
 }
 
+// GetMuatanDetail menangani GET /armada/tracking/muatan-detail?id_ritase=&nama_lokasi=
+// — rincian muatan satu titik (input, terkonfirmasi, sisa + daftar konfirmasi).
+func (h *Handler) GetMuatanDetail(c echo.Context) error {
+	idRitase, _ := strconv.ParseInt(c.QueryParam("id_ritase"), 10, 64)
+	namaLokasi := c.QueryParam("nama_lokasi")
+	if idRitase <= 0 || namaLokasi == "" {
+		return response.Error(c, http.StatusBadRequest, "id_ritase dan nama_lokasi wajib diisi")
+	}
+	data, err := h.svc.GetMuatanDetail(c.Request().Context(), idRitase, namaLokasi)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil rincian muatan")
+	}
+	return response.OK(c, data)
+}
+
 // GetGpsHistory menangani GET /armada/ritase/:id/gps-history — titik GPS history per ritase.
 func (h *Handler) GetGpsHistory(c echo.Context) error {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -393,6 +408,7 @@ func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	g.POST("/armada/tracking", h.CreateTracking, authMW)
 	g.GET("/armada/tracking/map", h.GetTrackingMap, authMW)
 	g.GET("/armada/tracking/history", h.GetTrackingHistory, authMW)
+	g.GET("/armada/tracking/muatan-detail", h.GetMuatanDetail, authMW)
 
 	g.POST("/armada/implan/barang", h.SaveImplanBarang, authMW)
 	g.GET("/armada/implan/:id/history", h.GetImplanBarangHistory, authMW)

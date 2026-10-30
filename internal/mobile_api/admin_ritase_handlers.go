@@ -257,10 +257,19 @@ func (h *APIHandler) muatRouteTemplateDB(ctx context.Context) ([]FixedRoute, err
 
 		// Load stops untuk route ini
 		stopRows, err := h.DB.Query(ctx, `
-			SELECT urutan, jenis_stop, id_lokasi, kolom_lokasi, COALESCE(keterangan, '')
-			FROM ritase_stop_template
-			WHERE id_route_template = $1
-			ORDER BY urutan
+			SELECT ts.urutan, ts.jenis_stop,
+			       CASE WHEN ts.jenis_stop = 'implant'
+			            THEN COALESCE(kim.id_titik_implant, ts.id_lokasi)
+			            ELSE ts.id_lokasi END,
+			       ts.kolom_lokasi, COALESCE(ts.keterangan, '')
+			FROM ritase_stop_template ts
+			LEFT JOIN LATERAL (
+				SELECT id_titik_implant FROM kapten_implant_map
+				WHERE id_implant = ts.id_lokasi
+				ORDER BY id_user LIMIT 1
+			) kim ON ts.jenis_stop = 'implant'
+			WHERE ts.id_route_template = $1
+			ORDER BY ts.urutan
 		`, r.ID)
 		if err != nil {
 			return defaultFixedRoutes, err
@@ -1310,7 +1319,27 @@ func validasiStopID(ctx context.Context, tx pgx.Tx, jenis string, idLokasi int64
 	case "seller":
 		table, column = "seller", "id_seller"
 	case "implant":
-		table, column = "implant", "id_implant"
+		// Rute hanya boleh berhenti di titik penjemputan (host/self), bukan
+		// implant sumber yang sudah digabung ke titik lain.
+		query := `
+			SELECT EXISTS(
+				SELECT 1 FROM implant i
+				WHERE i.id_implant = $1 AND i.status = 'aktif'
+				  AND i.latitude IS NOT NULL AND i.longitude IS NOT NULL
+				  AND (
+					EXISTS (SELECT 1 FROM kapten_implant_map kim
+					        WHERE COALESCE(kim.id_titik_implant, kim.id_implant) = i.id_implant)
+					OR NOT EXISTS (SELECT 1 FROM kapten_implant_map kim
+					               WHERE kim.id_implant = i.id_implant)
+				  )
+			)`
+		if err := tx.QueryRow(ctx, query, idLokasi).Scan(&exists); err != nil {
+			return fmt.Errorf("gagal validasi implant ID %d: %v", idLokasi, err)
+		}
+		if !exists {
+			return fmt.Errorf("implant ID %d bukan titik penjemputan aktif / belum punya koordinat", idLokasi)
+		}
+		return nil
 	case "gateway", "drop_point":
 		table, column = "drop_point", "id_drop_point"
 	default:
@@ -1401,6 +1430,35 @@ func (h *APIHandler) AdminGetMasterOptions(c echo.Context) error {
 		iRows.Close()
 	}
 
+	// 4c. Titik penjemputan implant (host/self saja)
+	implantPoints := make([]map[string]interface{}, 0)
+	ipRows, _ := h.DB.Query(ctx, `
+		SELECT i.id_implant, i.nama_implant, COALESCE(i.kode_implant, ''),
+		       (i.latitude IS NOT NULL AND i.longitude IS NOT NULL) AS has_coordinate
+		FROM implant i
+		WHERE i.status = 'aktif'
+		  AND (
+			EXISTS (SELECT 1 FROM kapten_implant_map kim
+			        WHERE COALESCE(kim.id_titik_implant, kim.id_implant) = i.id_implant)
+			OR NOT EXISTS (SELECT 1 FROM kapten_implant_map kim
+			               WHERE kim.id_implant = i.id_implant)
+		  )
+		ORDER BY i.nama_implant ASC`)
+	if ipRows != nil {
+		for ipRows.Next() {
+			var id int64
+			var nama, kode string
+			var hasCoordinate bool
+			if err := ipRows.Scan(&id, &nama, &kode, &hasCoordinate); err == nil {
+				implantPoints = append(implantPoints, map[string]interface{}{
+					"id_implant": id, "nama_implant": nama, "kode_implant": kode,
+					"has_coordinate": hasCoordinate,
+				})
+			}
+		}
+		ipRows.Close()
+	}
+
 	// 5. Gudang
 	gudangs := make([]map[string]interface{}, 0)
 	gRows, err := h.DB.Query(ctx, "SELECT id_gudang, nama_gudang FROM gudang ORDER BY id_gudang ASC")
@@ -1448,14 +1506,15 @@ func (h *APIHandler) AdminGetMasterOptions(c echo.Context) error {
 	}
 
 	return response.OK(c, map[string]interface{}{
-		"drivers":      drivers,
-		"kendaraan":    kendaraans,
-		"drop_points":  dropPoints,
-		"sellers":      sellers,
-		"implants":     implants,
-		"gudangs":      gudangs,
-		"driver_jenis": driverJenis,
-		"jam_ritase":   jamRitase,
+		"drivers":        drivers,
+		"kendaraan":      kendaraans,
+		"drop_points":    dropPoints,
+		"sellers":        sellers,
+		"implants":       implants,
+		"implant_points": implantPoints,
+		"gudangs":        gudangs,
+		"driver_jenis":   driverJenis,
+		"jam_ritase":     jamRitase,
 	})
 }
 
@@ -1479,7 +1538,7 @@ func getValidDropPointID(ctx context.Context, db interface {
 }
 
 // AdminGetManifestPhotos mengambil seluruh daftar foto bukti manifest yang diunggah driver
-// GET /api/v1/admin/manifest-photos?tanggal=YYYY-MM-DD&driver_id=&search=
+// GET /api/v1/admin/manifest-photos?tanggal=YYYY-MM-DD&driver_id=&search=&jenis_ritase=&ritase_ke=&input_by=
 func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
 	defer cancel()
@@ -1489,6 +1548,7 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 	searchParam := strings.TrimSpace(c.QueryParam("search"))
 	jenisRitaseParam := strings.TrimSpace(c.QueryParam("jenis_ritase"))
 	ritaseKeParam, _ := strconv.Atoi(c.QueryParam("ritase_ke"))
+	inputByParam := strings.TrimSpace(c.QueryParam("input_by"))
 
 	// Subquery 1: data dari ritase_event (driver upload foto)
 	// Subquery 2: data dari input_kapten (kapten input muatan)
@@ -1498,6 +1558,8 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 			(
 				SELECT
 					ev.id_event,
+					0 AS id_seller,
+					0 AS id_implant,
 					COALESCE(ev.id_ritase, 0) AS id_ritase,
 					COALESCE(r.kode_ritase, 'R-' || COALESCE(ev.id_ritase, 0)) AS kode_ritase,
 					COALESCE(r.tanggal, (ev.created_at + interval '7 hours')::date) AS tanggal,
@@ -1553,6 +1615,8 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 			(
 				SELECT
 					ik.id AS id_event,
+					COALESCE(ik.id_seller, 0) AS id_seller,
+					COALESCE(ik.id_implant, 0) AS id_implant,
 					COALESCE(ik.id_ritase, 0) AS id_ritase,
 					COALESCE(r.kode_ritase, 'IK-' || ik.id) AS kode_ritase,
 					COALESCE(r.tanggal, (ik.created_at + interval '7 hours')::date) AS tanggal,
@@ -1629,6 +1693,12 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 		argIdx++
 	}
 
+	if inputByParam != "" {
+		query += fmt.Sprintf(" AND sub.input_by = $%d", argIdx)
+		args = append(args, inputByParam)
+		argIdx++
+	}
+
 	if ritaseKeParam > 0 {
 		query += fmt.Sprintf(" AND sub.ritase_ke = $%d", argIdx)
 		args = append(args, ritaseKeParam)
@@ -1646,7 +1716,7 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 
 	photos := make([]map[string]interface{}, 0)
 	for rows.Next() {
-		var idEvent, idRitase, idDriver, idKendaraan int64
+		var idEvent, idSeller, idImplant, idRitase, idDriver, idKendaraan int64
 		var kodeRitase, tanggal, namaDriver, jabatanDriver, nopol, jenisKendaraan, namaLokasi, status, fotoURL string
 		var ritaseKe int
 		var jenisRitase string
@@ -1662,7 +1732,7 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 		var updatedAt *time.Time
 
 		if err := rows.Scan(
-			&idEvent, &idRitase, &kodeRitase, &tanggal, &ritaseKe, &jenisRitase,
+			&idEvent, &idSeller, &idImplant, &idRitase, &kodeRitase, &tanggal, &ritaseKe, &jenisRitase,
 			&idDriver, &namaDriver, &jabatanDriver,
 			&idKendaraan, &nopol, &jenisKendaraan,
 			&namaLokasi, &status,
@@ -1695,6 +1765,8 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 		}
 		photos = append(photos, map[string]interface{}{
 			"id_event":        idEvent,
+			"id_seller":       idSeller,
+			"id_implant":      idImplant,
 			"id_ritase":       idRitase,
 			"kode_ritase":     kodeRitase,
 			"tanggal":         tanggal,
@@ -1714,7 +1786,7 @@ func (h *APIHandler) AdminGetManifestPhotos(c echo.Context) error {
 			"koli_hv_jkt": koliHvJkt, "koli_hv_seg": koliHvSeg, "koli_hv_btn": koliHvBtn,
 			"ecer_hv_jkt": ecerHvJkt, "ecer_hv_seg": ecerHvSeg, "ecer_hv_btn": ecerHvBtn,
 			"awb_hv_jkt": awbHvJkt, "awb_hv_seg": awbHvSeg, "awb_hv_btn": awbHvBtn,
-			"awb_hv":          awbHvJkt + awbHvSeg + awbHvBtn,
+			"awb_hv":            awbHvJkt + awbHvSeg + awbHvBtn,
 			"total_koli":        totalKoli,
 			"total_ecer":        totalEcer,
 			"total_hv":          totalHV,
@@ -1750,7 +1822,7 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 	// ── RINGKASAN per (seller, jenis, rit) ──
 	ringkasanQuery := `
 		WITH inp AS (
-			SELECT t.id_seller, t.jenis_ritase, t.ritase_ke,
+			SELECT t.id_implant, t.id_seller, t.jenis_ritase, t.ritase_ke,
 			       COALESCE(SUM(t.jumlah_awb), 0) AS awb,
 			       COALESCE(SUM(t.koli_jkt + t.koli_seg + t.koli_btn), 0) AS koli,
 			       COALESCE(SUM(t.ecer_jkt + t.ecer_seg + t.ecer_btn), 0) AS ecer,
@@ -1765,10 +1837,10 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 		ringkasanArgs = append(ringkasanArgs, tanggalParam)
 		argIdx++
 	}
-	ringkasanQuery += ` GROUP BY t.id_seller, t.jenis_ritase, t.ritase_ke
+	ringkasanQuery += ` GROUP BY t.id_implant, t.id_seller, t.jenis_ritase, t.ritase_ke
 		),
 		amb AS (
-			SELECT t.id_seller, t.jenis_ritase, t.ritase_ke,
+			SELECT t.id_implant, t.id_seller, t.jenis_ritase, t.ritase_ke,
 			       COALESCE(SUM(t.jumlah_awb), 0) AS awb,
 			       COALESCE(SUM(t.koli_jkt + t.koli_seg + t.koli_btn), 0) AS koli,
 			       COALESCE(SUM(t.ecer_jkt + t.ecer_seg + t.ecer_btn), 0) AS ecer,
@@ -1781,17 +1853,29 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 		ringkasanArgs = append(ringkasanArgs, tanggalParam)
 		argIdx++
 	}
-	ringkasanQuery += ` GROUP BY t.id_seller, t.jenis_ritase, t.ritase_ke
+	ringkasanQuery += ` GROUP BY t.id_implant, t.id_seller, t.jenis_ritase, t.ritase_ke
 		)
-		SELECT COALESCE(i.id_seller, a.id_seller) AS id_seller,
-		       COALESCE(s.nama_seller, 'Seller') AS nama_lokasi,
+		SELECT COALESCE(i.id_implant, a.id_implant, 0) AS id_implant,
+		       COALESCE(i.id_seller, a.id_seller, 0) AS id_seller,
+		       COALESCE(s.nama_seller, ik.nama_lokasi, 'Seller') AS nama_lokasi,
 		       COALESCE(i.jenis_ritase, a.jenis_ritase, '') AS jenis_ritase,
 		       COALESCE(i.ritase_ke, a.ritase_ke, 0) AS ritase_ke,
 		       COALESCE(i.awb, 0), COALESCE(i.koli, 0), COALESCE(i.ecer, 0), COALESCE(i.hv, 0),
 		       COALESCE(a.awb, 0), COALESCE(a.koli, 0), COALESCE(a.ecer, 0), COALESCE(a.hv, 0)
 		FROM inp i
-		FULL OUTER JOIN amb a USING (id_seller, jenis_ritase, ritase_ke)
+		FULL OUTER JOIN amb a
+		  ON COALESCE(i.id_implant, 0) = COALESCE(a.id_implant, 0)
+		 AND COALESCE(i.id_seller, 0) = COALESCE(a.id_seller, 0)
+		 AND COALESCE(i.jenis_ritase, '') = COALESCE(a.jenis_ritase, '')
+		 AND COALESCE(i.ritase_ke, 0) = COALESCE(a.ritase_ke, 0)
 		LEFT JOIN seller s ON s.id_seller = COALESCE(i.id_seller, a.id_seller)
+		LEFT JOIN LATERAL (
+			SELECT NULLIF(TRIM(nama_lokasi), '') AS nama_lokasi
+			FROM input_kapten
+			WHERE id_implant = COALESCE(i.id_implant, a.id_implant)
+			ORDER BY created_at DESC
+			LIMIT 1
+		) ik ON true
 		WHERE 1=1
 	`
 	if ritaseKeParam > 0 {
@@ -1805,7 +1889,7 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 		argIdx++
 	}
 	if searchParam != "" {
-		ringkasanQuery += fmt.Sprintf(" AND LOWER(COALESCE(s.nama_seller, '')) LIKE $%d", argIdx)
+		ringkasanQuery += fmt.Sprintf(" AND LOWER(COALESCE(s.nama_seller, ik.nama_lokasi, '')) LIKE $%d", argIdx)
 		ringkasanArgs = append(ringkasanArgs, "%"+strings.ToLower(searchParam)+"%")
 		argIdx++
 	}
@@ -1818,17 +1902,17 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "Gagal mengambil ringkasan: "+err.Error())
 	}
 	for rRows.Next() {
-		var idSeller int64
+		var idImplant, idSeller int64
 		var namaLokasi, jenis string
 		var ritKe int
 		var inAwb, inKoli, inEcer, inHV, amAwb, amKoli, amEcer, amHV int
-		if err := rRows.Scan(&idSeller, &namaLokasi, &jenis, &ritKe,
+		if err := rRows.Scan(&idImplant, &idSeller, &namaLokasi, &jenis, &ritKe,
 			&inAwb, &inKoli, &inEcer, &inHV, &amAwb, &amKoli, &amEcer, &amHV); err != nil {
 			log.Printf("[ManifestPenjemputan] scan ringkasan error: %v", err)
 			continue
 		}
 		ringkasan = append(ringkasan, map[string]interface{}{
-			"id_seller": idSeller, "nama_lokasi": namaLokasi,
+			"id_implant": idImplant, "id_seller": idSeller, "nama_lokasi": namaLokasi,
 			"jenis_ritase": jenis, "ritase_ke": ritKe,
 			"input_awb": inAwb, "input_koli": inKoli, "input_ecer": inEcer, "input_hv": inHV,
 			"diambil_awb": amAwb, "diambil_koli": amKoli, "diambil_ecer": amEcer, "diambil_hv": amHV,
@@ -1844,7 +1928,8 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 		       COALESCE(r.kode_ritase, ''),
 		       (kp.created_at + interval '7 hours')::date AS tanggal,
 		       kp.ritase_ke, COALESCE(kp.jenis_ritase, ''),
-		       kp.id_seller, COALESCE(s.nama_seller, 'Seller'),
+		       COALESCE(kp.id_implant, 0),
+		       COALESCE(kp.id_seller, 0), COALESCE(s.nama_seller, ik.nama_lokasi, 'Seller'),
 		       COALESCE(d.nama_driver, ''),
 		       COALESCE(kp.jumlah_awb, 0),
 		       COALESCE(kp.koli_jkt + kp.koli_seg + kp.koli_btn, 0),
@@ -1862,6 +1947,13 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 		LEFT JOIN ritase r ON r.id_ritase = kp.id_ritase
 		LEFT JOIN driver d ON d.id_driver = r.id_driver
 		LEFT JOIN seller s ON s.id_seller = kp.id_seller
+		LEFT JOIN LATERAL (
+			SELECT NULLIF(TRIM(nama_lokasi), '') AS nama_lokasi
+			FROM input_kapten
+			WHERE id_implant = kp.id_implant
+			ORDER BY created_at DESC
+			LIMIT 1
+		) ik ON true
 		WHERE 1=1
 	`
 	riwayatArgs := []interface{}{}
@@ -1883,7 +1975,7 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 	}
 	if searchParam != "" {
 		like := "%" + strings.ToLower(searchParam) + "%"
-		riwayatQuery += fmt.Sprintf(" AND (LOWER(COALESCE(s.nama_seller, '')) LIKE $%d OR LOWER(COALESCE(d.nama_driver, '')) LIKE $%d OR LOWER(COALESCE(r.kode_ritase, '')) LIKE $%d)", argIdx, argIdx, argIdx)
+		riwayatQuery += fmt.Sprintf(" AND (LOWER(COALESCE(s.nama_seller, ik.nama_lokasi, '')) LIKE $%d OR LOWER(COALESCE(d.nama_driver, '')) LIKE $%d OR LOWER(COALESCE(r.kode_ritase, '')) LIKE $%d)", argIdx, argIdx, argIdx)
 		riwayatArgs = append(riwayatArgs, like)
 		argIdx++
 	}
@@ -1896,14 +1988,14 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "Gagal mengambil riwayat: "+err.Error())
 	}
 	for wRows.Next() {
-		var id, idRitase, idSeller int64
+		var id, idRitase, idImplant, idSeller int64
 		var kode, tanggal, jenis, namaLokasi, namaDriver, foto, catatan string
 		var ritKe int
 		var awb, koli, ecer, hv int
 		var kj, ks, kb, ej, es, eb, khj, khs, khb, ehj, ehs, ehb, ahj, ahs, ahb int
 		var createdAt time.Time
 		if err := wRows.Scan(&id, &idRitase, &kode, &tanggal, &ritKe, &jenis,
-			&idSeller, &namaLokasi, &namaDriver, &awb, &koli, &ecer, &hv,
+			&idImplant, &idSeller, &namaLokasi, &namaDriver, &awb, &koli, &ecer, &hv,
 			&kj, &ks, &kb, &ej, &es, &eb, &khj, &khs, &khb, &ehj, &ehs, &ehb, &ahj, &ahs, &ahb,
 			&foto, &catatan, &createdAt); err != nil {
 			log.Printf("[ManifestPenjemputan] scan riwayat error: %v", err)
@@ -1912,14 +2004,15 @@ func (h *APIHandler) AdminGetKonfirmasiPenjemputan(c echo.Context) error {
 		riwayat = append(riwayat, map[string]interface{}{
 			"id": id, "id_ritase": idRitase, "kode_ritase": kode,
 			"tanggal": tanggal, "ritase_ke": ritKe, "jenis_ritase": jenis,
-			"id_seller": idSeller, "nama_lokasi": namaLokasi, "nama_driver": namaDriver,
+			"id_implant": idImplant,
+			"id_seller":  idSeller, "nama_lokasi": namaLokasi, "nama_driver": namaDriver,
 			"jumlah_awb": awb, "total_koli": koli, "total_ecer": ecer, "total_hv": hv,
 			"koli_jkt": kj, "koli_seg": ks, "koli_btn": kb,
 			"ecer_jkt": ej, "ecer_seg": es, "ecer_btn": eb,
 			"koli_hv_jkt": khj, "koli_hv_seg": khs, "koli_hv_btn": khb,
 			"ecer_hv_jkt": ehj, "ecer_hv_seg": ehs, "ecer_hv_btn": ehb,
 			"awb_hv_jkt": ahj, "awb_hv_seg": ahs, "awb_hv_btn": ahb,
-			"awb_hv": ahj + ahs + ahb,
+			"awb_hv":               ahj + ahs + ahb,
 			"foto_penjemputan_url": foto, "catatan": catatan,
 			"created_at": createdAt.Format(time.RFC3339),
 		})

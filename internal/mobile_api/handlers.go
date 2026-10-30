@@ -45,13 +45,38 @@ type AppVersionResponse struct {
 	ReleaseNotes string `json:"release_notes"`
 }
 
+// GetAppVersion mengembalikan info versi terbaru. Nilai default = production
+// saat ini; override via env agar backend lokal bisa menonaktifkan
+// force-update saat testing (APP_FORCE_UPDATE=false) tanpa ubah kode:
+// APP_VERSION_CODE, APP_VERSION_NAME, APP_DOWNLOAD_URL,
+// APP_FORCE_UPDATE ("true"/"false"), APP_RELEASE_NOTES.
 func (h *APIHandler) GetAppVersion(c echo.Context) error {
+	versionCode := 16
+	if v, err := strconv.Atoi(os.Getenv("APP_VERSION_CODE")); err == nil && v > 0 {
+		versionCode = v
+	}
+	versionName := os.Getenv("APP_VERSION_NAME")
+	if versionName == "" {
+		versionName = "1.2.5"
+	}
+	downloadURL := os.Getenv("APP_DOWNLOAD_URL")
+	if downloadURL == "" {
+		downloadURL = "https://api.controltowerslb.tech/uploads/apk/tower-control-latest.apk"
+	}
+	forceUpdate := true
+	if v := os.Getenv("APP_FORCE_UPDATE"); v != "" {
+		forceUpdate = v == "true" || v == "1"
+	}
+	releaseNotes := os.Getenv("APP_RELEASE_NOTES")
+	if releaseNotes == "" {
+		releaseNotes = "Update Darurat v1.2.5: Peningkatan presisi GPS tracking pergerakan (10 meter) untuk akurasi posisi armada."
+	}
 	return c.JSON(http.StatusOK, AppVersionResponse{
-		VersionCode:  16,
-		VersionName:  "1.2.5",
-		DownloadURL:  "https://api.controltowerslb.tech/uploads/apk/tower-control-latest.apk",
-		ForceUpdate:  true,
-		ReleaseNotes: "Update Darurat v1.2.5: Peningkatan presisi GPS tracking pergerakan (10 meter) untuk akurasi posisi armada.",
+		VersionCode:  versionCode,
+		VersionName:  versionName,
+		DownloadURL:  downloadURL,
+		ForceUpdate:  forceUpdate,
+		ReleaseNotes: releaseNotes,
 	})
 }
 
@@ -751,63 +776,9 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		}
 	}
 
-	var countUnfinished int
-	_ = h.DB.QueryRow(ctx, `
-		SELECT COUNT(*) FROM ritase
-		WHERE id_driver = $1 AND status != 'selesai' 
-		  AND (
-		    status = 'berjalan'
-		    OR tanggal = $2 
-		    OR tanggal IS NULL
-		    OR (tanggal = ($2::date - INTERVAL '1 day')::date AND jam_selesai < jam_mulai)
-		  )
-	`, idDriver, hariIni).Scan(&countUnfinished)
-
-	isLastRitase := countUnfinished <= 1
-	if isLastRitase && len(stops) > 0 {
-		lastStop := stops[len(stops)-1]
-		lastJenis, _ := lastStop["jenis_stop"].(string)
-		if strings.ToLower(lastJenis) != "gudang" {
-			var dbGudangId int64 = 1
-			dbNamaGudang := "Gudang Outgoing"
-			dbAlamat := "Gudang Outgoing Utama"
-			gudangLat := -6.171496
-			gudangLon := 106.657155
-
-			var dbLat, dbLon *float64
-			errG := h.DB.QueryRow(ctx, `
-				SELECT id_gudang, nama_gudang, COALESCE(alamat, 'Gudang Outgoing Utama'), latitude, longitude
-				FROM gudang
-				WHERE LOWER(tipe) = 'outgoing' OR LOWER(nama_gudang) LIKE '%outgoing%'
-				ORDER BY id_gudang ASC
-				LIMIT 1
-			`).Scan(&dbGudangId, &dbNamaGudang, &dbAlamat, &dbLat, &dbLon)
-			if errG == nil {
-				if dbLat != nil && dbLon != nil {
-					gudangLat = *dbLat
-					gudangLon = *dbLon
-				}
-			}
-
-			nextUrutan := len(stops) + 1
-			stops = append(stops, map[string]interface{}{
-				"id_stop":           int64(999000 + nextUrutan),
-				"urutan":            nextUrutan,
-				"jenis_stop":        "gudang",
-				"id_seller":         nil,
-				"id_drop_point":     nil,
-				"id_gudang":         dbGudangId,
-				"keterangan":        "Pengembalian Armada ke Gudang Outgoing",
-				"nama_lokasi":       dbNamaGudang,
-				"alamat":            dbAlamat,
-				"no_hp":             "-",
-				"latitude":          gudangLat,
-				"longitude":         gudangLon,
-				"is_return_to_base": true,
-			})
-		}
-	}
-
+	// Catatan: kaki pulang otomatis ke Outgoing sengaja TIDAK ditempel di sini.
+	// Pengembalian armada diatur murni lewat jadwal ritase (tambah stop gudang
+	// bila perlu), agar mobil bisa lanjut ke implant/ritase berikutnya.
 	var stageStartedAt *time.Time
 	_ = h.DB.QueryRow(ctx, `
 		SELECT MAX(created_at) FROM ritase_event WHERE id_ritase = $1
@@ -832,7 +803,6 @@ func (h *APIHandler) GetActiveRitase(c echo.Context) error {
 		"id_kendaraan":       assignedKendaraanID,
 		"kode_ritase":        kodeRitase,
 		"status":             statusRitase,
-		"is_last_ritase":     countUnfinished <= 1,
 		"stops":              stops,
 		"stage_started_at":   stageStartedAt,
 		"current_stop_index": currentStopIndex,

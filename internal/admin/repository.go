@@ -494,11 +494,15 @@ func implantsOfUsers(ctx context.Context, q interface {
 		return out, nil
 	}
 	rows, err := q.Query(ctx, `
-		SELECT kim.id_user, i.id_implant, COALESCE(i.kode_implant, ''), i.nama_implant, COALESCE(kim.peran, 'utama')
+		SELECT kim.id_user, i.id_implant, COALESCE(i.kode_implant, ''), i.nama_implant,
+		       COALESCE(kim.peran, 'utama'),
+		       COALESCE(kim.id_titik_implant, i.id_implant),
+		       COALESCE(ht.nama_implant, i.nama_implant)
 		FROM kapten_implant_map kim
 		JOIN implant i ON i.id_implant = kim.id_implant
+		LEFT JOIN implant ht ON ht.id_implant = COALESCE(kim.id_titik_implant, i.id_implant)
 		WHERE kim.id_user = ANY($1)
-		ORDER BY i.nama_implant`, userIDs)
+		ORDER BY COALESCE(ht.nama_implant, i.nama_implant), i.nama_implant`, userIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -506,7 +510,8 @@ func implantsOfUsers(ctx context.Context, q interface {
 	for rows.Next() {
 		var uid int64
 		var im KaptenImplant
-		if err := rows.Scan(&uid, &im.IDImplant, &im.KodeImplant, &im.NamaImplant, &im.Peran); err != nil {
+		if err := rows.Scan(&uid, &im.IDImplant, &im.KodeImplant, &im.NamaImplant, &im.Peran,
+			&im.IDTitikImplant, &im.NamaTitikImplant); err != nil {
 			return nil, err
 		}
 		out[uid] = append(out[uid], im)
@@ -644,8 +649,61 @@ func peranImplant(peran map[int64]string, id int64) (string, error) {
 	return p, nil
 }
 
+// normalisasiImplantTitik memastikan setiap implant punya host yang termasuk
+// dalam pilihan dan host menunjuk dirinya sendiri (tidak ada rantai/cycle).
+func normalisasiImplantTitik(implantIDs []int64, titik map[int64]int64) (map[int64]int64, error) {
+	selected := make(map[int64]bool, len(implantIDs))
+	for _, id := range implantIDs {
+		selected[id] = true
+	}
+	out := make(map[int64]int64, len(implantIDs))
+	for _, id := range implantIDs {
+		host := id
+		if v, ok := titik[id]; ok && v > 0 {
+			host = v
+		}
+		if !selected[host] {
+			return nil, fmt.Errorf("titik implant %d harus salah satu implant yang dipilih", id)
+		}
+		out[id] = host
+	}
+	for _, host := range out {
+		if out[host] != host {
+			return nil, fmt.Errorf("implant titik harus menunjuk dirinya sendiri")
+		}
+	}
+	return out, nil
+}
+
+// validateImplantOwnership memastikan satu implant hanya dipegang satu kapten
+// aktif. excludeUserID dipakai saat update agar mapping sendiri tidak dihitung.
+func validateImplantOwnership(ctx context.Context, q interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}, implantIDs []int64, excludeUserID int64) error {
+	if len(implantIDs) == 0 {
+		return nil
+	}
+	var nama string
+	err := q.QueryRow(ctx, `
+		SELECT COALESCE(k.nama, u.username, '')
+		FROM kapten_implant_map kim
+		JOIN kapten k ON k.id_user = kim.id_user
+		JOIN users u ON u.id_user = kim.id_user
+		WHERE kim.id_implant = ANY($1)
+		  AND kim.id_user <> $2
+		  AND COALESCE(k.status, 'aktif') = 'aktif'
+		LIMIT 1`, implantIDs, excludeUserID).Scan(&nama)
+	if err == nil {
+		return fmt.Errorf("implant sudah dipegang kapten aktif lain: %s", nama)
+	}
+	if err != pgx.ErrNoRows {
+		return err
+	}
+	return nil
+}
+
 // CreateKaptenTx membuat akun users (role kapten) + profil kapten + mapping seller & implant.
-func (r *Repository) CreateKaptenTx(ctx context.Context, username, passwordHash, nama string, noHP *string, status string, sellerIDs, implantIDs []int64, implantPeran map[int64]string, createdBy int64) (idKapten, idUser int64, err error) {
+func (r *Repository) CreateKaptenTx(ctx context.Context, username, passwordHash, nama string, noHP *string, status string, sellerIDs, implantIDs []int64, implantPeran map[int64]string, implantTitik map[int64]int64, createdBy int64) (idKapten, idUser int64, err error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return 0, 0, err
@@ -679,13 +737,24 @@ func (r *Repository) CreateKaptenTx(ctx context.Context, username, passwordHash,
 			return 0, 0, err
 		}
 	}
-	for _, iid := range implantIDs {
-		p, err := peranImplant(implantPeran, iid)
+	if status == "aktif" && len(implantIDs) > 0 {
+		titik, err := normalisasiImplantTitik(implantIDs, implantTitik)
 		if err != nil {
 			return 0, 0, err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO kapten_implant_map (id_user, id_implant, peran) VALUES ($1, $2, $3)`, idUser, iid, p); err != nil {
+		if err := validateImplantOwnership(ctx, tx, implantIDs, idUser); err != nil {
 			return 0, 0, err
+		}
+		for _, iid := range implantIDs {
+			p, err := peranImplant(implantPeran, iid)
+			if err != nil {
+				return 0, 0, err
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO kapten_implant_map (id_user, id_implant, peran, id_titik_implant)
+				VALUES ($1, $2, $3, $4)`, idUser, iid, p, titik[iid]); err != nil {
+				return 0, 0, err
+			}
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -697,7 +766,7 @@ func (r *Repository) CreateKaptenTx(ctx context.Context, username, passwordHash,
 // UpdateKaptenTx ubah profil; sellerIDs==nil berarti mapping seller tidak diubah,
 // implantIDs==nil berarti mapping implant tidak diubah.
 // Status selalu disinkronkan ke akun users.
-func (r *Repository) UpdateKaptenTx(ctx context.Context, id int64, nama string, noHP *string, status string, sellerIDs, implantIDs []int64, gantiSeller, gantiImplant bool, implantPeran map[int64]string, updatedBy int64) error {
+func (r *Repository) UpdateKaptenTx(ctx context.Context, id int64, nama string, noHP *string, status string, sellerIDs, implantIDs []int64, gantiSeller, gantiImplant bool, implantPeran map[int64]string, implantTitik map[int64]int64, updatedBy int64) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -733,11 +802,23 @@ func (r *Repository) UpdateKaptenTx(ctx context.Context, id int64, nama string, 
 			}
 		}
 	}
-	if gantiImplant {
-		if err := validateImplants(ctx, tx, implantIDs); err != nil {
-			return err
-		}
-		if idUser != nil {
+	if idUser != nil {
+		if status != "aktif" {
+			// Nonaktif melepas seluruh mapping implant agar bisa dipakai kapten lain.
+			if _, err := tx.Exec(ctx, `DELETE FROM kapten_implant_map WHERE id_user=$1`, *idUser); err != nil {
+				return err
+			}
+		} else if gantiImplant {
+			if err := validateImplants(ctx, tx, implantIDs); err != nil {
+				return err
+			}
+			titik, err := normalisasiImplantTitik(implantIDs, implantTitik)
+			if err != nil {
+				return err
+			}
+			if err := validateImplantOwnership(ctx, tx, implantIDs, *idUser); err != nil {
+				return err
+			}
 			if _, err := tx.Exec(ctx, `DELETE FROM kapten_implant_map WHERE id_user=$1`, *idUser); err != nil {
 				return err
 			}
@@ -746,9 +827,19 @@ func (r *Repository) UpdateKaptenTx(ctx context.Context, id int64, nama string, 
 				if err != nil {
 					return err
 				}
-				if _, err := tx.Exec(ctx, `INSERT INTO kapten_implant_map (id_user, id_implant, peran) VALUES ($1, $2, $3)`, *idUser, iid, p); err != nil {
+				if _, err := tx.Exec(ctx, `
+					INSERT INTO kapten_implant_map (id_user, id_implant, peran, id_titik_implant)
+					VALUES ($1, $2, $3, $4)`, *idUser, iid, p, titik[iid]); err != nil {
 					return err
 				}
+			}
+		} else {
+			var count int
+			if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM kapten_implant_map WHERE id_user=$1`, *idUser).Scan(&count); err != nil {
+				return err
+			}
+			if count == 0 {
+				return fmt.Errorf("kapten aktif wajib memegang minimal 1 implant")
 			}
 		}
 	}

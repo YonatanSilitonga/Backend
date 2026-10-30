@@ -7,7 +7,6 @@ type Kendaraan struct {
 	ID              int64   `json:"id_kendaraan"`
 	PlatNomor       string  `json:"plat_nomor"`
 	JenisKendaraan  *string `json:"jenis_kendaraan,omitempty"`
-	KapasitasKoli   *int    `json:"kapasitas_koli,omitempty"`
 	KapasitasKg     *int    `json:"kapasitas_kg,omitempty"`
 	StatusKendaraan string  `json:"status_kendaraan"`
 }
@@ -27,34 +26,34 @@ type Driver struct {
 
 // Ritase merepresentasikan tabel ritase (penugasan perjalanan angkut).
 type Ritase struct {
-	ID               int64     `json:"id_ritase"`
-	KodeRitase       string    `json:"kode_ritase"`
-	Tanggal          string    `json:"tanggal"`
-	IDDriver         int64     `json:"id_driver"`
-	NamaDriver       string    `json:"nama_driver,omitempty"`
-	IDKendaraan      int64     `json:"id_kendaraan"`
-	PlatNomor        string    `json:"plat_nomor,omitempty"`
-	IDSeller         int64     `json:"id_seller,omitempty"`
-	NamaSeller       string    `json:"nama_seller,omitempty"`
-	IDDropPoint      int64     `json:"id_drop_point"`
-	NamaDropPoint    string    `json:"nama_drop_point,omitempty"`
-	RitaseKe         *int      `json:"ritase_ke,omitempty"`
-	JenisRitase      string    `json:"jenis_ritase,omitempty"`
-	TotalAWB         *int      `json:"total_awb,omitempty"`
-	TotalKoli        *int      `json:"total_koli,omitempty"`
-	TotalHighValue   *int      `json:"total_high_value,omitempty"`
-	TotalEceran      *int      `json:"total_eceran,omitempty"`
-	PaketTertinggal  *int      `json:"paket_tertinggal,omitempty"`
-	AlasanTertinggal *string   `json:"alasan_tertinggal,omitempty"`
-	JamBerangkat     *string   `json:"jam_berangkat,omitempty"`
-	JamTiba          *string   `json:"jam_tiba,omitempty"`
-	JamMulai         *string   `json:"jam_mulai,omitempty"`
-	JamSelesai       *string   `json:"jam_selesai,omitempty"`
-	Status           string    `json:"status"`
-	CreatedAt        *string   `json:"created_at,omitempty"`
-	UpdatedAt        *string   `json:"updated_at,omitempty"`
-	CreatedByName    string    `json:"created_by_name,omitempty"`
-	UpdatedByName    string    `json:"updated_by_name,omitempty"`
+	ID               int64   `json:"id_ritase"`
+	KodeRitase       string  `json:"kode_ritase"`
+	Tanggal          string  `json:"tanggal"`
+	IDDriver         int64   `json:"id_driver"`
+	NamaDriver       string  `json:"nama_driver,omitempty"`
+	IDKendaraan      int64   `json:"id_kendaraan"`
+	PlatNomor        string  `json:"plat_nomor,omitempty"`
+	IDSeller         int64   `json:"id_seller,omitempty"`
+	NamaSeller       string  `json:"nama_seller,omitempty"`
+	IDDropPoint      int64   `json:"id_drop_point"`
+	NamaDropPoint    string  `json:"nama_drop_point,omitempty"`
+	RitaseKe         *int    `json:"ritase_ke,omitempty"`
+	JenisRitase      string  `json:"jenis_ritase,omitempty"`
+	TotalAWB         *int    `json:"total_awb,omitempty"`
+	TotalKoli        *int    `json:"total_koli,omitempty"`
+	TotalHighValue   *int    `json:"total_high_value,omitempty"`
+	TotalEceran      *int    `json:"total_eceran,omitempty"`
+	PaketTertinggal  *int    `json:"paket_tertinggal,omitempty"`
+	AlasanTertinggal *string `json:"alasan_tertinggal,omitempty"`
+	JamBerangkat     *string `json:"jam_berangkat,omitempty"`
+	JamTiba          *string `json:"jam_tiba,omitempty"`
+	JamMulai         *string `json:"jam_mulai,omitempty"`
+	JamSelesai       *string `json:"jam_selesai,omitempty"`
+	Status           string  `json:"status"`
+	CreatedAt        *string `json:"created_at,omitempty"`
+	UpdatedAt        *string `json:"updated_at,omitempty"`
+	CreatedByName    string  `json:"created_by_name,omitempty"`
+	UpdatedByName    string  `json:"updated_by_name,omitempty"`
 }
 
 // RitaseEvent adalah satu baris timeline status perjalanan (10 status tombol driver).
@@ -96,21 +95,21 @@ type Tracking struct {
 
 // TrackingLive adalah posisi TERBARU satu kendaraan (1 baris per kendaraan) — untuk map.
 type TrackingLive struct {
-	ID            int64      `json:"id_tracking"`
-	IDRitase      *int64     `json:"id_ritase,omitempty"`
+	ID              int64      `json:"id_tracking"`
+	IDRitase        *int64     `json:"id_ritase,omitempty"`
 	StatusRitase    *string    `json:"status_ritase,omitempty"`
 	TanggalRitase   *string    `json:"tanggal,omitempty"` // YYYY-MM-DD
 	JamMulai        *string    `json:"jam_mulai,omitempty"`
 	JamSelesai      *string    `json:"jam_selesai,omitempty"`
-	IDKendaraan   int64      `json:"id_kendaraan"`
-	PlatNomor     string     `json:"plat_nomor"`
-	IDDriver      int64      `json:"id_driver"`
-	NamaDriver    string     `json:"nama_driver"`
-	Latitude      float64    `json:"latitude"`
-	Longitude     float64    `json:"longitude"`
-	Kecepatan     *int       `json:"kecepatan,omitempty"`
-	Arah          *int       `json:"arah,omitempty"`
-	Status        *string    `json:"status,omitempty"`
+	IDKendaraan     int64      `json:"id_kendaraan"`
+	PlatNomor       string     `json:"plat_nomor"`
+	IDDriver        int64      `json:"id_driver"`
+	NamaDriver      string     `json:"nama_driver"`
+	Latitude        float64    `json:"latitude"`
+	Longitude       float64    `json:"longitude"`
+	Kecepatan       *int       `json:"kecepatan,omitempty"`
+	Arah            *int       `json:"arah,omitempty"`
+	Status          *string    `json:"status,omitempty"`
 	NamaLokasi      *string    `json:"nama_lokasi,omitempty"`
 	JumlahKoli      *int       `json:"total_koli,omitempty"`
 	JumlahEcer      *int       `json:"total_eceran,omitempty"`
@@ -206,21 +205,21 @@ type DriverPickupInput struct {
 
 // DriverPickupLog satu baris riwayat muatan driver pickup.
 type DriverPickupLog struct {
-	ID           int64      `json:"id_log"`
-	IDUser       *int64     `json:"id_user"`
-	NamaDriver   string     `json:"nama_driver"`
-	Tanggal      string     `json:"tanggal"`
-	JumlahBarang int        `json:"jumlah_barang"`
-	Koli         int        `json:"koli"`
-	Ecer         int        `json:"ecer"`
-	HighValue    int        `json:"high_value"`
-	Status       string     `json:"status"`
-	Catatan      string     `json:"catatan"`
-	AsalSeller   string     `json:"asal_seller"`
-	FotoURL      string     `json:"foto_url,omitempty"`
-	CreatedBy    string     `json:"created_by"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID           int64     `json:"id_log"`
+	IDUser       *int64    `json:"id_user"`
+	NamaDriver   string    `json:"nama_driver"`
+	Tanggal      string    `json:"tanggal"`
+	JumlahBarang int       `json:"jumlah_barang"`
+	Koli         int       `json:"koli"`
+	Ecer         int       `json:"ecer"`
+	HighValue    int       `json:"high_value"`
+	Status       string    `json:"status"`
+	Catatan      string    `json:"catatan"`
+	AsalSeller   string    `json:"asal_seller"`
+	FotoURL      string    `json:"foto_url,omitempty"`
+	CreatedBy    string    `json:"created_by"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // MapTracking gabungan posisi live kendaraan + titik seller + titik implant + gudang + drop_point + driver pickup (data peta).
@@ -228,6 +227,7 @@ type MapTracking struct {
 	Vehicles      []TrackingLive     `json:"vehicles"`
 	Sellers       []SellerLocation   `json:"sellers"`
 	Implants      []ImplantLocation  `json:"implants,omitempty"`
+	ImplantPoints []ImplantLocation  `json:"implant_points,omitempty"`
 	Gudang        []GudangPoint      `json:"gudang"`
 	DropPoints    []DropPointPoi     `json:"drop_points"`
 	DriverPickups []DriverPickupItem `json:"driver_pickups"`
@@ -282,6 +282,44 @@ type UpdateMuatanRequest struct {
 	TotalKoli        *int    `json:"total_koli"`
 	PaketTertinggal  *int    `json:"paket_tertinggal"`
 	AlasanTertinggal *string `json:"alasan_tertinggal"`
+}
+
+// MuatanRingkasan adalah total muatan (input/terkonfirmasi/sisa) satu titik.
+type MuatanRingkasan struct {
+	AWB  int `json:"awb"`
+	Koli int `json:"koli"`
+	Ecer int `json:"ecer"`
+	HV   int `json:"hv"`
+}
+
+// MuatanKonfirmasiItem adalah satu baris serah terima terkonfirmasi di satu titik.
+type MuatanKonfirmasiItem struct {
+	ID        int64  `json:"id"`
+	JumlahAWB int    `json:"jumlah_awb"`
+	Koli      int    `json:"koli"`
+	Ecer      int    `json:"ecer"`
+	HV        int    `json:"hv"`
+	Oleh      string `json:"oleh"`
+	Peran     string `json:"peran"`
+	Waktu     string `json:"waktu"`
+	Foto      string `json:"foto,omitempty"`
+	Catatan   string `json:"catatan,omitempty"`
+}
+
+// MuatanDetail adalah rincian muatan satu titik dalam satu ritase:
+// total input, total terkonfirmasi, sisa, dan daftar konfirmasinya.
+type MuatanDetail struct {
+	IDRitase   int64  `json:"id_ritase"`
+	NamaLokasi string `json:"nama_lokasi"`
+	Lokasi     *struct {
+		Jenis string `json:"jenis"`
+		ID    int64  `json:"id"`
+		Nama  string `json:"nama"`
+	} `json:"lokasi"`
+	Input      MuatanRingkasan        `json:"input"`
+	Diambil    MuatanRingkasan        `json:"diambil"`
+	Sisa       MuatanRingkasan        `json:"sisa"`
+	Konfirmasi []MuatanKonfirmasiItem `json:"konfirmasi"`
 }
 
 type CreateTrackingRequest struct {

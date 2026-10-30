@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,7 +30,7 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id_kendaraan, plat_nomor, jenis_kendaraan,
-		       kapasitas_koli, kapasitas_kg, status_kendaraan
+		       kapasitas_kg, status_kendaraan
 		FROM kendaraan
 		ORDER BY id_kendaraan
 	`)
@@ -41,7 +43,7 @@ func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	for rows.Next() {
 		var k Kendaraan
 		if err := rows.Scan(&k.ID, &k.PlatNomor, &k.JenisKendaraan,
-			&k.KapasitasKoli, &k.KapasitasKg, &k.StatusKendaraan); err != nil {
+			&k.KapasitasKg, &k.StatusKendaraan); err != nil {
 			return nil, err
 		}
 		items = append(items, k)
@@ -478,9 +480,9 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 		       t.id_driver, COALESCE(d.nama_driver,''),
 		       t.latitude, t.longitude, t.kecepatan, t.arah, t.status,
 		       COALESCE(NULLIF(t.nama_lokasi, ''), re.nama_lokasi, ''),
-		       COALESCE(NULLIF(pl.pickup_koli, 0), t.jumlah_koli, re.jumlah_koli, 0),
-		       COALESCE(NULLIF(pl.pickup_ecer, 0), t.jumlah_ecer, re.jumlah_ecer, 0),
-		       COALESCE(NULLIF(pl.pickup_hv, 0), t.jumlah_high_value, re.jumlah_high_value, 0),
+		       COALESCE(NULLIF(COALESCE(pl.pickup_koli, 0) + COALESCE(cf.confirm_koli, 0), 0), t.jumlah_koli, re.jumlah_koli, 0),
+		       COALESCE(NULLIF(COALESCE(pl.pickup_ecer, 0) + COALESCE(cf.confirm_ecer, 0), 0), t.jumlah_ecer, re.jumlah_ecer, 0),
+		       COALESCE(NULLIF(COALESCE(pl.pickup_hv, 0) + COALESCE(cf.confirm_hv, 0), 0), t.jumlah_high_value, re.jumlah_high_value, 0),
 		       t.last_update,
 		       %s AS offline,
 		       (u.last_login IS NOT NULL AND u.last_login > now() - make_interval(hours => %d)) AS session_online,
@@ -528,7 +530,18 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 		) pl ON true
 		LEFT JOIN LATERAL (
 			-- Muatan yang dikonfirmasi kapten ke ritase kendaraan ini hari ini (WIB).
-			SELECT COALESCE(SUM(kp.jumlah_awb), 0)::int AS confirm_awb
+			SELECT COALESCE(SUM(kp.jumlah_awb), 0)::int AS confirm_awb,
+			       COALESCE(SUM(
+			           COALESCE(kp.koli_jkt, 0) + COALESCE(kp.koli_seg, 0) + COALESCE(kp.koli_btn, 0)
+			       ), 0)::int AS confirm_koli,
+			       COALESCE(SUM(
+			           COALESCE(kp.ecer_jkt, 0) + COALESCE(kp.ecer_seg, 0) + COALESCE(kp.ecer_btn, 0)
+			       ), 0)::int AS confirm_ecer,
+			       COALESCE(SUM(
+			           COALESCE(kp.koli_hv_jkt, 0) + COALESCE(kp.koli_hv_seg, 0) + COALESCE(kp.koli_hv_btn, 0) +
+			           COALESCE(kp.ecer_hv_jkt, 0) + COALESCE(kp.ecer_hv_seg, 0) + COALESCE(kp.ecer_hv_btn, 0) +
+			           COALESCE(kp.awb_hv_jkt, 0) + COALESCE(kp.awb_hv_seg, 0) + COALESCE(kp.awb_hv_btn, 0)
+			       ), 0)::int AS confirm_hv
 			FROM konfirmasi_penjemputan kp
 			WHERE kp.id_ritase = t.id_ritase
 			  AND (kp.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
@@ -590,8 +603,8 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 	           WHEN kap.count_input > 0 AND kap.kap_catatan != '' THEN kap.kap_catatan
 	           ELSE COALESCE(ibl.catatan, '')
 	       END AS catatan_pickup,
-	       -- Sisa muatan hari ini (total tampil − sudah diambil). Dipakai peta
-	       -- untuk bubble angka; GREATEST + COALESCE menjaga NULL → 0.
+	       -- Sisa muatan hari ini (total tampil âˆ’ sudah diambil). Dipakai peta
+	       -- untuk bubble angka; GREATEST + COALESCE menjaga NULL â†’ 0.
 	       GREATEST(
 	           CASE
 	               WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_awb
@@ -684,13 +697,16 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 	return items, rows.Err()
 }
 
-// ListImplantLocations mengambil implant aktif yang punya koordinat (untuk peta),
-// termasuk status log barang hari ini. PIC = nama kapten (utama dulu).
+// ListImplantLocations mengambil semua implant aktif untuk peta, termasuk yang
+// belum punya koordinat agar muatannya tetap bisa diagregasi ke host point.
+// PIC = nama kapten (utama dulu).
 func (r *Repository) ListImplantLocations(ctx context.Context) ([]ImplantLocation, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT i.id_implant, COALESCE(i.kode_implant,''), COALESCE(i.nama_implant,''), COALESCE(i.alamat,''),
 		       COALESCE(i.kota,''), COALESCE(kapten_agg.kapten, ''), COALESCE(i.no_hp,''),
-	       i.latitude, i.longitude, i.jarak_tempuh_km, i.jarak_dc_km,
+	       COALESCE(i.latitude, 0), COALESCE(i.longitude, 0),
+	       (i.latitude IS NOT NULL AND i.longitude IS NOT NULL) AS has_coordinate,
+	       i.jarak_tempuh_km, i.jarak_dc_km,
 	       mu.total_koli, mu.total_ecer, mu.total_hv,
 	       -- Muatan tampil: input kapten hari ini (kalau ada), else log implan terakhir.
 	       CASE
@@ -719,8 +735,8 @@ func (r *Repository) ListImplantLocations(ctx context.Context) ([]ImplantLocatio
 	           WHEN kap.count_input > 0 AND kap.kap_catatan != '' THEN kap.kap_catatan
 	           ELSE COALESCE(ibl.catatan, '')
 	       END AS catatan_pickup,
-	       -- Sisa muatan hari ini (total tampil − sudah diambil). Dipakai peta
-	       -- untuk bubble angka; GREATEST + COALESCE menjaga NULL → 0.
+	       -- Sisa muatan hari ini (total tampil âˆ’ sudah diambil). Dipakai peta
+	       -- untuk bubble angka; GREATEST + COALESCE menjaga NULL â†’ 0.
 	       GREATEST(
 	           CASE
 	               WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_awb
@@ -795,7 +811,7 @@ func (r *Repository) ListImplantLocations(ctx context.Context) ([]ImplantLocatio
 			WHERE ik.id_implant = i.id_implant
 			  AND (ik.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
 		) kap ON TRUE
-		WHERE i.latitude IS NOT NULL AND i.longitude IS NOT NULL AND i.status = 'aktif'
+		WHERE i.status = 'aktif'
 		ORDER BY i.id_implant ASC
 	`)
 	if err != nil {
@@ -807,7 +823,7 @@ func (r *Repository) ListImplantLocations(ctx context.Context) ([]ImplantLocatio
 	for rows.Next() {
 		var im ImplantLocation
 		if err := rows.Scan(&im.IDImplant, &im.KodeImplant, &im.NamaImplant, &im.Alamat,
-			&im.Kota, &im.Kapten, &im.NoHP, &im.Latitude, &im.Longitude,
+			&im.Kota, &im.Kapten, &im.NoHP, &im.Latitude, &im.Longitude, &im.HasCoordinate,
 			&im.JarakTempuhKm, &im.JarakDcKm,
 			&im.TotalKoli, &im.TotalEcer, &im.TotalHighValue,
 			&im.JumlahBarang, &im.Koli, &im.Ecer, &im.HighValue, &im.StatusPickup, &im.CatatanPickup,
@@ -819,13 +835,167 @@ func (r *Repository) ListImplantLocations(ctx context.Context) ([]ImplantLocatio
 	return items, rows.Err()
 }
 
-// ListGudangLocations mengambil posisi gudang yang punya koordinat (peta).
+// ListImplantPoints menggabungkan implant anggota ke satu marker titik.
+// Data muatan diambil dari ListImplantLocations yang sudah menghitung sisa
+// per implant, lalu dijumlahkan per host point.
+func (r *Repository) ListImplantPoints(ctx context.Context, implants []ImplantLocation) ([]ImplantLocation, error) {
+	byID := make(map[int64]ImplantLocation, len(implants))
+	for _, im := range implants {
+		byID[im.IDImplant] = im
+	}
+	hostOf := make(map[int64]int64, len(implants))
+	rows, err := r.db.Query(ctx, `
+		SELECT kim.id_implant, COALESCE(kim.id_titik_implant, i.id_implant)
+		FROM kapten_implant_map kim
+		JOIN implant i ON i.id_implant = kim.id_implant`)
+	if err == nil {
+		for rows.Next() {
+			var source, host int64
+			if err := rows.Scan(&source, &host); err == nil && host > 0 {
+				hostOf[source] = host
+			}
+		}
+		rows.Close()
+	}
+
+	groups := make(map[int64][]int64, len(implants))
+	for _, im := range implants {
+		host := hostOf[im.IDImplant]
+		if host == 0 {
+			host = im.IDImplant
+		}
+		if _, ok := byID[host]; !ok {
+			host = im.IDImplant
+		}
+		groups[host] = append(groups[host], im.IDImplant)
+	}
+
+	sumPtr := func(a, b *int) int {
+		v := 0
+		if a != nil {
+			v += *a
+		}
+		if b != nil {
+			v += *b
+		}
+		return v
+	}
+	intRef := func(v int) *int { return &v }
+
+	out := make([]ImplantLocation, 0, len(groups))
+	for host, members := range groups {
+		base, ok := byID[host]
+		if !ok || !base.HasCoordinate {
+			continue
+		}
+		point := base
+		totalAWB, totalKoli, totalEcer, totalHV, sisaAWB, sisaKoli := 0, 0, 0, 0, 0, 0
+		names := make([]string, 0, len(members))
+		for _, id := range members {
+			m := byID[id]
+			totalAWB += sumPtr(m.JumlahBarang, nil)
+			totalKoli += sumPtr(m.Koli, nil)
+			totalEcer += sumPtr(m.Ecer, nil)
+			totalHV += sumPtr(m.HighValue, nil)
+			sisaAWB += sumPtr(m.SisaBarang, nil)
+			sisaKoli += sumPtr(m.SisaKoli, nil)
+			names = append(names, m.NamaImplant)
+		}
+		sort.Strings(names)
+		point.JumlahBarang = intRef(totalAWB)
+		point.Koli = intRef(totalKoli)
+		point.Ecer = intRef(totalEcer)
+		point.HighValue = intRef(totalHV)
+		point.SisaBarang = intRef(sisaAWB)
+		point.SisaKoli = intRef(sisaKoli)
+		point.Anggota = names
+		switch {
+		case totalAWB > 0 && sisaAWB <= 0:
+			st := "sudah_diambil"
+			point.StatusPickup = &st
+		case sisaAWB > 0:
+			st := "menunggu"
+			point.StatusPickup = &st
+		}
+		out = append(out, point)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].NamaImplant < out[j].NamaImplant
+	})
+	return out, nil
+}
+
+// ListGudangLocations mengambil posisi gudang yang punya koordinat (peta),
+// termasuk muatan hari ini dari input koor gudang (mirror seller/implant).
 func (r *Repository) ListGudangLocations(ctx context.Context) ([]GudangPoint, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id_gudang, COALESCE(nama_gudang,''), COALESCE(tipe,''), latitude, longitude
-		FROM gudang
-		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-		ORDER BY id_gudang ASC
+		SELECT g.id_gudang, COALESCE(g.nama_gudang,''), COALESCE(g.tipe,''), g.latitude, g.longitude,
+		       CASE
+		           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_awb
+		           ELSE 0
+		       END AS jumlah_barang,
+		       CASE
+		           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_koli
+		           ELSE 0
+		       END AS koli,
+		       CASE
+		           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_ecer
+		           ELSE 0
+		       END AS ecer,
+		       CASE
+		           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_hv
+		           ELSE 0
+		       END AS high_value,
+		       CASE
+		           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0) THEN
+		               CASE WHEN kap.taken_awb >= kap.kap_awb AND kap.taken_koli >= kap.kap_koli AND kap.taken_awb > 0 THEN 'sudah_diambil' ELSE 'menunggu' END
+		           ELSE 'menunggu'
+		       END AS status_pickup,
+		       CASE
+		           WHEN kap.count_input > 0 AND kap.kap_catatan != '' THEN kap.kap_catatan
+		           ELSE ''
+		       END AS catatan_pickup,
+		       GREATEST(
+		           CASE
+		               WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_awb
+		               ELSE 0
+		           END - COALESCE(kap.taken_awb, 0), 0) AS sisa_barang,
+		       GREATEST(
+		           CASE
+		               WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0 OR kap.kap_ecer > 0 OR kap.kap_hv > 0) THEN kap.kap_koli
+		               ELSE 0
+		           END - COALESCE(kap.taken_koli, 0), 0) AS sisa_koli
+		FROM gudang g
+		LEFT JOIN LATERAL (
+			SELECT
+				COALESCE(SUM(ik.jumlah_awb), 0)::int AS kap_awb,
+				COALESCE(SUM(ik.koli_jkt + ik.koli_seg + ik.koli_btn), 0)::int AS kap_koli,
+				COALESCE(SUM(ik.ecer_jkt + ik.ecer_seg + ik.ecer_btn), 0)::int AS kap_ecer,
+				COALESCE(SUM(ik.koli_hv_jkt + ik.koli_hv_seg + ik.koli_hv_btn + ik.ecer_hv_jkt + ik.ecer_hv_seg + ik.ecer_hv_btn + ik.awb_hv_jkt + ik.awb_hv_seg + ik.awb_hv_btn), 0)::int AS kap_hv,
+				COALESCE((
+					SELECT ik2.catatan FROM input_kapten ik2
+					WHERE ik2.id_gudang = g.id_gudang
+					  AND (ik2.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+					  AND ik2.catatan IS NOT NULL AND ik2.catatan != ''
+					ORDER BY ik2.id DESC LIMIT 1
+				), '') AS kap_catatan,
+				(COALESCE((
+					SELECT SUM(kp.jumlah_awb) FROM konfirmasi_penjemputan kp
+					WHERE kp.id_gudang = g.id_gudang
+					  AND (kp.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+				), 0))::int AS taken_awb,
+				(COALESCE((
+					SELECT SUM(kp.koli_jkt + kp.koli_seg + kp.koli_btn) FROM konfirmasi_penjemputan kp
+					WHERE kp.id_gudang = g.id_gudang
+					  AND (kp.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+				), 0))::int AS taken_koli,
+				COUNT(ik.id) AS count_input
+			FROM input_kapten ik
+			WHERE ik.id_gudang = g.id_gudang
+			  AND (ik.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+		) kap ON TRUE
+		WHERE g.latitude IS NOT NULL AND g.longitude IS NOT NULL
+		ORDER BY g.id_gudang ASC
 	`)
 	if err != nil {
 		return nil, err
@@ -835,7 +1005,9 @@ func (r *Repository) ListGudangLocations(ctx context.Context) ([]GudangPoint, er
 	var items []GudangPoint
 	for rows.Next() {
 		var g GudangPoint
-		if err := rows.Scan(&g.IDGudang, &g.NamaGudang, &g.Tipe, &g.Latitude, &g.Longitude); err != nil {
+		if err := rows.Scan(&g.IDGudang, &g.NamaGudang, &g.Tipe, &g.Latitude, &g.Longitude,
+			&g.JumlahBarang, &g.Koli, &g.Ecer, &g.HighValue, &g.StatusPickup, &g.CatatanPickup,
+			&g.SisaBarang, &g.SisaKoli); err != nil {
 			return nil, err
 		}
 		items = append(items, g)
@@ -888,7 +1060,7 @@ func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan, idDri
 	}
 	if tanggal != "" {
 		args = append(args, tanggal)
-		// Cross-midnight: return ALL events from any ritase that has ≥1 event on selected date.
+		// Cross-midnight: return ALL events from any ritase that has â‰¥1 event on selected date.
 		// This ensures trips spanning midnight show complete logs.
 		if idDriver > 0 {
 			args = append(args, idDriver)
@@ -935,6 +1107,182 @@ func (r *Repository) ListTrackingHistory(ctx context.Context, idKendaraan, idDri
 		items = append(items, c)
 	}
 	return items, rows.Err()
+}
+
+// roleLabelMuatan memetakan role user ke label tampilan pemberi konfirmasi.
+func roleLabelMuatan(role string) string {
+	switch role {
+	case "kapten":
+		return "Kapten"
+	case "koor_gudang":
+		return "Koor Gudang"
+	case "admin":
+		return "Admin"
+	case "driver", "driver_pickup":
+		return "Driver"
+	case "tower_control":
+		return "Tower Control"
+	case "direktur":
+		return "Direktur"
+	case "developer":
+		return "Developer"
+	default:
+		if role == "" {
+			return "Pengguna"
+		}
+		return role
+	}
+}
+
+// GetMuatanDetail mengembalikan rincian muatan satu titik dalam satu ritase:
+// total input yang ter-link, total terkonfirmasi, sisa, dan daftar
+// konfirmasinya (beserta pemberi konfirmasi). Lokasi dikenali lewat
+// ritase_stop milik ritase itu (cocok nama persis dulu, lalu mengandung).
+func (r *Repository) GetMuatanDetail(ctx context.Context, idRitase int64, namaLokasi string) (*MuatanDetail, error) {
+	out := &MuatanDetail{IDRitase: idRitase, NamaLokasi: namaLokasi, Konfirmasi: []MuatanKonfirmasiItem{}}
+
+	// 1. Resolusi lokasi via stop ritase ini.
+	type stopRow struct {
+		jenis               string
+		idSeller, idImplant *int64
+		idGudang, idDrop    *int64
+		nama                string
+	}
+	var stops []stopRow
+	sRows, err := r.db.Query(ctx, `
+		SELECT rs.jenis_stop, rs.id_seller, rs.id_implant, rs.id_gudang, rs.id_drop_point,
+		       COALESCE(i.nama_implant, s.nama_seller, g.nama_gudang, dp.nama_drop_point, rs.keterangan, '')
+		FROM ritase_stop rs
+		LEFT JOIN seller s ON s.id_seller = rs.id_seller
+		LEFT JOIN implant i ON i.id_implant = rs.id_implant
+		LEFT JOIN gudang g ON g.id_gudang = rs.id_gudang
+		LEFT JOIN drop_point dp ON dp.id_drop_point = rs.id_drop_point
+		WHERE rs.id_ritase = $1
+		ORDER BY rs.urutan ASC
+	`, idRitase)
+	if err != nil {
+		return nil, err
+	}
+	for sRows.Next() {
+		var st stopRow
+		if err := sRows.Scan(&st.jenis, &st.idSeller, &st.idImplant, &st.idGudang, &st.idDrop, &st.nama); err == nil {
+			stops = append(stops, st)
+		}
+	}
+	sRows.Close()
+
+	norm := func(s string) string {
+		return strings.ToLower(strings.TrimSpace(s))
+	}
+	want := norm(namaLokasi)
+	var matched *stopRow
+	for i := range stops {
+		if norm(stops[i].nama) == want && want != "" {
+			matched = &stops[i]
+			break
+		}
+	}
+	if matched == nil && want != "" {
+		for i := range stops {
+			n := norm(stops[i].nama)
+			if n != "" && (strings.Contains(n, want) || strings.Contains(want, n)) {
+				matched = &stops[i]
+				break
+			}
+		}
+	}
+	if matched != nil {
+		var locID int64
+		locJenis := matched.jenis
+		switch {
+		case matched.idImplant != nil && *matched.idImplant > 0:
+			locJenis, locID = "implant", *matched.idImplant
+		case matched.idSeller != nil && *matched.idSeller > 0:
+			locJenis, locID = "seller", *matched.idSeller
+		case matched.idGudang != nil && *matched.idGudang > 0:
+			locJenis, locID = "gudang", *matched.idGudang
+		case matched.idDrop != nil && *matched.idDrop > 0:
+			locJenis, locID = "gateway", *matched.idDrop
+		}
+		if locID > 0 {
+			out.Lokasi = &struct {
+				Jenis string `json:"jenis"`
+				ID    int64  `json:"id"`
+				Nama  string `json:"nama"`
+			}{Jenis: locJenis, ID: locID, Nama: matched.nama}
+		}
+	}
+	if out.Lokasi == nil {
+		// Lokasi tak dikenali â€” kembalikan struktur kosong yang valid.
+		out.Lokasi = nil
+		out.Input, out.Diambil, out.Sisa = MuatanRingkasan{}, MuatanRingkasan{}, MuatanRingkasan{}
+		return out, nil
+	}
+
+	locID := out.Lokasi.ID
+	locCol := map[string]string{"seller": "id_seller", "implant": "id_implant", "gudang": "id_gudang"}[out.Lokasi.Jenis]
+	if locCol == "" {
+		out.Lokasi = nil
+		return out, nil
+	}
+
+	// 2. Daftar konfirmasi titik ini pada ritase ini.
+	qKonfirmasi := fmt.Sprintf(`
+		SELECT kp.id,
+		       COALESCE(kp.jumlah_awb, 0),
+		       COALESCE(kp.koli_jkt,0)+COALESCE(kp.koli_seg,0)+COALESCE(kp.koli_btn,0),
+		       COALESCE(kp.ecer_jkt,0)+COALESCE(kp.ecer_seg,0)+COALESCE(kp.ecer_btn,0),
+		       COALESCE(kp.koli_hv_jkt,0)+COALESCE(kp.koli_hv_seg,0)+COALESCE(kp.koli_hv_btn,0)
+		         +COALESCE(kp.ecer_hv_jkt,0)+COALESCE(kp.ecer_hv_seg,0)+COALESCE(kp.ecer_hv_btn,0)
+		         +COALESCE(kp.awb_hv_jkt,0)+COALESCE(kp.awb_hv_seg,0)+COALESCE(kp.awb_hv_btn,0),
+		       COALESCE(u.username, '-'), COALESCE(u.role, ''),
+		       COALESCE(kp.foto_penjemputan_url, ''), COALESCE(kp.catatan, ''),
+		       kp.created_at
+		FROM konfirmasi_penjemputan kp
+		LEFT JOIN users u ON u.id_user = kp.id_user
+		WHERE kp.id_ritase = $1 AND kp.%s = $2
+		ORDER BY kp.created_at ASC
+	`, locCol)
+	kRows, err := r.db.Query(ctx, qKonfirmasi, idRitase, locID)
+	if err != nil {
+		return nil, err
+	}
+	for kRows.Next() {
+		var it MuatanKonfirmasiItem
+		var username, role string
+		var waktu time.Time
+		if err := kRows.Scan(&it.ID, &it.JumlahAWB, &it.Koli, &it.Ecer, &it.HV,
+			&username, &role, &it.Foto, &it.Catatan, &waktu); err != nil {
+			continue
+		}
+		it.Oleh = username
+		it.Peran = roleLabelMuatan(role)
+		it.Waktu = waktu.Format(time.RFC3339)
+		out.Konfirmasi = append(out.Konfirmasi, it)
+		out.Diambil.AWB += it.JumlahAWB
+		out.Diambil.Koli += it.Koli
+		out.Diambil.Ecer += it.Ecer
+		out.Diambil.HV += it.HV
+	}
+	kRows.Close()
+
+	// 3. Total input yang ter-link ke ritase + titik ini.
+	qInput := fmt.Sprintf(`
+		SELECT COALESCE(SUM(jumlah_awb), 0),
+		       COALESCE(SUM(koli_jkt+koli_seg+koli_btn), 0),
+		       COALESCE(SUM(ecer_jkt+ecer_seg+ecer_btn), 0),
+		       COALESCE(SUM(koli_hv_jkt+koli_hv_seg+koli_hv_btn+ecer_hv_jkt+ecer_hv_seg+ecer_hv_btn+awb_hv_jkt+awb_hv_seg+awb_hv_btn), 0)
+		FROM input_kapten
+		WHERE id_ritase = $1 AND %s = $2
+	`, locCol)
+	_ = r.db.QueryRow(ctx, qInput, idRitase, locID).Scan(
+		&out.Input.AWB, &out.Input.Koli, &out.Input.Ecer, &out.Input.HV)
+
+	out.Sisa.AWB = out.Input.AWB - out.Diambil.AWB
+	out.Sisa.Koli = out.Input.Koli - out.Diambil.Koli
+	out.Sisa.Ecer = out.Input.Ecer - out.Diambil.Ecer
+	out.Sisa.HV = out.Input.HV - out.Diambil.HV
+	return out, nil
 }
 
 // ListGpsHistory mengembalikan seluruh titik GPS history untuk satu ritase.
