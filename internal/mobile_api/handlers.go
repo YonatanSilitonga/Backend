@@ -51,13 +51,13 @@ type AppVersionResponse struct {
 // APP_VERSION_CODE, APP_VERSION_NAME, APP_DOWNLOAD_URL,
 // APP_FORCE_UPDATE ("true"/"false"), APP_RELEASE_NOTES.
 func (h *APIHandler) GetAppVersion(c echo.Context) error {
-	versionCode := 16
+	versionCode := 17
 	if v, err := strconv.Atoi(os.Getenv("APP_VERSION_CODE")); err == nil && v > 0 {
 		versionCode = v
 	}
 	versionName := os.Getenv("APP_VERSION_NAME")
 	if versionName == "" {
-		versionName = "1.2.5"
+		versionName = "1.2.6"
 	}
 	downloadURL := os.Getenv("APP_DOWNLOAD_URL")
 	if downloadURL == "" {
@@ -69,14 +69,14 @@ func (h *APIHandler) GetAppVersion(c echo.Context) error {
 	}
 	releaseNotes := os.Getenv("APP_RELEASE_NOTES")
 	if releaseNotes == "" {
-		releaseNotes = "Update Darurat v1.2.5: Peningkatan presisi GPS tracking pergerakan (10 meter) untuk akurasi posisi armada."
+		releaseNotes = "Update v1.2.6: Optimasi tracking GPS 10 detik / 5 meter, perbaikan alur tombol kembali ke gudang, penyaringan riwayat pickup hari ini, dan penghapusan input koli."
 	}
 	return c.JSON(http.StatusOK, AppVersionResponse{
-		VersionCode:  17,
-		VersionName:  "1.2.6",
-		DownloadURL:  "https://api.controltowerslb.tech/uploads/apk/tower-control-latest.apk",
-		ForceUpdate:  true,
-		ReleaseNotes: "Update v1.2.6: Optimasi tracking GPS 10 detik / 5 meter, perbaikan alur tombol kembali ke gudang, penyaringan riwayat pickup hari ini, dan penghapusan input koli.",
+		VersionCode:  versionCode,
+		VersionName:  versionName,
+		DownloadURL:  downloadURL,
+		ForceUpdate:  forceUpdate,
+		ReleaseNotes: releaseNotes,
 	})
 }
 
