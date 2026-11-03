@@ -157,6 +157,7 @@ type DriverPickupItem struct {
 	IDUser        int64      `json:"id_user"`
 	Username      string     `json:"username"`
 	NamaDriver    string     `json:"nama_driver"`
+	PlatNomor     string     `json:"plat_nomor,omitempty"`
 	NoHP          string     `json:"no_hp"`
 	JumlahBarang  int        `json:"jumlah_barang"`
 	Koli          int        `json:"koli"`
@@ -184,6 +185,7 @@ type DriverPickupSellerItem struct {
 type DriverPickupBatchInput struct {
 	IDUser     int64                    `json:"id_user"`
 	NamaDriver string                   `json:"nama_driver"`
+	PlatNomor  string                   `json:"plat_nomor"`
 	Status     string                   `json:"status"` // 'menuju_gudang' | 'menuju_seller' | 'selesai' | 'standby'
 	Catatan    string                   `json:"catatan"`
 	Items      []DriverPickupSellerItem `json:"items"`
@@ -193,6 +195,7 @@ type DriverPickupBatchInput struct {
 type DriverPickupInput struct {
 	IDUser       int64  `json:"id_user"`
 	NamaDriver   string `json:"nama_driver"`
+	PlatNomor    string `json:"plat_nomor"`
 	JumlahBarang int    `json:"jumlah_barang"`
 	Koli         int    `json:"koli"`
 	Ecer         int    `json:"ecer"`
@@ -208,6 +211,7 @@ type DriverPickupLog struct {
 	ID           int64     `json:"id_log"`
 	IDUser       *int64    `json:"id_user"`
 	NamaDriver   string    `json:"nama_driver"`
+	PlatNomor    string    `json:"plat_nomor,omitempty"`
 	Tanggal      string    `json:"tanggal"`
 	JumlahBarang int       `json:"jumlah_barang"`
 	Koli         int       `json:"koli"`
