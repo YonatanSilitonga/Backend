@@ -61,10 +61,10 @@ type GudangMuatanInputRequest struct {
 	AwbHvSEG    int    `json:"awb_hv_seg"`
 	AwbHvBTN    int    `json:"awb_hv_btn"`
 	// Alias lama (kompatibilitas): menang hanya bila ketiga region masih 0.
-	KoliHV  int `json:"koli_hv"`
-	HvAwb   int `json:"hv_awb"`
-	EcerHV  int `json:"ecer_hv"`
-	AwbHv   int `json:"awb_hv"`
+	KoliHV int `json:"koli_hv"`
+	HvAwb  int `json:"hv_awb"`
+	EcerHV int `json:"ecer_hv"`
+	AwbHv  int `json:"awb_hv"`
 }
 
 // normalisasiHV menggabungkan alias lama + kolom per-wilayah (mirror kapten).
@@ -211,13 +211,13 @@ func (h *Handler) PostMuatanInput(c echo.Context) error {
 	h.bus.Publish("force_refresh", "gudang_muatan_input")
 
 	return response.Created(c, map[string]interface{}{
-		"id":          insertedID,
-		"id_gudang":   idGudang,
-		"nama_gudang": namaGudang,
-		"total_awb":   locAwb,
-		"total_koli":  locKoli,
-		"total_ecer":  locEcer,
-		"total_hv":    locHV,
+		"id":           insertedID,
+		"id_gudang":    idGudang,
+		"nama_gudang":  namaGudang,
+		"total_awb":    locAwb,
+		"total_koli":   locKoli,
+		"total_ecer":   locEcer,
+		"total_hv":     locHV,
 		"total_awb_hv": locAwbHv,
 	})
 }
@@ -266,7 +266,7 @@ func (h *Handler) GetPending(c echo.Context) error {
 		list = append(list, map[string]interface{}{
 			"jenis_ritase": jenis, "ritase_ke": ritKe,
 			"jumlah_input": count,
-			"total_awb": awb, "total_koli": koli, "total_ecer": ecer, "total_hv": hv,
+			"total_awb":    awb, "total_koli": koli, "total_ecer": ecer, "total_hv": hv,
 		})
 	}
 
@@ -326,11 +326,11 @@ func (h *Handler) GetKonfirmasi(c echo.Context) error {
 			"id": id, "id_ritase": idRitase,
 			"jenis_ritase": jenis, "ritase_ke": ritKe,
 			"jumlah_awb": awb,
-			"koli_jkt": kj, "koli_seg": ks, "koli_btn": kb,
+			"koli_jkt":   kj, "koli_seg": ks, "koli_btn": kb,
 			"ecer_jkt": ej, "ecer_seg": es, "ecer_btn": eb,
 			"total_koli": tKoli, "total_ecer": tEcer,
 			"foto_penjemputan_url": foto, "catatan": catatan,
-			"created_at": createdAt.Format(time.RFC3339),
+			"created_at":  createdAt.Format(time.RFC3339),
 			"kode_ritase": kode, "nama_driver": driver,
 		})
 	}
@@ -412,8 +412,9 @@ func (h *Handler) GetKonfirmasi(c echo.Context) error {
 	})
 }
 
-// GetRitase mengambil ritase hari ini (WIB) yang start di gudang outgoing
-// dan sudah ada driver + kendaraan — kandidat pengambilan.
+// GetRitase mengambil ritase hari ini (WIB) yang punya titik muat di gudang
+// outgoing dan sudah ada driver + kendaraan — kandidat pengambilan. Titik start
+// Rit 1 (urutan 1) tidak dihitung sebagai titik muat.
 // GET /api/v1/gudang-muatan/ritase
 func (h *Handler) GetRitase(c echo.Context) error {
 	ctx0, cancel0 := context.WithTimeout(c.Request().Context(), 5*time.Second)
@@ -435,14 +436,23 @@ func (h *Handler) GetRitase(c echo.Context) error {
 	rows, err := h.DB.Query(ctx, `
 		SELECT r.id_ritase, r.kode_ritase, r.ritase_ke, r.status,
 		       r.jam_mulai, r.jam_selesai, r.jenis_ritase,
-		       COALESCE(d.nama_driver, 'Driver'), COALESCE(k.plat_nomor, '-')
+		       COALESCE(d.nama_driver, 'Driver'), COALESCE(k.plat_nomor, '-'),
+		       rs.id_stop, rs.urutan
 		FROM ritase r
-		JOIN ritase_stop rs ON rs.id_ritase = r.id_ritase AND rs.id_gudang = $1
+		JOIN LATERAL (
+			SELECT rs.id_stop, rs.urutan
+			FROM ritase_stop rs
+			WHERE rs.id_ritase = r.id_ritase
+			  AND rs.id_gudang = $1
+			  AND NOT (COALESCE(r.ritase_ke, 1) = 1 AND rs.urutan = 1)
+			ORDER BY rs.urutan DESC
+			LIMIT 1
+		) rs ON TRUE
 		JOIN driver d ON d.id_driver = r.id_driver
 		JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
 		WHERE r.tanggal = $2
 		  AND r.status != 'selesai'
-		ORDER BY r.ritase_ke ASC, rs.urutan ASC
+		ORDER BY r.ritase_ke ASC, r.id_ritase ASC
 	`, idGudang, hariIni)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data ritase")
@@ -451,13 +461,13 @@ func (h *Handler) GetRitase(c echo.Context) error {
 
 	list := []map[string]interface{}{}
 	for rows.Next() {
-		var idRitase int64
+		var idRitase, idStop int64
 		var kode, status, namaDriver, plat string
-		var ritKe int
+		var ritKe, urutan int
 		var jamMulai, jamSelesai, jenis *string
 		if err := rows.Scan(&idRitase, &kode, &ritKe, &status,
 			&jamMulai, &jamSelesai, &jenis,
-			&namaDriver, &plat); err != nil {
+			&namaDriver, &plat, &idStop, &urutan); err != nil {
 			continue
 		}
 		list = append(list, map[string]interface{}{
@@ -465,7 +475,8 @@ func (h *Handler) GetRitase(c echo.Context) error {
 			"ritase_ke": ritKe, "status": status,
 			"jam_mulai": jamMulai, "jam_selesai": jamSelesai,
 			"jenis_ritase": jenis,
-			"nama_driver": namaDriver, "plat_nomor": plat,
+			"nama_driver":  namaDriver, "plat_nomor": plat,
+			"id_stop": idStop, "urutan": urutan,
 		})
 	}
 
@@ -477,24 +488,25 @@ type ConfirmPickupRequest struct {
 	JenisRitase string `json:"jenis_ritase"`
 	RitaseKe    int    `json:"ritase_ke"`
 	IDRitase    int64  `json:"id_ritase"`
+	IDStop      int64  `json:"id_stop"`
 
-	DiambilAWB     int `json:"diambil_awb"`
-	DiambilKoliJKT int `json:"diambil_koli_jkt"`
-	DiambilKoliSEG int `json:"diambil_koli_seg"`
-	DiambilKoliBTN int `json:"diambil_koli_btn"`
-	DiambilEcerJKT int `json:"diambil_ecer_jkt"`
-	DiambilEcerSEG int `json:"diambil_ecer_seg"`
-	DiambilEcerBTN int `json:"diambil_ecer_btn"`
-	DiambilKoliHVJKT int `json:"diambil_koli_hv_jkt"`
-	DiambilKoliHVSEG int `json:"diambil_koli_hv_seg"`
-	DiambilKoliHVBTN int `json:"diambil_koli_hv_btn"`
-	DiambilEcerHVJKT int `json:"diambil_ecer_hv_jkt"`
-	DiambilEcerHVSEG int `json:"diambil_ecer_hv_seg"`
-	DiambilEcerHVBTN int `json:"diambil_ecer_hv_btn"`
-	DiambilAwbHVJKT int `json:"diambil_awb_hv_jkt"`
-	DiambilAwbHVSEG int `json:"diambil_awb_hv_seg"`
-	DiambilAwbHVBTN int `json:"diambil_awb_hv_btn"`
-	Catatan        string `json:"catatan"`
+	DiambilAWB       int    `json:"diambil_awb"`
+	DiambilKoliJKT   int    `json:"diambil_koli_jkt"`
+	DiambilKoliSEG   int    `json:"diambil_koli_seg"`
+	DiambilKoliBTN   int    `json:"diambil_koli_btn"`
+	DiambilEcerJKT   int    `json:"diambil_ecer_jkt"`
+	DiambilEcerSEG   int    `json:"diambil_ecer_seg"`
+	DiambilEcerBTN   int    `json:"diambil_ecer_btn"`
+	DiambilKoliHVJKT int    `json:"diambil_koli_hv_jkt"`
+	DiambilKoliHVSEG int    `json:"diambil_koli_hv_seg"`
+	DiambilKoliHVBTN int    `json:"diambil_koli_hv_btn"`
+	DiambilEcerHVJKT int    `json:"diambil_ecer_hv_jkt"`
+	DiambilEcerHVSEG int    `json:"diambil_ecer_hv_seg"`
+	DiambilEcerHVBTN int    `json:"diambil_ecer_hv_btn"`
+	DiambilAwbHVJKT  int    `json:"diambil_awb_hv_jkt"`
+	DiambilAwbHVSEG  int    `json:"diambil_awb_hv_seg"`
+	DiambilAwbHVBTN  int    `json:"diambil_awb_hv_btn"`
+	Catatan          string `json:"catatan"`
 }
 
 // PostConfirmPickup menautkan input gudang ke ritase pilihan dan mencatat realisasi.
@@ -552,17 +564,24 @@ func (h *Handler) PostConfirmPickup(c echo.Context) error {
 	}
 	defer tx.Rollback(ctx)
 
-	// 1. Validasi: ritase ada, belum selesai, start di outgoing, jenis+rit sama.
+	// 1. Validasi: ritase ada, belum selesai, punya titik muat outgoing
+	// (titik start Rit 1 tidak dihitung), jenis+rit sama.
 	var foundID int64
 	err = tx.QueryRow(ctx, `
 		SELECT r.id_ritase FROM ritase r
-		JOIN ritase_stop rs ON rs.id_ritase = r.id_ritase AND rs.id_gudang = $1
 		WHERE r.id_ritase = $2
 		  AND r.status != 'selesai'
 		  AND r.jenis_ritase = $3 AND r.ritase_ke = $4
 		  AND r.tanggal BETWEEN ((now() AT TIME ZONE 'Asia/Jakarta')::date - 1)
 		                    AND ((now() AT TIME ZONE 'Asia/Jakarta')::date + 1)
-	`, idGudang, req.IDRitase, req.JenisRitase, req.RitaseKe).Scan(&foundID)
+		  AND EXISTS (
+			SELECT 1 FROM ritase_stop rs
+			WHERE rs.id_ritase = r.id_ritase
+			  AND rs.id_gudang = $1
+			  AND NOT (COALESCE(r.ritase_ke, 1) = 1 AND rs.urutan = 1)
+			  AND ($5 = 0 OR rs.id_stop = $5)
+		  )
+	`, idGudang, req.IDRitase, req.JenisRitase, req.RitaseKe, req.IDStop).Scan(&foundID)
 	if err != nil {
 		return response.Error(c, http.StatusBadRequest, "ritase tidak valid untuk gudang ini")
 	}
@@ -655,7 +674,7 @@ func (h *Handler) PostConfirmPickup(c echo.Context) error {
 		"id_konfirmasi": idKonfirmasi,
 		"sisa": map[string]interface{}{
 			"jumlah_awb": inAWB - tkAWB,
-			"koli_jkt": inKJ - tkKJ, "koli_seg": inKS - tkKS, "koli_btn": inKB - tkKB,
+			"koli_jkt":   inKJ - tkKJ, "koli_seg": inKS - tkKS, "koli_btn": inKB - tkKB,
 			"ecer_jkt": inEJ - tkEJ, "ecer_seg": inES - tkES, "ecer_btn": inEB - tkEB,
 		},
 	})
