@@ -115,7 +115,14 @@ func (s *Service) ResetPassword(ctx context.Context, username, noHP, newPassword
 	}
 
 	// Bandingkan no_hp tanpa spasi/strip, case-insensitive.
-	norm := func(v string) string { return strings.ToLower(strings.ReplaceAll(v, " ", "")) }
+	norm := func(v string) string {
+		s := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(v, " ", ""), "-", ""))
+		s = strings.TrimPrefix(s, "+")
+		if strings.HasPrefix(s, "0") {
+			s = "62" + s[1:]
+		}
+		return s
+	}
 	if norm(phone) != norm(noHP) {
 		return errors.New("nomor HP tidak sesuai dengan akun")
 	}

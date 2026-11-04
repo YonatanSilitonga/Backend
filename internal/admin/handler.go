@@ -93,7 +93,7 @@ func (h *Handler) CreateDriver(c echo.Context) error {
 	createdBy := c.Get(middleware.CtxUserID).(int64)
 	id, err := h.svc.CreateDriver(c.Request().Context(), req, createdBy)
 	if err != nil {
-		return response.Error(c, http.StatusInternalServerError, "gagal membuat driver")
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
 	return response.Created(c, map[string]any{"id_driver": id})
 }
@@ -109,7 +109,7 @@ func (h *Handler) UpdateDriver(c echo.Context) error {
 	}
 	updatedBy := c.Get(middleware.CtxUserID).(int64)
 	if err := h.svc.UpdateDriver(c.Request().Context(), id, req, updatedBy); err != nil {
-		return response.Error(c, http.StatusInternalServerError, "gagal update driver")
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
 	return response.OK(c, map[string]string{"message": "driver diperbarui"})
 }
@@ -202,7 +202,7 @@ func (h *Handler) CreateSeller(c echo.Context) error {
 	createdBy := c.Get(middleware.CtxUserID).(int64)
 	id, err := h.svc.CreateSeller(c.Request().Context(), req, createdBy)
 	if err != nil {
-		return response.Error(c, http.StatusInternalServerError, "gagal membuat seller")
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
 	return response.Created(c, map[string]any{"id_seller": id})
 }
@@ -218,7 +218,7 @@ func (h *Handler) UpdateSeller(c echo.Context) error {
 	}
 	updatedBy := c.Get(middleware.CtxUserID).(int64)
 	if err := h.svc.UpdateSeller(c.Request().Context(), id, req, updatedBy); err != nil {
-		return response.Error(c, http.StatusInternalServerError, "gagal update seller")
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
 	return response.OK(c, map[string]string{"message": "seller diperbarui"})
 }
@@ -258,7 +258,7 @@ func (h *Handler) CreateImplant(c echo.Context) error {
 	createdBy := c.Get(middleware.CtxUserID).(int64)
 	id, err := h.svc.CreateImplant(c.Request().Context(), req, createdBy)
 	if err != nil {
-		return response.Error(c, http.StatusInternalServerError, "gagal membuat implant")
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
 	return response.Created(c, map[string]any{"id_implant": id})
 }
@@ -274,7 +274,7 @@ func (h *Handler) UpdateImplant(c echo.Context) error {
 	}
 	updatedBy := c.Get(middleware.CtxUserID).(int64)
 	if err := h.svc.UpdateImplant(c.Request().Context(), id, req, updatedBy); err != nil {
-		return response.Error(c, http.StatusInternalServerError, "gagal update implant")
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
 	return response.OK(c, map[string]string{"message": "implant diperbarui"})
 }

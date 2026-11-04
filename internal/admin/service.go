@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -35,16 +36,47 @@ func checkRole(role string) error {
 }
 
 // ──────── Driver ────────
-func (s *Service) ListDriver(ctx context.Context) ([]Driver, error) { return s.repo.ListDriver(ctx) }
+func (s *Service) ListDriver(ctx context.Context) ([]Driver, error)                                   { return s.repo.ListDriver(ctx) }
+var rePhone62 = regexp.MustCompile(`^628\d{8,11}$`)
+
+func validateAndNormalizePhone(phone *string, label string) (*string, error) {
+	if phone == nil {
+		return nil, nil
+	}
+	cleaned := strings.TrimSpace(*phone)
+	if cleaned == "" {
+		return nil, nil
+	}
+	cleaned = strings.ReplaceAll(cleaned, " ", "")
+	cleaned = strings.ReplaceAll(cleaned, "-", "")
+	cleaned = strings.TrimPrefix(cleaned, "+")
+
+	if strings.HasPrefix(cleaned, "0") {
+		cleaned = "62" + cleaned[1:]
+	}
+	if !rePhone62.MatchString(cleaned) {
+		return nil, fmt.Errorf("nomor HP %s harus berformat '628...' (11-14 digit)", label)
+	}
+	return &cleaned, nil
+}
+
 func (s *Service) CreateDriver(ctx context.Context, r DriverRequest, createdBy int64) (int64, error) {
+	cleanPhone, err := validateAndNormalizePhone(r.NoHP, "driver")
+	if err != nil {
+		return 0, err
+	}
+	r.NoHP = cleanPhone
 	return s.repo.CreateDriver(ctx, r, createdBy)
 }
 func (s *Service) UpdateDriver(ctx context.Context, id int64, r DriverRequest, updatedBy int64) error {
+	cleanPhone, err := validateAndNormalizePhone(r.NoHP, "driver")
+	if err != nil {
+		return err
+	}
+	r.NoHP = cleanPhone
 	return s.repo.UpdateDriver(ctx, id, r, updatedBy)
 }
-func (s *Service) DeleteDriver(ctx context.Context, id int64) error {
-	return s.repo.DeleteDriver(ctx, id)
-}
+func (s *Service) DeleteDriver(ctx context.Context, id int64) error                                    { return s.repo.DeleteDriver(ctx, id) }
 
 // ──────── Kendaraan ────────
 func (s *Service) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
@@ -61,28 +93,44 @@ func (s *Service) DeleteKendaraan(ctx context.Context, id int64) error {
 }
 
 // ──────── Seller ────────
-func (s *Service) ListSeller(ctx context.Context) ([]Seller, error) { return s.repo.ListSeller(ctx) }
+func (s *Service) ListSeller(ctx context.Context) ([]Seller, error)                                     { return s.repo.ListSeller(ctx) }
 func (s *Service) CreateSeller(ctx context.Context, r SellerRequest, createdBy int64) (int64, error) {
+	clean, err := validateAndNormalizePhone(r.NoHP, "seller")
+	if err != nil {
+		return 0, err
+	}
+	r.NoHP = clean
 	return s.repo.CreateSeller(ctx, r, createdBy)
 }
 func (s *Service) UpdateSeller(ctx context.Context, id int64, r SellerRequest, updatedBy int64) error {
+	clean, err := validateAndNormalizePhone(r.NoHP, "seller")
+	if err != nil {
+		return err
+	}
+	r.NoHP = clean
 	return s.repo.UpdateSeller(ctx, id, r, updatedBy)
 }
-func (s *Service) DeleteSeller(ctx context.Context, id int64) error {
-	return s.repo.DeleteSeller(ctx, id)
-}
+func (s *Service) DeleteSeller(ctx context.Context, id int64) error                                     { return s.repo.DeleteSeller(ctx, id) }
 
 // ──────── Implant (master lokasi implant, terpisah dari seller) ────────
-func (s *Service) ListImplant(ctx context.Context) ([]Implant, error) { return s.repo.ListImplant(ctx) }
+func (s *Service) ListImplant(ctx context.Context) ([]Implant, error)                                   { return s.repo.ListImplant(ctx) }
 func (s *Service) CreateImplant(ctx context.Context, r ImplantRequest, createdBy int64) (int64, error) {
+	clean, err := validateAndNormalizePhone(r.NoHP, "implant")
+	if err != nil {
+		return 0, err
+	}
+	r.NoHP = clean
 	return s.repo.CreateImplant(ctx, r)
 }
 func (s *Service) UpdateImplant(ctx context.Context, id int64, r ImplantRequest, updatedBy int64) error {
+	clean, err := validateAndNormalizePhone(r.NoHP, "implant")
+	if err != nil {
+		return err
+	}
+	r.NoHP = clean
 	return s.repo.UpdateImplant(ctx, id, r)
 }
-func (s *Service) DeleteImplant(ctx context.Context, id int64) error {
-	return s.repo.DeleteImplant(ctx, id)
-}
+func (s *Service) DeleteImplant(ctx context.Context, id int64) error                                    { return s.repo.DeleteImplant(ctx, id) }
 
 // ──────── Gudang ────────
 func (s *Service) ListGudang(ctx context.Context) ([]Gudang, error) { return s.repo.ListGudang(ctx) }
@@ -184,6 +232,11 @@ func (s *Service) GetKapten(ctx context.Context, id int64) (*Kapten, error) {
 // CreateKapten membuat akun login + profil + mapping dalam satu transaksi.
 // Username auto bila kosong; password default kapten123 bila kosong (dikembalikan sekali).
 func (s *Service) CreateKapten(ctx context.Context, r KaptenRequest, createdBy int64) (*KaptenCreated, error) {
+	cleanPhone, err := validateAndNormalizePhone(r.NoHP, "kapten")
+	if err != nil {
+		return nil, err
+	}
+	r.NoHP = cleanPhone
 	if strings.TrimSpace(r.Nama) == "" {
 		return nil, fmt.Errorf("nama kapten wajib diisi")
 	}
@@ -250,6 +303,11 @@ func (s *Service) CreateKapten(ctx context.Context, r KaptenRequest, createdBy i
 // implantIDs==nil berarti mapping implant tidak diubah.
 // Bila implant_ids dikirim, minimal 1 (implant wajib punya kapten & kapten wajib pegang implant).
 func (s *Service) UpdateKapten(ctx context.Context, id int64, r KaptenRequest, updatedBy int64) error {
+	cleanPhone, err := validateAndNormalizePhone(r.NoHP, "kapten")
+	if err != nil {
+		return err
+	}
+	r.NoHP = cleanPhone
 	if strings.TrimSpace(r.Nama) == "" {
 		return fmt.Errorf("nama kapten wajib diisi")
 	}
