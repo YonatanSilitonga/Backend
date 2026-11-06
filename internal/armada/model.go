@@ -121,6 +121,9 @@ type TrackingLive struct {
 	LastOpen        *time.Time `json:"last_open,omitempty"`
 	RoleDriver      *string    `json:"role_driver,omitempty"`
 	TotalAWB        *int       `json:"total_awb,omitempty"`
+	HasConfirmation bool       `json:"has_confirmation"`
+	GatewayAkhir    string     `json:"gateway_akhir,omitempty"`
+	BubbleTotal     int        `json:"bubble_total"`
 }
 
 // ImplanBarangInput payload untuk input/update jumlah barang di implan.

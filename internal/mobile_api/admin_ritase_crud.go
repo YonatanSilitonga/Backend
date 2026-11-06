@@ -308,6 +308,35 @@ type UpdateRitaseRequest struct {
 	Stops       []FixedStop `json:"stops"`
 }
 
+type ritaseHeaderSnapshot struct {
+	IDDriver    int64
+	IDKendaraan int64
+	RitaseKe    int
+	Status      string
+	JenisRitase string
+}
+
+var errRunningRitaseHeaderChanged = errors.New("header ritase berubah saat berjalan")
+
+func validateRunningRitaseUpdate(req UpdateRitaseRequest, cur ritaseHeaderSnapshot) error {
+	if req.IDDriver != 0 && req.IDDriver != cur.IDDriver {
+		return fmt.Errorf("%w: id_driver", errRunningRitaseHeaderChanged)
+	}
+	if req.IDKendaraan != 0 && req.IDKendaraan != cur.IDKendaraan {
+		return fmt.Errorf("%w: id_kendaraan", errRunningRitaseHeaderChanged)
+	}
+	if req.RitaseKe != 0 && req.RitaseKe != cur.RitaseKe {
+		return fmt.Errorf("%w: ritase_ke", errRunningRitaseHeaderChanged)
+	}
+	if req.Status != "" && req.Status != cur.Status {
+		return fmt.Errorf("%w: status", errRunningRitaseHeaderChanged)
+	}
+	if req.JenisRitase != "" && req.JenisRitase != cur.JenisRitase {
+		return fmt.Errorf("%w: jenis_ritase", errRunningRitaseHeaderChanged)
+	}
+	return nil
+}
+
 // AdminUpdateRitase Handler untuk memperbarui data ritase dan stops
 func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 	idParam := c.Param("id")
@@ -326,7 +355,18 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 
 	// ── Cek status ritase ──
 	var currentStatus string
-	err = h.DB.QueryRow(ctx, "SELECT status FROM ritase WHERE id_ritase = $1", idRitase).Scan(&currentStatus)
+	var currentIDDriver, currentIDKendaraan int64
+	var currentRitaseKe int
+	var currentJenisRitase string
+	err = h.DB.QueryRow(ctx, `
+		SELECT status,
+		       COALESCE(id_driver, 0),
+		       COALESCE(id_kendaraan, 0),
+		       COALESCE(ritase_ke, 0),
+		       COALESCE(jenis_ritase, '')
+		FROM ritase
+		WHERE id_ritase = $1
+	`, idRitase).Scan(&currentStatus, &currentIDDriver, &currentIDKendaraan, &currentRitaseKe, &currentJenisRitase)
 	if err != nil {
 		return response.Error(c, http.StatusNotFound, "Ritase tidak ditemukan")
 	}
@@ -342,8 +382,16 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 			return response.Error(c, http.StatusBadRequest, "Ritase sudah selesai dan tidak bisa diubah")
 		}
 		if currentStatus == "berjalan" {
-			// Saat berjalan: hanya boleh update stops, driver/kendaraan/ritase_ke/status tidak boleh diubah
-			if req.IDDriver != 0 || req.IDKendaraan != 0 || req.RitaseKe != 0 || req.Status != "" || req.JenisRitase != "" {
+			// Saat berjalan: hanya boleh update stops. Field header yang dikirim
+			// dengan nilai sama seperti data lama tidak dianggap perubahan.
+			cur := ritaseHeaderSnapshot{
+				IDDriver:    currentIDDriver,
+				IDKendaraan: currentIDKendaraan,
+				RitaseKe:    currentRitaseKe,
+				Status:      currentStatus,
+				JenisRitase: currentJenisRitase,
+			}
+			if err := validateRunningRitaseUpdate(req, cur); err != nil {
 				return response.Error(c, http.StatusBadRequest, "Ritase sedang berjalan. Hanya stops yang bisa diubah.")
 			}
 		}
@@ -356,7 +404,7 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 	}
 
 	// ── Validasi status driver harus aktif (jika driver diganti) ──
-	if req.IDDriver != 0 {
+	if req.IDDriver != 0 && req.IDDriver != currentIDDriver {
 		var driverStatus string
 		err := h.DB.QueryRow(ctx, "SELECT COALESCE(status_driver, 'on_duty') FROM driver WHERE id_driver = $1", req.IDDriver).Scan(&driverStatus)
 		if err != nil {
@@ -368,7 +416,7 @@ func (h *APIHandler) AdminUpdateRitase(c echo.Context) error {
 	}
 
 	// ── Validasi status kendaraan harus tersedia (jika kendaraan diganti) ──
-	if req.IDKendaraan != 0 {
+	if req.IDKendaraan != 0 && req.IDKendaraan != currentIDKendaraan {
 		var vehicleStatus string
 		err := h.DB.QueryRow(ctx, "SELECT COALESCE(status_kendaraan, 'available') FROM kendaraan WHERE id_kendaraan = $1", req.IDKendaraan).Scan(&vehicleStatus)
 		if err != nil {
@@ -877,4 +925,3 @@ func getValidDropPointID(ctx context.Context, db interface {
 	}
 	return 2
 }
-

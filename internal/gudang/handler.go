@@ -17,6 +17,7 @@ import (
 	"backend/internal/eventbus"
 	appMiddleware "backend/internal/pkg/middleware"
 	"backend/internal/pkg/response"
+	"backend/internal/pkg/timeutil"
 )
 
 type Handler struct {
@@ -127,19 +128,10 @@ func (h *Handler) PostMuatanInput(c echo.Context) error {
 	`, req.JenisRitase, req.RitaseKe).Scan(&jamMulai, &jamSelesai)
 
 	if errJadwal == nil && jamMulai != "" && jamSelesai != "" {
-		now := time.Now()
-		nowMin := now.Hour()*60 + now.Minute()
-		mulaiMin := parseTimeMinutes(jamMulai)
-		selesaiMin := parseTimeMinutes(jamSelesai)
-		startMin, endMin := mulaiMin, selesaiMin
-		if endMin <= startMin {
-			endMin += 1440
-		}
-		checkMin := nowMin
-		if checkMin < startMin {
-			checkMin += 1440
-		}
-		if checkMin < startMin || checkMin > endMin {
+		now := timeutil.NowWIB()
+		if !timeutil.WithinMinutes(now, parseTimeMinutes(jamMulai), parseTimeMinutes(jamSelesai)) {
+			log.Printf("[Gudang] input ditolak: waktu %02d:%02d WIB di luar window %s-%s (jenis=%s ritase_ke=%d)",
+				now.Hour(), now.Minute(), jamMulai[:5], jamSelesai[:5], req.JenisRitase, req.RitaseKe)
 			return response.Error(c, http.StatusBadRequest,
 				fmt.Sprintf("input hanya bisa dilakukan pada jam %s - %s", jamMulai[:5], jamSelesai[:5]))
 		}

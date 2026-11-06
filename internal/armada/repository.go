@@ -500,10 +500,45 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 	       COALESCE(u.role, 'driver') AS role_driver,
 	       -- Muatan dibawa driver: input pickup sendiri + yang dikonfirmasi kapten
 	       -- ke ritase ini. Fallback ke total ritase / tracking / event seperti semula.
-	       COALESCE(NULLIF(COALESCE(pl.pickup_awb, 0) + COALESCE(cf.confirm_awb, 0), 0), r.total_awb, t.jumlah_koli, re.jumlah_koli, 0) AS total_awb
+	       COALESCE(NULLIF(COALESCE(pl.pickup_awb, 0) + COALESCE(cf.confirm_awb, 0), 0), r.total_awb, t.jumlah_koli, re.jumlah_koli, 0) AS total_awb,
+	       COALESCE(cf.confirm_src_count, 0) > 0 AS has_confirmation,
+	       COALESCE(gl.gateway, '') AS gateway_akhir,
+	       GREATEST(
+	           COALESCE(cf.confirm_koli, 0) + COALESCE(cf.confirm_koli_hv, 0)
+	           - CASE WHEN dg.jkt_done THEN
+	                 COALESCE(cf.confirm_koli_jkt, 0) + COALESCE(cf.confirm_koli_hv_jkt, 0)
+	             ELSE 0 END
+	           - CASE WHEN dg.seg_done THEN
+	                 COALESCE(cf.confirm_koli_seg, 0) + COALESCE(cf.confirm_koli_btn, 0) +
+	                 COALESCE(cf.confirm_koli_hv_seg, 0) + COALESCE(cf.confirm_koli_hv_btn, 0)
+	             ELSE 0 END,
+	           0
+	       ) AS bubble_total
 		FROM armada_tracking t
 		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
 		LEFT JOIN ritase r ON r.id_ritase = t.id_ritase
+		LEFT JOIN LATERAL (
+			SELECT COALESCE(
+				r.id_drop_point,
+				(SELECT rs.id_drop_point
+				 FROM ritase_stop rs
+				 WHERE rs.id_ritase = r.id_ritase AND rs.id_drop_point IS NOT NULL
+				 ORDER BY rs.urutan DESC
+				 LIMIT 1)
+			) AS id_drop_point
+		) gwp ON true
+		LEFT JOIN drop_point dp ON dp.id_drop_point = gwp.id_drop_point
+		LEFT JOIN LATERAL (
+			SELECT CASE
+				WHEN POSITION('jkt' IN LOWER(COALESCE(dp.kode_dp, ''))) > 0
+				  OR POSITION('jkt' IN LOWER(COALESCE(dp.nama_drop_point, ''))) > 0 THEN 'JKT'
+				WHEN POSITION('seg' IN LOWER(COALESCE(dp.kode_dp, ''))) > 0
+				  OR POSITION('seg' IN LOWER(COALESCE(dp.nama_drop_point, ''))) > 0
+				  OR POSITION('btn' IN LOWER(COALESCE(dp.kode_dp, ''))) > 0
+				  OR POSITION('btn' IN LOWER(COALESCE(dp.nama_drop_point, ''))) > 0 THEN 'SEG'
+				ELSE ''
+			END AS gateway
+		) gl ON true
 		LEFT JOIN driver d ON d.id_driver = t.id_driver
 		LEFT JOIN LATERAL (
 			SELECT * FROM users WHERE id_driver = t.id_driver ORDER BY id_user DESC LIMIT 1
@@ -544,6 +579,15 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 			       COALESCE(SUM(
 			           COALESCE(kp.koli_jkt, 0) + COALESCE(kp.koli_seg, 0) + COALESCE(kp.koli_btn, 0)
 			       ), 0)::int AS confirm_koli,
+			       COALESCE(SUM(COALESCE(kp.koli_jkt, 0)), 0)::int AS confirm_koli_jkt,
+			       COALESCE(SUM(COALESCE(kp.koli_seg, 0)), 0)::int AS confirm_koli_seg,
+			       COALESCE(SUM(COALESCE(kp.koli_btn, 0)), 0)::int AS confirm_koli_btn,
+			       COALESCE(SUM(
+			           COALESCE(kp.koli_hv_jkt, 0) + COALESCE(kp.koli_hv_seg, 0) + COALESCE(kp.koli_hv_btn, 0)
+			       ), 0)::int AS confirm_koli_hv,
+			       COALESCE(SUM(COALESCE(kp.koli_hv_jkt, 0)), 0)::int AS confirm_koli_hv_jkt,
+			       COALESCE(SUM(COALESCE(kp.koli_hv_seg, 0)), 0)::int AS confirm_koli_hv_seg,
+			       COALESCE(SUM(COALESCE(kp.koli_hv_btn, 0)), 0)::int AS confirm_koli_hv_btn,
 			       COALESCE(SUM(
 			           COALESCE(kp.ecer_jkt, 0) + COALESCE(kp.ecer_seg, 0) + COALESCE(kp.ecer_btn, 0)
 			       ), 0)::int AS confirm_ecer,
@@ -551,11 +595,87 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 			           COALESCE(kp.koli_hv_jkt, 0) + COALESCE(kp.koli_hv_seg, 0) + COALESCE(kp.koli_hv_btn, 0) +
 			           COALESCE(kp.ecer_hv_jkt, 0) + COALESCE(kp.ecer_hv_seg, 0) + COALESCE(kp.ecer_hv_btn, 0) +
 			           COALESCE(kp.awb_hv_jkt, 0) + COALESCE(kp.awb_hv_seg, 0) + COALESCE(kp.awb_hv_btn, 0)
-			       ), 0)::int AS confirm_hv
+			       ), 0)::int AS confirm_hv,
+			       (COUNT(*) FILTER (WHERE kp.id_implant IS NOT NULL OR kp.id_gudang IS NOT NULL))::int AS confirm_src_count
 			FROM konfirmasi_penjemputan kp
 			WHERE kp.id_ritase = t.id_ritase
 			  AND (kp.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
 		) cf ON true
+		LEFT JOIN LATERAL (
+			SELECT ev.nama_lokasi
+			FROM ritase_event ev
+			WHERE ev.id_ritase = t.id_ritase
+			  AND ev.nama_lokasi IS NOT NULL
+			  AND ev.nama_lokasi != ''
+			ORDER BY ev.created_at DESC, ev.id_event DESC
+			LIMIT 1
+		) le ON true
+		LEFT JOIN LATERAL (
+			SELECT CASE
+				WHEN POSITION('jkt' IN LOWER(COALESCE(dp_cur.kode_dp, ''))) > 0
+				  OR POSITION('jkt' IN LOWER(COALESCE(dp_cur.nama_drop_point, ''))) > 0 THEN 'JKT'
+				WHEN POSITION('seg' IN LOWER(COALESCE(dp_cur.kode_dp, ''))) > 0
+				  OR POSITION('seg' IN LOWER(COALESCE(dp_cur.nama_drop_point, ''))) > 0
+				  OR POSITION('btn' IN LOWER(COALESCE(dp_cur.kode_dp, ''))) > 0
+				  OR POSITION('btn' IN LOWER(COALESCE(dp_cur.nama_drop_point, ''))) > 0 THEN 'SEG'
+				ELSE ''
+			END AS gateway
+			FROM (
+				SELECT COALESCE(NULLIF(t.nama_lokasi, ''), le.nama_lokasi, '') AS loc
+			) l
+			JOIN drop_point dp_cur ON (
+				TRIM(dp_cur.nama_drop_point) != ''
+				AND l.loc != ''
+				AND (
+					LOWER(TRIM(dp_cur.nama_drop_point)) = LOWER(TRIM(l.loc))
+					OR POSITION(LOWER(TRIM(dp_cur.nama_drop_point)) IN LOWER(l.loc)) > 0
+					OR POSITION(LOWER(TRIM(l.loc)) IN LOWER(dp_cur.nama_drop_point)) > 0
+				)
+			)
+			ORDER BY (LOWER(TRIM(dp_cur.nama_drop_point)) = LOWER(TRIM(l.loc))) DESC, dp_cur.id_drop_point
+			LIMIT 1
+		) cur ON true
+		LEFT JOIN LATERAL (
+			SELECT
+				BOOL_OR(
+					POSITION('jkt' IN LOWER(COALESCE(dp_ev.kode_dp, ''))) > 0
+					OR POSITION('jkt' IN LOWER(COALESCE(dp_ev.nama_drop_point, ''))) > 0
+				) AS jkt_done,
+				BOOL_OR(
+					POSITION('seg' IN LOWER(COALESCE(dp_ev.kode_dp, ''))) > 0
+					OR POSITION('seg' IN LOWER(COALESCE(dp_ev.nama_drop_point, ''))) > 0
+					OR POSITION('btn' IN LOWER(COALESCE(dp_ev.kode_dp, ''))) > 0
+					OR POSITION('btn' IN LOWER(COALESCE(dp_ev.nama_drop_point, ''))) > 0
+				) AS seg_done
+			FROM ritase_event ev
+			JOIN drop_point dp_ev ON (
+				TRIM(dp_ev.nama_drop_point) != ''
+				AND ev.nama_lokasi IS NOT NULL
+				AND ev.nama_lokasi != ''
+				AND (
+					LOWER(TRIM(dp_ev.nama_drop_point)) = LOWER(TRIM(ev.nama_lokasi))
+					OR POSITION(LOWER(TRIM(dp_ev.nama_drop_point)) IN LOWER(ev.nama_lokasi)) > 0
+					OR POSITION(LOWER(TRIM(ev.nama_lokasi)) IN LOWER(dp_ev.nama_drop_point)) > 0
+				)
+			)
+			WHERE ev.id_ritase = t.id_ritase
+			  AND LOWER(ev.status) IN ('tiba', 'bongkar barang')
+		) evg ON true
+		LEFT JOIN LATERAL (
+			SELECT
+				COALESCE(
+					COALESCE(evg.jkt_done, false)
+					OR (LOWER(COALESCE(t.status, '')) LIKE 'sedang menuju%%' AND cur.gateway = 'JKT')
+					OR (LOWER(COALESCE(t.status, '')) IN ('tiba', 'bongkar barang') AND cur.gateway = 'JKT'),
+					false
+				) AS jkt_done,
+				COALESCE(
+					COALESCE(evg.seg_done, false)
+					OR (LOWER(COALESCE(t.status, '')) LIKE 'sedang menuju%%' AND cur.gateway = 'SEG')
+					OR (LOWER(COALESCE(t.status, '')) IN ('tiba', 'bongkar barang') AND cur.gateway = 'SEG'),
+					false
+				) AS seg_done
+		) dg ON true
 		ORDER BY t.last_update DESC
 	`, offlineExpr, sessionHours, sessionHours))
 	if err != nil {
@@ -572,7 +692,7 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 			&t.JumlahKoli, &t.JumlahEcer, &t.JumlahHighValue,
 			&t.LastUpdate,
 			&t.Offline, &t.SessionOnline, &t.LastLogin, &t.LastOpen,
-			&t.RoleDriver, &t.TotalAWB); err != nil {
+			&t.RoleDriver, &t.TotalAWB, &t.HasConfirmation, &t.GatewayAkhir, &t.BubbleTotal); err != nil {
 			return nil, err
 		}
 		items = append(items, t)
@@ -605,7 +725,7 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 		       END AS high_value,
 		       CASE 
 		           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0) THEN 
-		               CASE WHEN kap.taken_awb >= kap.kap_awb AND kap.taken_koli >= kap.kap_koli AND kap.taken_awb > 0 THEN 'sudah_diambil' ELSE 'menunggu' END
+		               CASE WHEN kap.taken_awb >= kap.kap_awb AND kap.taken_koli >= kap.kap_koli AND (kap.kap_awb + kap.kap_koli > 0) THEN 'sudah_diambil' ELSE 'menunggu' END
 		           WHEN ibl.status IS NOT NULL THEN ibl.status
 		           ELSE 'menunggu'
 		       END AS status_pickup,
@@ -737,7 +857,7 @@ func (r *Repository) ListImplantLocations(ctx context.Context) ([]ImplantLocatio
 	       END AS high_value,
 	       CASE
 	           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0) THEN
-	               CASE WHEN kap.taken_awb >= kap.kap_awb AND kap.taken_koli >= kap.kap_koli AND kap.taken_awb > 0 THEN 'sudah_diambil' ELSE 'menunggu' END
+	               CASE WHEN kap.taken_awb >= kap.kap_awb AND kap.taken_koli >= kap.kap_koli AND (kap.kap_awb + kap.kap_koli > 0) THEN 'sudah_diambil' ELSE 'menunggu' END
 	           WHEN ibl.status IS NOT NULL THEN ibl.status
 	           ELSE 'menunggu'
 	       END AS status_pickup,
@@ -920,10 +1040,10 @@ func (r *Repository) ListImplantPoints(ctx context.Context, implants []ImplantLo
 		point.SisaKoli = intRef(sisaKoli)
 		point.Anggota = names
 		switch {
-		case totalAWB > 0 && sisaAWB <= 0:
+		case (totalAWB > 0 || totalKoli > 0) && sisaAWB <= 0 && sisaKoli <= 0:
 			st := "sudah_diambil"
 			point.StatusPickup = &st
-		case sisaAWB > 0:
+		case sisaAWB > 0 || sisaKoli > 0:
 			st := "menunggu"
 			point.StatusPickup = &st
 		}
@@ -958,7 +1078,7 @@ func (r *Repository) ListGudangLocations(ctx context.Context) ([]GudangPoint, er
 		       END AS high_value,
 		       CASE
 		           WHEN kap.count_input > 0 AND (kap.kap_awb > 0 OR kap.kap_koli > 0) THEN
-		               CASE WHEN kap.taken_awb >= kap.kap_awb AND kap.taken_koli >= kap.kap_koli AND kap.taken_awb > 0 THEN 'sudah_diambil' ELSE 'menunggu' END
+		               CASE WHEN kap.taken_awb >= kap.kap_awb AND kap.taken_koli >= kap.kap_koli AND (kap.kap_awb + kap.kap_koli > 0) THEN 'sudah_diambil' ELSE 'menunggu' END
 		           ELSE 'menunggu'
 		       END AS status_pickup,
 		       CASE
