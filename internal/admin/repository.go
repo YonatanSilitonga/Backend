@@ -155,6 +155,12 @@ func (r *Repository) ListSeller(ctx context.Context) ([]Seller, error) {
 	return items, rows.Err()
 }
 
+func (r *Repository) CheckKodeSellerExists(ctx context.Context, kode string, excludeID int64) (bool, error) {
+	var count int
+	err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM seller WHERE LOWER(TRIM(kode_seller)) = LOWER(TRIM($1)) AND id_seller != $2`, kode, excludeID).Scan(&count)
+	return count > 0, err
+}
+
 func (r *Repository) CreateSeller(ctx context.Context, req SellerRequest, createdBy int64) (int64, error) {
 	var id int64
 	err := r.db.QueryRow(ctx, `

@@ -595,7 +595,7 @@ func (r *Repository) GetAnalyticsDrivers(ctx context.Context, from, to string) (
 			SELECT id_ritase, id_driver, id_drop_point, tanggal, status, total_awb
 			FROM ritase
 			WHERE tanggal BETWEEN $1 AND $2
-			  AND status IN ('selesai', 'berjalan')
+			  AND LOWER(status) NOT IN ('batal', 'cancelled')
 		),
 		stepped_events AS (
 			SELECT id_ritase, status, created_at,
@@ -677,7 +677,7 @@ func (r *Repository) GetAnalyticsSellers(ctx context.Context, from, to string) (
 			SELECT id_ritase, tanggal, status, total_awb
 			FROM ritase
 			WHERE tanggal BETWEEN $1 AND $2
-			  AND status IN ('selesai', 'berjalan')
+			  AND LOWER(status) NOT IN ('batal', 'cancelled')
 		),
 		stepped_events AS (
 			SELECT id_ritase, status, created_at,
@@ -752,7 +752,7 @@ func (r *Repository) GetAnalyticsImplants(ctx context.Context, from, to string) 
 			SELECT id_ritase, tanggal, status, total_awb
 			FROM ritase
 			WHERE tanggal BETWEEN $1 AND $2
-			  AND status IN ('selesai', 'berjalan')
+			  AND LOWER(status) NOT IN ('batal', 'cancelled')
 		),
 		stepped_events AS (
 			SELECT id_ritase, status, created_at,
