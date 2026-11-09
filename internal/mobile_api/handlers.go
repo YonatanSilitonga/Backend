@@ -45,13 +45,13 @@ type AppVersionResponse struct {
 // APP_VERSION_CODE, APP_VERSION_NAME, APP_DOWNLOAD_URL,
 // APP_FORCE_UPDATE ("true"/"false"), APP_RELEASE_NOTES.
 func (h *APIHandler) GetAppVersion(c echo.Context) error {
-	versionCode := 18
+	versionCode := 19
 	if v, err := strconv.Atoi(os.Getenv("APP_VERSION_CODE")); err == nil && v > 0 {
 		versionCode = v
 	}
 	versionName := os.Getenv("APP_VERSION_NAME")
 	if versionName == "" {
-		versionName = "1.2.7"
+		versionName = "1.2.8"
 	}
 	downloadURL := os.Getenv("APP_DOWNLOAD_URL")
 	if downloadURL == "" {
@@ -63,7 +63,7 @@ func (h *APIHandler) GetAppVersion(c echo.Context) error {
 	}
 	releaseNotes := os.Getenv("APP_RELEASE_NOTES")
 	if releaseNotes == "" {
-		releaseNotes = "Update v1.2.7: Auto-correct dan saran pencarian nama seller aktif, perbaikan pencegahan posisi terakhir armada, dan pembaruan stabilitas aplikasi."
+		releaseNotes = "Update v1.2.8: Peningkatan akurasi live tracking armada, sinkronisasi rute aktif, dan peningkatan stabilitas aplikasi."
 	}
 	return c.JSON(http.StatusOK, AppVersionResponse{
 		VersionCode:  versionCode,

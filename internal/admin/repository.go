@@ -60,11 +60,17 @@ func (r *Repository) UpdateDriver(ctx context.Context, id int64, req DriverReque
 		WHERE id_driver=$8`,
 		req.NamaDriver, req.NoHP, req.NoSIM, req.JenisSIM, req.Jabatan, req.StatusDriver, updatedBy, id,
 	)
+	if err == nil && req.StatusDriver != "" {
+		_, _ = r.db.Exec(ctx, `UPDATE users SET status=$1, updated_at=NOW(), updated_by=$2 WHERE id_driver=$3`, req.StatusDriver, updatedBy, id)
+	}
 	return err
 }
 
 func (r *Repository) DeleteDriver(ctx context.Context, id int64) error {
 	_, err := r.db.Exec(ctx, `UPDATE driver SET status_driver='nonaktif' WHERE id_driver=$1`, id)
+	if err == nil {
+		_, _ = r.db.Exec(ctx, `UPDATE users SET status='nonaktif', updated_at=NOW() WHERE id_driver=$1`, id)
+	}
 	return err
 }
 
@@ -356,6 +362,13 @@ func (r *Repository) UpdateUserRole(ctx context.Context, id int64, role string, 
 
 func (r *Repository) UpdateUserStatus(ctx context.Context, id int64, status string, updatedBy int64) error {
 	_, err := r.db.Exec(ctx, `UPDATE users SET status=$1, updated_at=NOW(), updated_by=$2 WHERE id_user=$3`, status, updatedBy, id)
+	if err == nil {
+		_, _ = r.db.Exec(ctx, `
+			UPDATE driver 
+			SET status_driver=$1, updated_at=NOW(), updated_by=$2 
+			WHERE id_driver=(SELECT id_driver FROM users WHERE id_user=$3 AND id_driver IS NOT NULL)
+		`, status, updatedBy, id)
+	}
 	return err
 }
 

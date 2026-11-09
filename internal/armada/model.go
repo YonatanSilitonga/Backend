@@ -172,6 +172,8 @@ type DriverPickupItem struct {
 	SessionOnline bool       `json:"session_online"`
 	LastLogin     *time.Time `json:"last_login,omitempty"`
 	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
+	StatusDriver  string     `json:"status_driver,omitempty"`
+	StatusUser    string     `json:"status_user,omitempty"`
 }
 
 // DriverPickupSellerItem satu entri seller pada multi-input driver pickup.

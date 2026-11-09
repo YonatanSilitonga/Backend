@@ -1547,10 +1547,12 @@ func (r *Repository) ListDriverPickups(ctx context.Context) ([]DriverPickupItem,
 			) AS session_online,
 			u.last_login,
 			l.updated_at,
-			COALESCE(l.plat_nomor, '') AS plat_nomor
+			COALESCE(l.plat_nomor, '') AS plat_nomor,
+			COALESCE(d.status_driver, 'aktif') AS status_driver,
+			COALESCE(u.status, 'aktif') AS status_user
 		FROM users u
 		LEFT JOIN LATERAL (
-			SELECT d.nama_driver, d.no_hp
+			SELECT d.nama_driver, d.no_hp, d.status_driver
 			FROM driver d
 			WHERE (u.id_driver IS NOT NULL AND u.id_driver > 0 AND d.id_driver = u.id_driver)
 			   OR LOWER(TRIM(d.nama_driver)) = LOWER(TRIM(u.username))
@@ -1613,7 +1615,9 @@ func (r *Repository) ListDriverPickups(ctx context.Context) ([]DriverPickupItem,
 				) AS plat_nomor
 			FROM active_logs al
 		) l ON TRUE
-		WHERE LOWER(TRIM(u.role)) = 'driver_pickup' AND (u.status = 'aktif' OR u.status IS NULL OR u.status = '')
+		WHERE LOWER(TRIM(u.role)) = 'driver_pickup' 
+		  AND LOWER(TRIM(COALESCE(u.status, 'aktif'))) NOT IN ('nonaktif', 'inactive')
+		  AND LOWER(TRIM(COALESCE(d.status_driver, 'aktif'))) NOT IN ('nonaktif', 'inactive', 'off')
 
 		UNION ALL
 
@@ -1638,7 +1642,9 @@ func (r *Repository) ListDriverPickups(ctx context.Context) ([]DriverPickupItem,
 			TRUE AS session_online,
 			MAX(dpl.created_at) AS last_login,
 			MAX(dpl.updated_at) AS updated_at,
-			COALESCE((ARRAY_AGG(dpl.plat_nomor ORDER BY dpl.id_log DESC) FILTER (WHERE dpl.plat_nomor IS NOT NULL AND dpl.plat_nomor <> ''))[1], '') AS plat_nomor
+			COALESCE((ARRAY_AGG(dpl.plat_nomor ORDER BY dpl.id_log DESC) FILTER (WHERE dpl.plat_nomor IS NOT NULL AND dpl.plat_nomor <> ''))[1], '') AS plat_nomor,
+			'aktif' AS status_driver,
+			'aktif' AS status_user
 		FROM driver_pickup_log dpl
 		WHERE (dpl.id_user IS NULL OR dpl.id_user = 0)
 		  AND (dpl.tanggal = CURRENT_DATE OR dpl.tanggal = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE)
@@ -1659,7 +1665,7 @@ func (r *Repository) ListDriverPickups(ctx context.Context) ([]DriverPickupItem,
 			&item.JumlahBarang, &item.Koli, &item.Ecer, &item.HighValue,
 			&item.Status, &item.Catatan, &item.AsalSeller,
 			&item.SessionOnline, &item.LastLogin, &item.UpdatedAt,
-			&item.PlatNomor,
+			&item.PlatNomor, &item.StatusDriver, &item.StatusUser,
 		); err != nil {
 			return nil, err
 		}
