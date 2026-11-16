@@ -7,6 +7,8 @@ type Driver struct {
 	NoHP          *string `json:"no_hp,omitempty"`
 	NoSIM         *string `json:"no_sim,omitempty"`
 	JenisSIM      *string `json:"jenis_sim,omitempty"`
+	Jabatan       *string `json:"jabatan,omitempty"`
+	TipeDriver    string  `json:"tipe_driver"`
 	StatusDriver  string  `json:"status_driver"`
 	CreatedAt     *string `json:"created_at,omitempty"`
 	CreatedBy     *int64  `json:"created_by,omitempty"`
@@ -22,6 +24,7 @@ type DriverRequest struct {
 	NoSIM        *string `json:"no_sim,omitempty"`
 	JenisSIM     *string `json:"jenis_sim,omitempty"`
 	Jabatan      *string `json:"jabatan,omitempty"`
+	TipeDriver   string  `json:"tipe_driver,omitempty"`
 	StatusDriver string  `json:"status_driver"`
 }
 
@@ -31,6 +34,7 @@ type Kendaraan struct {
 	PlatNomor       string  `json:"plat_nomor"`
 	JenisKendaraan  *string `json:"jenis_kendaraan,omitempty"`
 	KapasitasKg     *int64  `json:"kapasitas_kg,omitempty"`
+	KapasitasKoli   *int64  `json:"kapasitas_koli,omitempty"`
 	StatusKendaraan string  `json:"status_kendaraan"`
 	CreatedAt       *string `json:"created_at,omitempty"`
 	CreatedBy       *int64  `json:"created_by,omitempty"`
@@ -44,6 +48,7 @@ type KendaraanRequest struct {
 	PlatNomor       string  `json:"plat_nomor"`
 	JenisKendaraan  *string `json:"jenis_kendaraan,omitempty"`
 	KapasitasKg     *int64  `json:"kapasitas_kg,omitempty"`
+	KapasitasKoli   *int64  `json:"kapasitas_koli,omitempty"`
 	StatusKendaraan string  `json:"status_kendaraan"`
 }
 
@@ -59,6 +64,7 @@ type Seller struct {
 	NoHP           *string  `json:"no_hp,omitempty"`
 	ForecastHarian *int64   `json:"forecast_harian,omitempty"`
 	Status         string   `json:"status"`
+	IsDropper      bool     `json:"is_dropper"`
 	Latitude       *float64 `json:"latitude,omitempty"`
 	Longitude      *float64 `json:"longitude,omitempty"`
 	CreatedAt      *string  `json:"created_at,omitempty"`
@@ -79,6 +85,7 @@ type SellerRequest struct {
 	NoHP           *string  `json:"no_hp,omitempty"`
 	ForecastHarian *int64   `json:"forecast_harian,omitempty"`
 	Status         string   `json:"status"`
+	IsDropper      bool     `json:"is_dropper"`
 	Latitude       *float64 `json:"latitude,omitempty"`
 	Longitude      *float64 `json:"longitude,omitempty"`
 }
@@ -150,15 +157,46 @@ type GudangRequest struct {
 	Status     string   `json:"status"`
 }
 
-// User — admin CRUD.
-type User struct {
-	ID            int64   `json:"id_user"`
-	Username      string  `json:"username"`
-	Name          string  `json:"name"`
-	Role          string  `json:"role"`
-	IDDriver      *int64  `json:"id_driver,omitempty"`
-	IsActive      bool    `json:"is_active"`
+// Karyawan — master pegawai kantor (admin/developer/direktur/tower_control).
+type Karyawan struct {
+	ID               int64   `json:"id_karyawan"`
+	NIK              *string `json:"nik,omitempty"`
+	Nama             string  `json:"nama"`
+	Jabatan          *string `json:"jabatan,omitempty"`
+	Penempatan       *string `json:"penempatan,omitempty"`
+	TempatPenugasan  *string `json:"tempat_penugasan,omitempty"`
+	Shift            *string `json:"shift,omitempty"`
+	Peran            string  `json:"peran"`
+	Status           string  `json:"status"`
+	IDUser           *int64  `json:"id_user,omitempty"`
+	CreatedAt        *string `json:"created_at,omitempty"`
+	CreatedBy        *int64  `json:"created_by,omitempty"`
+	CreatedByName    string  `json:"created_by_name,omitempty"`
+	UpdatedAt        *string `json:"updated_at,omitempty"`
+	UpdatedBy        *int64  `json:"updated_by,omitempty"`
+	UpdatedByName    string  `json:"updated_by_name,omitempty"`
+}
+
+type KaryawanRequest struct {
+	NIK             *string `json:"nik,omitempty"`
+	Nama            string  `json:"nama"`
+	Jabatan         *string `json:"jabatan,omitempty"`
+	Penempatan      *string `json:"penempatan,omitempty"`
+	TempatPenugasan *string `json:"tempat_penugasan,omitempty"`
+	Shift           *string `json:"shift,omitempty"`
+	Peran           string  `json:"peran"`
+	Status          string  `json:"status"`
+}
+
+// KoordinatorGudang — master koordinator gudang (role koor_gudang).
+type KoordinatorGudang struct {
+	ID            int64   `json:"id_koor_gudang"`
+	Nama          string  `json:"nama"`
+	NoHP          *string `json:"no_hp,omitempty"`
+	IDGudang      *int64  `json:"id_gudang,omitempty"`
+	NamaGudang    string  `json:"nama_gudang,omitempty"`
 	Status        string  `json:"status"`
+	IDUser        *int64  `json:"id_user,omitempty"`
 	CreatedAt     *string `json:"created_at,omitempty"`
 	CreatedBy     *int64  `json:"created_by,omitempty"`
 	CreatedByName string  `json:"created_by_name,omitempty"`
@@ -167,13 +205,49 @@ type User struct {
 	UpdatedByName string  `json:"updated_by_name,omitempty"`
 }
 
+type KoordinatorGudangRequest struct {
+	Nama     string `json:"nama"`
+	NoHP     *string `json:"no_hp,omitempty"`
+	IDGudang *int64  `json:"id_gudang,omitempty"`
+	Status   string `json:"status"`
+}
+
+// User — admin CRUD.
+type User struct {
+	ID              int64   `json:"id_user"`
+	Username        string  `json:"username"`
+	Name            string  `json:"name"`
+	Role            string  `json:"role"`
+	IDDriver        *int64  `json:"id_driver,omitempty"`
+	KaryawanID      *int64  `json:"karyawan_id,omitempty"`
+	IDKoorGudang    *int64  `json:"id_koor_gudang,omitempty"`
+	MustSetPassword bool    `json:"must_set_password"`
+	IsActive        bool    `json:"is_active"`
+	Status          string  `json:"status"`
+	CreatedAt       *string `json:"created_at,omitempty"`
+	CreatedBy       *int64  `json:"created_by,omitempty"`
+	CreatedByName   string  `json:"created_by_name,omitempty"`
+	UpdatedAt       *string `json:"updated_at,omitempty"`
+	UpdatedBy       *int64  `json:"updated_by,omitempty"`
+	UpdatedByName   string  `json:"updated_by_name,omitempty"`
+}
+
 type UserRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password,omitempty"`
-	Name     string `json:"name"`
-	Role     string `json:"role"`
-	IDDriver *int64 `json:"id_driver,omitempty"`
-	Status   string `json:"status,omitempty"`
+	Username     string `json:"username"`
+	Password     string `json:"password,omitempty"`
+	Name         string `json:"name"`
+	Role         string `json:"role"`
+	IDDriver     *int64 `json:"id_driver,omitempty"`
+	KaryawanID   *int64 `json:"karyawan_id,omitempty"`
+	IDKoorGudang *int64 `json:"id_koor_gudang,omitempty"`
+	KaptenUserID *int64 `json:"kapten_user_id,omitempty"`
+	Status       string `json:"status,omitempty"`
+}
+
+// LinkableActor adalah aktor master yang belum punya akun login.
+type LinkableActor struct {
+	ID   int64  `json:"id"`
+	Nama string `json:"nama"`
 }
 
 type UserStatusRequest struct {

@@ -24,17 +24,20 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 // FindByUsername mengambil user + password hash berdasarkan username.
 func (r *Repository) FindByUsername(ctx context.Context, username string) (*User, string, error) {
 	query := `
-		SELECT u.id_user, u.username, COALESCE(k.nama, u.username) AS name,
-		       u.role, u.karyawan_id, u.id_driver,
-		       COALESCE(u.seller_id, 0), COALESCE(u.status, 'aktif')
+		SELECT u.id_user, u.username,
+		       COALESCE(NULLIF(k.nama, ''), NULLIF(kg.nama, ''), NULLIF(d.nama_driver, ''), u.username) AS name,
+		       u.role, u.karyawan_id, u.id_driver, u.id_koor_gudang,
+		       COALESCE(u.seller_id, 0), COALESCE(u.status, 'aktif'), COALESCE(u.must_set_password, false)
 		FROM users u
 		LEFT JOIN karyawan k ON k.id_karyawan = u.karyawan_id
+		LEFT JOIN koordinator_gudang kg ON kg.id_koor_gudang = u.id_koor_gudang
+		LEFT JOIN driver d ON d.id_driver = u.id_driver
 		WHERE LOWER(u.username) = LOWER($1)
 	`
 	var u User
 	var pwHash string
 	var idSeller int64
-	err := r.db.QueryRow(ctx, query, username).Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.KaryawanID, &u.IDDriver, &idSeller, &u.Status)
+	err := r.db.QueryRow(ctx, query, username).Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.KaryawanID, &u.IDDriver, &u.IDKoorGudang, &idSeller, &u.Status, &u.MustSetPassword)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, "", ErrNotFound
 	}
@@ -56,16 +59,19 @@ func (r *Repository) FindByUsername(ctx context.Context, username string) (*User
 // FindByID mengambil user berdasarkan ID.
 func (r *Repository) FindByID(ctx context.Context, id int64) (*User, error) {
 	query := `
-		SELECT u.id_user, u.username, COALESCE(k.nama, u.username) AS name,
-		       u.role, u.karyawan_id, u.id_driver,
-		       COALESCE(u.seller_id, 0)
+		SELECT u.id_user, u.username,
+		       COALESCE(NULLIF(k.nama, ''), NULLIF(kg.nama, ''), NULLIF(d.nama_driver, ''), u.username) AS name,
+		       u.role, u.karyawan_id, u.id_driver, u.id_koor_gudang,
+		       COALESCE(u.seller_id, 0), COALESCE(u.must_set_password, false)
 		FROM users u
 		LEFT JOIN karyawan k ON k.id_karyawan = u.karyawan_id
+		LEFT JOIN koordinator_gudang kg ON kg.id_koor_gudang = u.id_koor_gudang
+		LEFT JOIN driver d ON d.id_driver = u.id_driver
 		WHERE u.id_user = $1
 	`
 	var u User
 	var idSeller int64
-	err := r.db.QueryRow(ctx, query, id).Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.KaryawanID, &u.IDDriver, &idSeller)
+	err := r.db.QueryRow(ctx, query, id).Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.KaryawanID, &u.IDDriver, &u.IDKoorGudang, &idSeller, &u.MustSetPassword)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

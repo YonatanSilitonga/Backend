@@ -13,6 +13,7 @@ type Claims struct {
 	UserID    int64  `json:"user_id"`
 	Username  string `json:"username"`
 	Role      string `json:"role"`
+	Platform  string `json:"platform,omitempty"`
 	IDDriver  int64  `json:"id_driver,omitempty"`
 	IDSeller  int64  `json:"id_seller,omitempty"`
 	IDImplant int64  `json:"id_implant,omitempty"`
@@ -34,6 +35,11 @@ func NewManager(secret string, ttl time.Duration) *Manager {
 // Kompatibilitas: idSeller/idImplant bersifat variadik agar pemanggil lama
 // (yang hanya kirim seller) tetap kompilasi — indeks 0 = seller, 1 = implant.
 func (m *Manager) Generate(userID int64, username, role string, idDriver int64, idLokasi ...int64) (string, error) {
+	return m.GenerateWithPlatform(userID, username, role, "", idDriver, idLokasi...)
+}
+
+// GenerateWithPlatform membuat token sekaligus mencatat asal platform (web/mobile).
+func (m *Manager) GenerateWithPlatform(userID int64, username, role, platform string, idDriver int64, idLokasi ...int64) (string, error) {
 	var sellerID, implantID int64
 	if len(idLokasi) > 0 {
 		sellerID = idLokasi[0]
@@ -46,6 +52,7 @@ func (m *Manager) Generate(userID int64, username, role string, idDriver int64, 
 		UserID:    userID,
 		Username:  username,
 		Role:      role,
+		Platform:  platform,
 		IDDriver:  idDriver,
 		IDSeller:  sellerID,
 		IDImplant: implantID,

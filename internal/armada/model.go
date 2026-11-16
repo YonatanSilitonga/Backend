@@ -308,6 +308,21 @@ type MuatanKonfirmasiItem struct {
 	Koli      int    `json:"koli"`
 	Ecer      int    `json:"ecer"`
 	HV        int    `json:"hv"`
+	KoliJKT   int    `json:"koli_jkt"`
+	KoliSEG   int    `json:"koli_seg"`
+	KoliBTN   int    `json:"koli_btn"`
+	EcerJKT   int    `json:"ecer_jkt"`
+	EcerSEG   int    `json:"ecer_seg"`
+	EcerBTN   int    `json:"ecer_btn"`
+	KoliHVJKT int    `json:"koli_hv_jkt"`
+	KoliHVSEG int    `json:"koli_hv_seg"`
+	KoliHVBTN int    `json:"koli_hv_btn"`
+	EcerHVJKT int    `json:"ecer_hv_jkt"`
+	EcerHVSEG int    `json:"ecer_hv_seg"`
+	EcerHVBTN int    `json:"ecer_hv_btn"`
+	AwbHVJKT  int    `json:"awb_hv_jkt"`
+	AwbHVSEG  int    `json:"awb_hv_seg"`
+	AwbHVBTN  int    `json:"awb_hv_btn"`
 	Oleh      string `json:"oleh"`
 	Peran     string `json:"peran"`
 	Waktu     string `json:"waktu"`

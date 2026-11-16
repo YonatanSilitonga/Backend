@@ -23,6 +23,7 @@ func Setup(e *echo.Echo) {
 			echo.HeaderAccept,
 			echo.HeaderOrigin,
 			"ngrok-skip-browser-warning", // wajib buat request browser lewat ngrok-free
+			"X-Client-Platform",          // penanda platform web/mobile
 		},
 	}))
 }

@@ -793,7 +793,7 @@ func (h *APIHandler) AdminGetMasterOptions(c echo.Context) error {
 
 	// 4. Sellers (hanya aktif — seller pindahan implant sudah nonaktif/dihapus)
 	sellers := make([]map[string]interface{}, 0)
-	sRows, _ := h.DB.Query(ctx, "SELECT id_seller, nama_seller, kode_seller FROM seller WHERE status = 'aktif' ORDER BY id_seller ASC")
+	sRows, _ := h.DB.Query(ctx, "SELECT id_seller, nama_seller, kode_seller FROM seller WHERE status = 'aktif' AND COALESCE(is_dropper, FALSE) = FALSE ORDER BY id_seller ASC")
 	if sRows != nil {
 		for sRows.Next() {
 			var id int64

@@ -7,24 +7,27 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"backend/internal/armada"
 	adminpkg "backend/internal/admin"
+	"backend/internal/armada"
 	"backend/internal/auth"
 	"backend/internal/config"
 	"backend/internal/dashboard"
 	"backend/internal/database"
 	"backend/internal/driver"
+	"backend/internal/dropper"
 	"backend/internal/eventbus"
 	"backend/internal/gudang"
 	"backend/internal/kapten"
 	"backend/internal/kendaraan"
 	"backend/internal/mobile_api"
+	"backend/internal/muatan"
 	appJWT "backend/internal/pkg/jwt"
 	appMiddleware "backend/internal/pkg/middleware"
 	"backend/internal/pkg/response"
 	"backend/internal/realtime"
 	"backend/internal/seller"
 	"backend/internal/tracking"
+	"backend/internal/utilisasi"
 )
 
 func main() {
@@ -45,6 +48,33 @@ func main() {
 		ALTER TABLE armada_tracking ADD COLUMN IF NOT EXISTS nama_lokasi VARCHAR(255);
 		ALTER TABLE input_kapten ADD COLUMN IF NOT EXISTS id_gudang BIGINT REFERENCES gudang(id_gudang);
 		ALTER TABLE konfirmasi_penjemputan ADD COLUMN IF NOT EXISTS id_gudang BIGINT REFERENCES gudang(id_gudang);
+		ALTER TABLE seller ADD COLUMN IF NOT EXISTS is_dropper BOOLEAN NOT NULL DEFAULT FALSE;
+		CREATE TABLE IF NOT EXISTS dropper_input (
+			id BIGSERIAL PRIMARY KEY,
+			id_seller BIGINT NOT NULL,
+			nama_seller VARCHAR NOT NULL,
+			jenis_ritase VARCHAR NOT NULL DEFAULT 'outgoing',
+			ritase_ke INTEGER NOT NULL CHECK (ritase_ke BETWEEN 1 AND 3),
+			jumlah_awb INTEGER NOT NULL DEFAULT 0 CHECK (jumlah_awb >= 0),
+			jumlah_awb_hv INTEGER NOT NULL DEFAULT 0 CHECK (jumlah_awb_hv >= 0),
+			catatan TEXT,
+			tanggal DATE NOT NULL DEFAULT ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Jakarta')::DATE),
+			id_user BIGINT,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			CONSTRAINT dropper_input_jumlah_check CHECK (jumlah_awb + jumlah_awb_hv > 0)
+		);
+		CREATE INDEX IF NOT EXISTS idx_dropper_input_tanggal_rit ON dropper_input (tanggal, ritase_ke);
+		CREATE INDEX IF NOT EXISTS idx_dropper_input_seller ON dropper_input (id_seller);
+		CREATE TABLE IF NOT EXISTS day_category_override (
+			tanggal DATE PRIMARY KEY,
+			kategori VARCHAR(10) NOT NULL CHECK (kategori IN ('peak','normal','low')),
+			keterangan TEXT,
+			created_by BIGINT,
+			updated_by BIGINT,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+		CREATE INDEX IF NOT EXISTS idx_day_category_override_kategori ON day_category_override (kategori);
 	`)
 
 	// Auto-recalculate armada_tracking muatan dari ritase_event (sync data)
@@ -191,6 +221,18 @@ func main() {
 	// Muatan gudang (koor gudang) — butuh JWT + role koor_gudang/admin
 	gudangH := gudang.NewHandler(db, eventBus)
 	gudangH.RegisterRoutes(v1, authMW, appMiddleware.RequireRoles("koor_gudang", "admin"))
+
+	// Input muatan dropper (seller drop langsung ke gudang) — tower_control/developer
+	dropperH := dropper.NewHandler(db)
+	dropperH.RegisterRoutes(v1, authMW, appMiddleware.RequireRoles("tower_control", "developer"))
+
+	// Rekap Total Muatan (implan + driver pickup + dropper) — tower_control/developer
+	muatanH := muatan.NewHandler(db)
+	muatanH.RegisterRoutes(v1, authMW, appMiddleware.RequireRoles("tower_control", "developer"))
+
+	// Utilisasi Muatan (matriks keterisian per kendaraan) — tower_control/developer
+	utilisasiH := utilisasi.NewHandler(db)
+	utilisasiH.RegisterRoutes(v1, authMW, appMiddleware.RequireRoles("tower_control", "developer"))
 
 	// GPS tracker hardware — sumber posisi cadangan saat HP mati.
 	// Tanpa JWT (device tidak login), dilindungi header X-Tracker-Key.

@@ -2,6 +2,8 @@ package admin
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
@@ -20,6 +22,7 @@ func NewService(repo *Repository) *Service {
 // ValidRoles adalah daftar role yang diakui sistem.
 var ValidRoles = map[string]bool{
 	"admin":         true,
+	"developer":     true,
 	"direktur":      true,
 	"tower_control": true,
 	"koor_gudang":   true,
@@ -96,6 +99,17 @@ func (s *Service) DeleteKendaraan(ctx context.Context, id int64) error {
 }
 
 // ──────── Seller ────────
+func clearDropperAddressFields(r *SellerRequest) {
+	if !r.IsDropper {
+		return
+	}
+	r.Alamat = nil
+	r.Kota = nil
+	r.Area = nil
+	r.Latitude = nil
+	r.Longitude = nil
+}
+
 func (s *Service) ListSeller(ctx context.Context) ([]Seller, error) { return s.repo.ListSeller(ctx) }
 func (s *Service) CreateSeller(ctx context.Context, r SellerRequest, createdBy int64) (int64, error) {
 	cleanKode := strings.TrimSpace(r.KodeSeller)
@@ -111,7 +125,7 @@ func (s *Service) CreateSeller(ctx context.Context, r SellerRequest, createdBy i
 		return 0, err
 	}
 	r.NoHP = clean
-	r.KodeSeller = strings.ToUpper(cleanKode)
+	clearDropperAddressFields(&r)
 	return s.repo.CreateSeller(ctx, r, createdBy)
 }
 func (s *Service) UpdateSeller(ctx context.Context, id int64, r SellerRequest, updatedBy int64) error {
@@ -128,6 +142,7 @@ func (s *Service) UpdateSeller(ctx context.Context, id int64, r SellerRequest, u
 		return err
 	}
 	r.NoHP = clean
+	clearDropperAddressFields(&r)
 	return s.repo.UpdateSeller(ctx, id, r, updatedBy)
 }
 func (s *Service) DeleteSeller(ctx context.Context, id int64) error {
@@ -189,6 +204,13 @@ func (s *Service) CreateUser(ctx context.Context, r UserRequest, createdBy int64
 	if err := checkRole(r.Role); err != nil {
 		return 0, err
 	}
+	r.Username = strings.TrimSpace(r.Username)
+	if r.Username == "" {
+		return 0, fmt.Errorf("username wajib diisi")
+	}
+	if len(r.Password) < 6 {
+		return 0, fmt.Errorf("password minimal 6 karakter")
+	}
 	exists, err := s.repo.UserExists(ctx, r.Username)
 	if err != nil {
 		return 0, err
@@ -199,6 +221,48 @@ func (s *Service) CreateUser(ctx context.Context, r UserRequest, createdBy int64
 	hash, err := bcrypt.GenerateFromPassword([]byte(r.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return 0, err
+	}
+
+	switch r.Role {
+	case "kapten":
+		if r.KaptenUserID == nil {
+			return 0, fmt.Errorf("pilih nama kapten")
+		}
+		return s.repo.ActivateKaptenAccount(ctx, *r.KaptenUserID, r.Username, string(hash), createdBy)
+	case "koor_gudang":
+		if r.IDKoorGudang == nil {
+			return 0, fmt.Errorf("pilih nama koordinator gudang")
+		}
+		nama, err := s.repo.LinkableKoordinatorGudang(ctx, *r.IDKoorGudang)
+		if err != nil {
+			return 0, err
+		}
+		r.Name = nama
+		r.IDDriver, r.KaryawanID = nil, nil
+	case "driver", "driver_pickup":
+		if r.IDDriver == nil {
+			return 0, fmt.Errorf("pilih nama driver")
+		}
+		tipe := "reguler"
+		if r.Role == "driver_pickup" {
+			tipe = "pickup"
+		}
+		nama, err := s.repo.LinkableDriver(ctx, *r.IDDriver, tipe)
+		if err != nil {
+			return 0, err
+		}
+		r.Name = nama
+		r.KaryawanID, r.IDKoorGudang = nil, nil
+	default:
+		if r.KaryawanID == nil {
+			return 0, fmt.Errorf("pilih nama karyawan")
+		}
+		nama, err := s.repo.LinkableKaryawan(ctx, r.Role, *r.KaryawanID)
+		if err != nil {
+			return 0, err
+		}
+		r.Name = nama
+		r.IDDriver, r.IDKoorGudang = nil, nil
 	}
 	return s.repo.CreateUser(ctx, r, string(hash), createdBy)
 }
@@ -222,18 +286,113 @@ func (s *Service) ResetPassword(ctx context.Context, id int64, newPassword strin
 	return s.repo.ResetPassword(ctx, id, string(hash), updatedBy)
 }
 
+// ──────── Karyawan (master pegawai kantor) ────────
+
+var peranKantor = map[string]bool{
+	"admin":         true,
+	"developer":     true,
+	"direktur":      true,
+	"tower_control": true,
+}
+
+func (s *Service) ListKaryawan(ctx context.Context, peran string) ([]Karyawan, error) {
+	return s.repo.ListKaryawan(ctx, peran)
+}
+
+func validStatus(v string) string {
+	if v == "nonaktif" {
+		return "nonaktif"
+	}
+	return "aktif"
+}
+
+func (s *Service) CreateKaryawan(ctx context.Context, r KaryawanRequest, createdBy int64) (int64, error) {
+	r.Nama = strings.TrimSpace(r.Nama)
+	if r.Nama == "" {
+		return 0, fmt.Errorf("nama wajib diisi")
+	}
+	if r.Peran == "" || !peranKantor[r.Peran] {
+		return 0, fmt.Errorf("peran tidak valid")
+	}
+	r.Status = validStatus(r.Status)
+	return s.repo.CreateKaryawan(ctx, r, createdBy)
+}
+
+func (s *Service) UpdateKaryawan(ctx context.Context, id int64, r KaryawanRequest, updatedBy int64) error {
+	r.Nama = strings.TrimSpace(r.Nama)
+	if r.Nama == "" {
+		return fmt.Errorf("nama wajib diisi")
+	}
+	r.Status = validStatus(r.Status)
+	return s.repo.UpdateKaryawan(ctx, id, r, updatedBy)
+}
+
+func (s *Service) DeleteKaryawan(ctx context.Context, id int64) error {
+	return s.repo.DeleteKaryawan(ctx, id)
+}
+
+// ──────── Koordinator Gudang ────────
+
+func (s *Service) ListKoordinatorGudang(ctx context.Context) ([]KoordinatorGudang, error) {
+	return s.repo.ListKoordinatorGudang(ctx)
+}
+
+func (s *Service) CreateKoordinatorGudang(ctx context.Context, r KoordinatorGudangRequest, createdBy int64) (int64, error) {
+	r.Nama = strings.TrimSpace(r.Nama)
+	if r.Nama == "" {
+		return 0, fmt.Errorf("nama wajib diisi")
+	}
+	cleanPhone, err := validateAndNormalizePhone(r.NoHP, "koordinator gudang")
+	if err != nil {
+		return 0, err
+	}
+	r.NoHP = cleanPhone
+	r.Status = validStatus(r.Status)
+	return s.repo.CreateKoordinatorGudang(ctx, r, createdBy)
+}
+
+func (s *Service) UpdateKoordinatorGudang(ctx context.Context, id int64, r KoordinatorGudangRequest, updatedBy int64) error {
+	r.Nama = strings.TrimSpace(r.Nama)
+	if r.Nama == "" {
+		return fmt.Errorf("nama wajib diisi")
+	}
+	cleanPhone, err := validateAndNormalizePhone(r.NoHP, "koordinator gudang")
+	if err != nil {
+		return err
+	}
+	r.NoHP = cleanPhone
+	r.Status = validStatus(r.Status)
+	return s.repo.UpdateKoordinatorGudang(ctx, id, r, updatedBy)
+}
+
+func (s *Service) DeleteKoordinatorGudang(ctx context.Context, id int64, updatedBy int64) error {
+	return s.repo.DeleteKoordinatorGudang(ctx, id, updatedBy)
+}
+
+func (s *Service) ListLinkableActors(ctx context.Context, role string) ([]LinkableActor, error) {
+	if err := checkRole(role); err != nil {
+		return nil, err
+	}
+	return s.repo.ListLinkableActors(ctx, role)
+}
+
 // ──────── Kapten (profil + akun + mapping seller) ────────
 
-const defaultKaptenPassword = "kapten123"
-
-// usernameKapten membuat username unik "kapten <nama>" (collision → tambah angka).
-func (s *Service) usernameKapten(ctx context.Context, nama string) (string, error) {
-	base := "kapten " + strings.ToLower(strings.TrimSpace(nama))
-	if base == "kapten " {
-		base = "kapten"
+func randomToken(n int) (string, error) {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
 	}
-	candidate := base
-	for n := 2; ; n++ {
+	return hex.EncodeToString(buf), nil
+}
+
+func (s *Service) placeholderKaptenUsername(ctx context.Context) (string, error) {
+	for i := 0; i < 5; i++ {
+		tok, err := randomToken(6)
+		if err != nil {
+			return "", err
+		}
+		candidate := "pending-kpt-" + tok
 		exists, err := s.repo.UserExists(ctx, candidate)
 		if err != nil {
 			return "", err
@@ -241,8 +400,8 @@ func (s *Service) usernameKapten(ctx context.Context, nama string) (string, erro
 		if !exists {
 			return candidate, nil
 		}
-		candidate = fmt.Sprintf("%s %d", base, n)
 	}
+	return "", fmt.Errorf("gagal membuat username sementara")
 }
 
 func (s *Service) ListKapten(ctx context.Context) ([]Kapten, error) {
@@ -253,8 +412,7 @@ func (s *Service) GetKapten(ctx context.Context, id int64) (*Kapten, error) {
 	return s.repo.GetKapten(ctx, id)
 }
 
-// CreateKapten membuat akun login + profil + mapping dalam satu transaksi.
-// Username auto bila kosong; password default kapten123 bila kosong (dikembalikan sekali).
+// CreateKapten membuat profil + baris login nonaktif (akun diaktifkan di Users & Role).
 func (s *Service) CreateKapten(ctx context.Context, r KaptenRequest, createdBy int64) (*KaptenCreated, error) {
 	cleanPhone, err := validateAndNormalizePhone(r.NoHP, "kapten")
 	if err != nil {
@@ -271,34 +429,13 @@ func (s *Service) CreateKapten(ctx context.Context, r KaptenRequest, createdBy i
 	if status != "aktif" && status != "nonaktif" {
 		return nil, fmt.Errorf("status harus 'aktif' atau 'nonaktif'")
 	}
-	username := ""
-	if r.Username != nil {
-		username = strings.TrimSpace(*r.Username)
+	username, err := s.placeholderKaptenUsername(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if username == "" {
-		var err error
-		username, err = s.usernameKapten(ctx, r.Nama)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		exists, err := s.repo.UserExists(ctx, username)
-		if err != nil {
-			return nil, err
-		}
-		if exists {
-			return nil, ErrUsernameExists
-		}
-	}
-	password := ""
-	if r.Password != nil {
-		password = *r.Password
-	}
-	if password == "" {
-		password = defaultKaptenPassword
-	}
-	if len(password) < 6 {
-		return nil, fmt.Errorf("password minimal 6 karakter")
+	password, err := randomToken(16)
+	if err != nil {
+		return nil, err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -316,8 +453,8 @@ func (s *Service) CreateKapten(ctx context.Context, r KaptenRequest, createdBy i
 	return &KaptenCreated{
 		IDKapten:     idKapten,
 		IDUser:       idUser,
-		Username:     username,
-		PasswordAwal: password,
+		Username:     "",
+		PasswordAwal: "",
 		SellerCount:  len(r.SellerIDs),
 		ImplantCount: len(r.ImplantIDs),
 	}, nil

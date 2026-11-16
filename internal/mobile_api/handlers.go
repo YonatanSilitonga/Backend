@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -111,6 +112,13 @@ func (h *APIHandler) Login(c echo.Context) error {
 		return response.Error(c, http.StatusUnauthorized, "Password salah")
 	}
 
+	// Endpoint mobile hanya untuk akun yang memang boleh memakai aplikasi mobile.
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "driver", "driver_pickup", "kapten":
+	default:
+		return response.Error(c, http.StatusForbidden, "Akun ini hanya bisa dipakai di dashboard web")
+	}
+
 	// Cari id_driver yang sesuai dengan username driver
 	var idDriver int64
 	var namaDriver string
@@ -147,7 +155,7 @@ func (h *APIHandler) GetSellers(c echo.Context) error {
 	defer cancel()
 
 	rows, err := h.DB.Query(ctx, `
-		SELECT id_seller, COALESCE(kode_seller, ''), nama_seller, COALESCE(alamat, ''), COALESCE(kota, ''), COALESCE(pic, ''), COALESCE(no_hp, '')
+		SELECT id_seller, COALESCE(kode_seller, ''), nama_seller, COALESCE(alamat, ''), COALESCE(kota, ''), COALESCE(pic, ''), COALESCE(no_hp, ''), COALESCE(is_dropper, FALSE)
 		FROM seller
 		WHERE status = 'aktif'
 		ORDER BY nama_seller ASC
@@ -161,16 +169,18 @@ func (h *APIHandler) GetSellers(c echo.Context) error {
 	for rows.Next() {
 		var id int
 		var kode, nama, alamat, kota, pic, noHp string
-		if err := rows.Scan(&id, &kode, &nama, &alamat, &kota, &pic, &noHp); err == nil {
+		var isDropper bool
+		if err := rows.Scan(&id, &kode, &nama, &alamat, &kota, &pic, &noHp, &isDropper); err == nil {
 			list = append(list, map[string]interface{}{
-				"id":      id,
-				"code":    kode,
-				"name":    nama,
+				"id":          id,
+				"code":        kode,
+				"name":        nama,
 				"nama_seller": nama,
-				"address": alamat,
-				"city":    kota,
-				"pic":     pic,
-				"no_hp":   noHp,
+				"address":     alamat,
+				"city":        kota,
+				"pic":         pic,
+				"no_hp":       noHp,
+				"is_dropper":  isDropper,
 			})
 		}
 	}
@@ -240,4 +250,3 @@ func (h *APIHandler) GetVehicles(c echo.Context) error {
 
 	return response.OK(c, list)
 }
-

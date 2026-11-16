@@ -21,13 +21,18 @@ func NewService(repo *Repository, jwtManager *jwt.Manager) *Service {
 }
 
 // Login memverifikasi username/email + password lalu mengembalikan user & token.
-func (s *Service) Login(ctx context.Context, req LoginRequest) (*AuthResponse, error) {
+func (s *Service) Login(ctx context.Context, req LoginRequest, platform ...string) (*AuthResponse, error) {
 	identifier := req.Username
 	if identifier == "" {
 		identifier = req.Email
 	}
 	if identifier == "" || req.Password == "" {
 		return nil, errors.New("username/email dan password wajib diisi")
+	}
+
+	client := "web"
+	if len(platform) > 0 && strings.TrimSpace(platform[0]) != "" {
+		client = strings.ToLower(strings.TrimSpace(platform[0]))
 	}
 
 	user, pwHash, err := s.repo.FindByUsername(ctx, identifier)
@@ -47,6 +52,13 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*AuthResponse, e
 		return nil, errors.New("akun dinonaktifkan, hubungi admin")
 	}
 
+	if client == "mobile" && !mobileRoles[user.Role] {
+		return nil, errors.New("akun ini hanya bisa dipakai di dashboard web")
+	}
+	if client != "mobile" && !webRoles[user.Role] {
+		return nil, errors.New("akun ini hanya bisa dipakai di aplikasi mobile")
+	}
+
 	var idDriver int64
 	if user.IDDriver != nil {
 		idDriver = *user.IDDriver
@@ -55,7 +67,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*AuthResponse, e
 	if user.IDSeller != nil {
 		idSeller = *user.IDSeller
 	}
-	token, err := s.jwt.Generate(user.ID, user.Username, user.Role, idDriver, idSeller)
+	token, err := s.jwt.GenerateWithPlatform(user.ID, user.Username, user.Role, client, idDriver, idSeller)
 	if err != nil {
 		return nil, err
 	}
@@ -64,6 +76,20 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*AuthResponse, e
 	_ = s.repo.SetLastLogin(ctx, user.ID)
 
 	return &AuthResponse{User: *user, Token: token}, nil
+}
+
+var webRoles = map[string]bool{
+	"admin":         true,
+	"developer":     true,
+	"direktur":      true,
+	"tower_control": true,
+	"koor_gudang":   true,
+}
+
+var mobileRoles = map[string]bool{
+	"driver":        true,
+	"driver_pickup": true,
+	"kapten":        true,
 }
 
 // Logout membersihkan penanda session online.

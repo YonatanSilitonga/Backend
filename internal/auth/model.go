@@ -4,15 +4,17 @@ import "time"
 
 // User merepresentasikan baris di tabel users, digabung dengan nama dari karyawan.
 type User struct {
-	ID         int64   `json:"id_user"`
-	Username   string  `json:"username"`
-	Name       string  `json:"name"`
-	Role       string  `json:"role"`
-	KaryawanID *int64  `json:"karyawan_id,omitempty"`
-	IDDriver   *int64  `json:"id_driver,omitempty"`
-	IDSeller   *int64  `json:"id_seller,omitempty"`
-	Status     string  `json:"status,omitempty"`
-	CreatedAt  time.Time `json:"created_at,omitempty"`
+	ID              int64     `json:"id_user"`
+	Username        string    `json:"username"`
+	Name            string    `json:"name"`
+	Role            string    `json:"role"`
+	KaryawanID      *int64    `json:"karyawan_id,omitempty"`
+	IDDriver        *int64    `json:"id_driver,omitempty"`
+	IDKoorGudang    *int64    `json:"id_koor_gudang,omitempty"`
+	IDSeller        *int64    `json:"id_seller,omitempty"`
+	Status          string    `json:"status,omitempty"`
+	MustSetPassword bool      `json:"must_set_password"`
+	CreatedAt       time.Time `json:"created_at,omitempty"`
 }
 
 // AuthResponse adalah hasil login: user + token.

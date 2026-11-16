@@ -27,7 +27,7 @@ func (h *Handler) Login(c echo.Context) error {
 		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
 	}
 
-	res, err := h.svc.Login(c.Request().Context(), req)
+	res, err := h.svc.Login(c.Request().Context(), req, c.Request().Header.Get("X-Client-Platform"))
 	if err != nil {
 		return response.Error(c, http.StatusUnauthorized, err.Error())
 	}

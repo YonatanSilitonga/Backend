@@ -503,17 +503,32 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 	       COALESCE(NULLIF(COALESCE(pl.pickup_awb, 0) + COALESCE(cf.confirm_awb, 0), 0), r.total_awb, t.jumlah_koli, re.jumlah_koli, 0) AS total_awb,
 	       COALESCE(cf.confirm_src_count, 0) > 0 AS has_confirmation,
 	       COALESCE(gl.gateway, '') AS gateway_akhir,
-	       GREATEST(
-	           COALESCE(cf.confirm_koli, 0) + COALESCE(cf.confirm_koli_hv, 0)
-	           - CASE WHEN dg.jkt_done THEN
-	                 COALESCE(cf.confirm_koli_jkt, 0) + COALESCE(cf.confirm_koli_hv_jkt, 0)
-	             ELSE 0 END
-	           - CASE WHEN dg.seg_done THEN
-	                 COALESCE(cf.confirm_koli_seg, 0) + COALESCE(cf.confirm_koli_btn, 0) +
-	                 COALESCE(cf.confirm_koli_hv_seg, 0) + COALESCE(cf.confirm_koli_hv_btn, 0)
-	             ELSE 0 END,
-	           0
-	       ) AS bubble_total
+	       -- Bubble mengikuti gateway akhir ritase:
+	       -- - belum menuju gateway akhir: total semua koli + HV koli;
+	       -- - sedang menuju gateway akhir: hanya koli gateway tersebut;
+	       -- - sudah Tiba/Bongkar Barang di gateway akhir: 0.
+	       CASE
+	           WHEN COALESCE(gl.gateway, '') = 'JKT'
+	                AND (
+	                    COALESCE(evg.jkt_done, false)
+	                    OR (LOWER(COALESCE(t.status, '')) IN ('tiba', 'bongkar barang') AND cur.gateway = 'JKT')
+	                ) THEN 0
+	           WHEN COALESCE(gl.gateway, '') = 'SEG'
+	                AND (
+	                    COALESCE(evg.seg_done, false)
+	                    OR (LOWER(COALESCE(t.status, '')) IN ('tiba', 'bongkar barang') AND cur.gateway = 'SEG')
+	                ) THEN 0
+	           WHEN COALESCE(gl.gateway, '') = 'JKT'
+	                AND LOWER(COALESCE(t.status, '')) LIKE 'sedang menuju%%'
+	                AND cur.gateway = 'JKT' THEN
+	                COALESCE(cf.confirm_koli_jkt, 0) + COALESCE(cf.confirm_koli_hv_jkt, 0)
+	           WHEN COALESCE(gl.gateway, '') = 'SEG'
+	                AND LOWER(COALESCE(t.status, '')) LIKE 'sedang menuju%%'
+	                AND cur.gateway = 'SEG' THEN
+	                COALESCE(cf.confirm_koli_seg, 0) + COALESCE(cf.confirm_koli_btn, 0) +
+	                COALESCE(cf.confirm_koli_hv_seg, 0) + COALESCE(cf.confirm_koli_hv_btn, 0)
+	           ELSE COALESCE(cf.confirm_koli, 0) + COALESCE(cf.confirm_koli_hv, 0)
+	       END AS bubble_total
 		FROM armada_tracking t
 		LEFT JOIN kendaraan k ON k.id_kendaraan = t.id_kendaraan
 		LEFT JOIN ritase r ON r.id_ritase = t.id_ritase
@@ -599,7 +614,10 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 			       (COUNT(*) FILTER (WHERE kp.id_implant IS NOT NULL OR kp.id_gudang IS NOT NULL))::int AS confirm_src_count
 			FROM konfirmasi_penjemputan kp
 			WHERE kp.id_ritase = t.id_ritase
-			  AND (kp.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+			  AND (
+			      (kp.created_at + interval '7 hours')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date
+			      OR LOWER(COALESCE(r.status, '')) = 'berjalan'
+			  )
 		) cf ON true
 		LEFT JOIN LATERAL (
 			SELECT ev.nama_lokasi
@@ -661,21 +679,6 @@ func (r *Repository) ListLatestTracking(ctx context.Context, offlineMin int, ses
 			WHERE ev.id_ritase = t.id_ritase
 			  AND LOWER(ev.status) IN ('tiba', 'bongkar barang')
 		) evg ON true
-		LEFT JOIN LATERAL (
-			SELECT
-				COALESCE(
-					COALESCE(evg.jkt_done, false)
-					OR (LOWER(COALESCE(t.status, '')) LIKE 'sedang menuju%%' AND cur.gateway = 'JKT')
-					OR (LOWER(COALESCE(t.status, '')) IN ('tiba', 'bongkar barang') AND cur.gateway = 'JKT'),
-					false
-				) AS jkt_done,
-				COALESCE(
-					COALESCE(evg.seg_done, false)
-					OR (LOWER(COALESCE(t.status, '')) LIKE 'sedang menuju%%' AND cur.gateway = 'SEG')
-					OR (LOWER(COALESCE(t.status, '')) IN ('tiba', 'bongkar barang') AND cur.gateway = 'SEG'),
-					false
-				) AS seg_done
-		) dg ON true
 		ORDER BY t.last_update DESC
 	`, offlineExpr, sessionHours, sessionHours))
 	if err != nil {
@@ -804,6 +807,7 @@ func (r *Repository) ListSellerLocations(ctx context.Context) ([]SellerLocation,
 			LIMIT 1
 		) ibl ON TRUE
 		WHERE s.latitude IS NOT NULL AND s.longitude IS NOT NULL AND s.status = 'aktif'
+		  AND COALESCE(s.is_dropper, FALSE) = FALSE
 		ORDER BY s.id_seller ASC
 	`)
 	if err != nil {
@@ -1248,8 +1252,10 @@ func roleLabelMuatan(role string) string {
 		return "Koor Gudang"
 	case "admin":
 		return "Admin"
-	case "driver", "driver_pickup":
-		return "Driver"
+	case "driver":
+		return "Driver Reguler"
+	case "driver_pickup":
+		return "Driver Pickup"
 	case "tower_control":
 		return "Tower Control"
 	case "direktur":
@@ -1360,11 +1366,11 @@ func (r *Repository) GetMuatanDetail(ctx context.Context, idRitase int64, namaLo
 	qKonfirmasi := fmt.Sprintf(`
 		SELECT kp.id,
 		       COALESCE(kp.jumlah_awb, 0),
-		       COALESCE(kp.koli_jkt,0)+COALESCE(kp.koli_seg,0)+COALESCE(kp.koli_btn,0),
-		       COALESCE(kp.ecer_jkt,0)+COALESCE(kp.ecer_seg,0)+COALESCE(kp.ecer_btn,0),
-		       COALESCE(kp.koli_hv_jkt,0)+COALESCE(kp.koli_hv_seg,0)+COALESCE(kp.koli_hv_btn,0)
-		         +COALESCE(kp.ecer_hv_jkt,0)+COALESCE(kp.ecer_hv_seg,0)+COALESCE(kp.ecer_hv_btn,0)
-		         +COALESCE(kp.awb_hv_jkt,0)+COALESCE(kp.awb_hv_seg,0)+COALESCE(kp.awb_hv_btn,0),
+		       COALESCE(kp.koli_jkt, 0), COALESCE(kp.koli_seg, 0), COALESCE(kp.koli_btn, 0),
+		       COALESCE(kp.ecer_jkt, 0), COALESCE(kp.ecer_seg, 0), COALESCE(kp.ecer_btn, 0),
+		       COALESCE(kp.koli_hv_jkt, 0), COALESCE(kp.koli_hv_seg, 0), COALESCE(kp.koli_hv_btn, 0),
+		       COALESCE(kp.ecer_hv_jkt, 0), COALESCE(kp.ecer_hv_seg, 0), COALESCE(kp.ecer_hv_btn, 0),
+		       COALESCE(kp.awb_hv_jkt, 0), COALESCE(kp.awb_hv_seg, 0), COALESCE(kp.awb_hv_btn, 0),
 		       COALESCE(u.username, '-'), COALESCE(u.role, ''),
 		       COALESCE(kp.foto_penjemputan_url, ''), COALESCE(kp.catatan, ''),
 		       kp.created_at
@@ -1381,10 +1387,20 @@ func (r *Repository) GetMuatanDetail(ctx context.Context, idRitase int64, namaLo
 		var it MuatanKonfirmasiItem
 		var username, role string
 		var waktu time.Time
-		if err := kRows.Scan(&it.ID, &it.JumlahAWB, &it.Koli, &it.Ecer, &it.HV,
+		if err := kRows.Scan(&it.ID, &it.JumlahAWB,
+			&it.KoliJKT, &it.KoliSEG, &it.KoliBTN,
+			&it.EcerJKT, &it.EcerSEG, &it.EcerBTN,
+			&it.KoliHVJKT, &it.KoliHVSEG, &it.KoliHVBTN,
+			&it.EcerHVJKT, &it.EcerHVSEG, &it.EcerHVBTN,
+			&it.AwbHVJKT, &it.AwbHVSEG, &it.AwbHVBTN,
 			&username, &role, &it.Foto, &it.Catatan, &waktu); err != nil {
 			continue
 		}
+		it.Koli = it.KoliJKT + it.KoliSEG + it.KoliBTN
+		it.Ecer = it.EcerJKT + it.EcerSEG + it.EcerBTN
+		it.HV = it.KoliHVJKT + it.KoliHVSEG + it.KoliHVBTN +
+			it.EcerHVJKT + it.EcerHVSEG + it.EcerHVBTN +
+			it.AwbHVJKT + it.AwbHVSEG + it.AwbHVBTN
 		it.Oleh = username
 		it.Peran = roleLabelMuatan(role)
 		it.Waktu = waktu.Format(time.RFC3339)

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -58,11 +59,24 @@ func (h *Handler) RegisterRoutes(g *echo.Group) {
 
 	// User
 	g.GET("/users", h.ListUser)
+	g.GET("/users/available", h.ListLinkableActors)
 	g.POST("/users", h.CreateUser)
 	g.PUT("/users/:id/role", h.UpdateUserRole)
 	g.PUT("/users/:id/status", h.UpdateUserStatus)
 	g.POST("/users/:id/reset-password", h.ResetPassword)
 	g.DELETE("/users/:id", h.DeleteUser)
+
+	// Karyawan (master pegawai kantor)
+	g.GET("/karyawan", h.ListKaryawan)
+	g.POST("/karyawan", h.CreateKaryawan)
+	g.PUT("/karyawan/:id", h.UpdateKaryawan)
+	g.DELETE("/karyawan/:id", h.DeleteKaryawan)
+
+	// Koordinator gudang
+	g.GET("/koordinator-gudang", h.ListKoordinatorGudang)
+	g.POST("/koordinator-gudang", h.CreateKoordinatorGudang)
+	g.PUT("/koordinator-gudang/:id", h.UpdateKoordinatorGudang)
+	g.DELETE("/koordinator-gudang/:id", h.DeleteKoordinatorGudang)
 
 	// Kapten (profil + akun + mapping seller)
 	g.GET("/kapten", h.ListKapten)
@@ -130,6 +144,7 @@ func (h *Handler) DeleteDriver(c echo.Context) error {
 func (h *Handler) ListKendaraan(c echo.Context) error {
 	data, err := h.svc.ListKendaraan(c.Request().Context())
 	if err != nil {
+		log.Printf("[ADMIN] gagal mengambil data kendaraan: %v", err)
 		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data kendaraan")
 	}
 	return response.OK(c, data)
@@ -146,6 +161,7 @@ func (h *Handler) CreateKendaraan(c echo.Context) error {
 	createdBy := c.Get(middleware.CtxUserID).(int64)
 	id, err := h.svc.CreateKendaraan(c.Request().Context(), req, createdBy)
 	if err != nil {
+		log.Printf("[ADMIN] gagal membuat kendaraan: %v", err)
 		return response.Error(c, http.StatusInternalServerError, "gagal membuat kendaraan")
 	}
 	return response.Created(c, map[string]any{"id_kendaraan": id})
@@ -162,6 +178,7 @@ func (h *Handler) UpdateKendaraan(c echo.Context) error {
 	}
 	updatedBy := c.Get(middleware.CtxUserID).(int64)
 	if err := h.svc.UpdateKendaraan(c.Request().Context(), id, req, updatedBy); err != nil {
+		log.Printf("[ADMIN] gagal update kendaraan: %v", err)
 		return response.Error(c, http.StatusInternalServerError, "gagal update kendaraan")
 	}
 	return response.OK(c, map[string]string{"message": "kendaraan diperbarui"})
@@ -173,6 +190,7 @@ func (h *Handler) DeleteKendaraan(c echo.Context) error {
 		return response.Error(c, http.StatusBadRequest, "id tidak valid")
 	}
 	if err := h.svc.DeleteKendaraan(c.Request().Context(), id); err != nil {
+		log.Printf("[ADMIN] gagal menonaktifkan kendaraan: %v", err)
 		return response.Error(c, http.StatusInternalServerError, "gagal menonaktifkan kendaraan")
 	}
 	return response.OK(c, map[string]string{"message": "kendaraan dinonaktifkan"})
@@ -426,9 +444,27 @@ func (h *Handler) CreateUser(c echo.Context) error {
 		if errors.Is(err, ErrUsernameExists) {
 			return response.Error(c, http.StatusConflict, "username sudah digunakan")
 		}
-		return response.Error(c, http.StatusInternalServerError, "gagal membuat user")
+		if errors.Is(err, ErrActorNotAvailable) {
+			return response.Error(c, http.StatusBadRequest, err.Error())
+		}
+		return response.Error(c, http.StatusBadRequest, err.Error())
 	}
-	return response.Created(c, map[string]any{"id_user": id})
+	return response.Created(c, map[string]any{"id_user": id, "username": req.Username})
+}
+
+func (h *Handler) ListLinkableActors(c echo.Context) error {
+	role := c.QueryParam("role")
+	if role == "" {
+		return response.Error(c, http.StatusBadRequest, "role wajib diisi")
+	}
+	data, err := h.svc.ListLinkableActors(c.Request().Context(), role)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, err.Error())
+	}
+	if data == nil {
+		data = []LinkableActor{}
+	}
+	return response.OK(c, data)
 }
 
 func (h *Handler) UpdateUserRole(c echo.Context) error {
@@ -498,6 +534,113 @@ func (h *Handler) DeleteUser(c echo.Context) error {
 		return response.Error(c, http.StatusInternalServerError, "gagal menghapus user")
 	}
 	return response.OK(c, map[string]string{"message": "user dihapus"})
+}
+
+// ──────── Karyawan (master pegawai kantor) ────────
+
+func (h *Handler) ListKaryawan(c echo.Context) error {
+	data, err := h.svc.ListKaryawan(c.Request().Context(), c.QueryParam("peran"))
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data karyawan")
+	}
+	if data == nil {
+		data = []Karyawan{}
+	}
+	return response.OK(c, data)
+}
+
+func (h *Handler) CreateKaryawan(c echo.Context) error {
+	var req KaryawanRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
+	}
+	createdBy := c.Get(middleware.CtxUserID).(int64)
+	id, err := h.svc.CreateKaryawan(c.Request().Context(), req, createdBy)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, err.Error())
+	}
+	return response.Created(c, map[string]any{"id_karyawan": id})
+}
+
+func (h *Handler) UpdateKaryawan(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "id tidak valid")
+	}
+	var req KaryawanRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
+	}
+	updatedBy := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.UpdateKaryawan(c.Request().Context(), id, req, updatedBy); err != nil {
+		return response.Error(c, http.StatusBadRequest, err.Error())
+	}
+	return response.OK(c, map[string]string{"message": "karyawan diperbarui"})
+}
+
+func (h *Handler) DeleteKaryawan(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "id tidak valid")
+	}
+	if err := h.svc.DeleteKaryawan(c.Request().Context(), id); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal menonaktifkan karyawan")
+	}
+	return response.OK(c, map[string]string{"message": "karyawan dinonaktifkan"})
+}
+
+// ──────── Koordinator Gudang ────────
+
+func (h *Handler) ListKoordinatorGudang(c echo.Context) error {
+	data, err := h.svc.ListKoordinatorGudang(c.Request().Context())
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data koordinator gudang")
+	}
+	if data == nil {
+		data = []KoordinatorGudang{}
+	}
+	return response.OK(c, data)
+}
+
+func (h *Handler) CreateKoordinatorGudang(c echo.Context) error {
+	var req KoordinatorGudangRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
+	}
+	createdBy := c.Get(middleware.CtxUserID).(int64)
+	id, err := h.svc.CreateKoordinatorGudang(c.Request().Context(), req, createdBy)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, err.Error())
+	}
+	return response.Created(c, map[string]any{"id_koor_gudang": id})
+}
+
+func (h *Handler) UpdateKoordinatorGudang(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "id tidak valid")
+	}
+	var req KoordinatorGudangRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
+	}
+	updatedBy := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.UpdateKoordinatorGudang(c.Request().Context(), id, req, updatedBy); err != nil {
+		return response.Error(c, http.StatusBadRequest, err.Error())
+	}
+	return response.OK(c, map[string]string{"message": "koordinator gudang diperbarui"})
+}
+
+func (h *Handler) DeleteKoordinatorGudang(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "id tidak valid")
+	}
+	updatedBy := c.Get(middleware.CtxUserID).(int64)
+	if err := h.svc.DeleteKoordinatorGudang(c.Request().Context(), id, updatedBy); err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal menonaktifkan koordinator gudang")
+	}
+	return response.OK(c, map[string]string{"message": "koordinator gudang dinonaktifkan"})
 }
 
 // ──────── Kapten ────────

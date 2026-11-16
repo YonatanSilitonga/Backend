@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -20,7 +21,8 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 
 func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT d.id_driver, d.nama_driver, d.no_hp, d.no_sim, d.jenis_sim, d.status_driver,
+		SELECT d.id_driver, d.nama_driver, d.no_hp, d.no_sim, d.jenis_sim, d.jabatan,
+		       COALESCE(d.tipe_driver, 'reguler'), d.status_driver,
 		       d.created_at, d.created_by, COALESCE(u1.username, ''),
 		       d.updated_at, d.updated_by, COALESCE(u2.username, '')
 		FROM driver d
@@ -34,8 +36,8 @@ func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 	var items []Driver
 	for rows.Next() {
 		var d Driver
-		if err := rows.Scan(&d.ID, &d.NamaDriver, &d.NoHP, &d.NoSIM, &d.JenisSIM, &d.StatusDriver,
-			&d.CreatedAt, &d.CreatedBy, &d.CreatedByName, &d.UpdatedAt, &d.UpdatedBy, &d.UpdatedByName); err != nil {
+		if err := rows.Scan(&d.ID, &d.NamaDriver, &d.NoHP, &d.NoSIM, &d.JenisSIM, &d.Jabatan, &d.TipeDriver,
+			&d.StatusDriver, &d.CreatedAt, &d.CreatedBy, &d.CreatedByName, &d.UpdatedAt, &d.UpdatedBy, &d.UpdatedByName); err != nil {
 			return nil, err
 		}
 		items = append(items, d)
@@ -44,21 +46,30 @@ func (r *Repository) ListDriver(ctx context.Context) ([]Driver, error) {
 }
 
 func (r *Repository) CreateDriver(ctx context.Context, req DriverRequest, createdBy int64) (int64, error) {
+	tipe := req.TipeDriver
+	if tipe != "pickup" {
+		tipe = "reguler"
+	}
 	var id int64
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO driver (nama_driver, no_hp, no_sim, jenis_sim, jabatan, status_driver, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id_driver`,
-		req.NamaDriver, req.NoHP, req.NoSIM, req.JenisSIM, req.Jabatan, req.StatusDriver, createdBy,
+		INSERT INTO driver (nama_driver, no_hp, no_sim, jenis_sim, jabatan, tipe_driver, status_driver, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id_driver`,
+		req.NamaDriver, req.NoHP, req.NoSIM, req.JenisSIM, req.Jabatan, tipe, req.StatusDriver, createdBy,
 	).Scan(&id)
 	return id, err
 }
 
 func (r *Repository) UpdateDriver(ctx context.Context, id int64, req DriverRequest, updatedBy int64) error {
+	var tipe *string
+	if req.TipeDriver == "pickup" || req.TipeDriver == "reguler" {
+		tipe = &req.TipeDriver
+	}
 	_, err := r.db.Exec(ctx, `
-		UPDATE driver SET nama_driver=$1, no_hp=$2, no_sim=$3, jenis_sim=$4, jabatan=$5, status_driver=$6,
-		                  updated_at=NOW(), updated_by=$7
-		WHERE id_driver=$8`,
-		req.NamaDriver, req.NoHP, req.NoSIM, req.JenisSIM, req.Jabatan, req.StatusDriver, updatedBy, id,
+		UPDATE driver SET nama_driver=$1, no_hp=$2, no_sim=$3, jenis_sim=$4, jabatan=$5,
+		                  tipe_driver=COALESCE($6, tipe_driver), status_driver=$7,
+		                  updated_at=NOW(), updated_by=$8
+		WHERE id_driver=$9`,
+		req.NamaDriver, req.NoHP, req.NoSIM, req.JenisSIM, req.Jabatan, tipe, req.StatusDriver, updatedBy, id,
 	)
 	if err == nil && req.StatusDriver != "" {
 		_, _ = r.db.Exec(ctx, `UPDATE users SET status=$1, updated_at=NOW(), updated_by=$2 WHERE id_driver=$3`, req.StatusDriver, updatedBy, id)
@@ -78,7 +89,7 @@ func (r *Repository) DeleteDriver(ctx context.Context, id int64) error {
 
 func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT k.id_kendaraan, k.plat_nomor, k.jenis_kendaraan, k.kapasitas_kg, k.status_kendaraan,
+		SELECT k.id_kendaraan, k.plat_nomor, k.jenis_kendaraan, k.kapasitas_kg, k.kapasitas_koli, k.status_kendaraan,
 		       k.created_at, k.created_by, COALESCE(u1.username, ''),
 		       k.updated_at, k.updated_by, COALESCE(u2.username, '')
 		FROM kendaraan k
@@ -92,7 +103,7 @@ func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 	var items []Kendaraan
 	for rows.Next() {
 		var k Kendaraan
-		if err := rows.Scan(&k.ID, &k.PlatNomor, &k.JenisKendaraan, &k.KapasitasKg, &k.StatusKendaraan,
+		if err := rows.Scan(&k.ID, &k.PlatNomor, &k.JenisKendaraan, &k.KapasitasKg, &k.KapasitasKoli, &k.StatusKendaraan,
 			&k.CreatedAt, &k.CreatedBy, &k.CreatedByName, &k.UpdatedAt, &k.UpdatedBy, &k.UpdatedByName); err != nil {
 			return nil, err
 		}
@@ -104,19 +115,19 @@ func (r *Repository) ListKendaraan(ctx context.Context) ([]Kendaraan, error) {
 func (r *Repository) CreateKendaraan(ctx context.Context, req KendaraanRequest, createdBy int64) (int64, error) {
 	var id int64
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO kendaraan (plat_nomor, jenis_kendaraan, kapasitas_kg, status_kendaraan, created_by)
-		VALUES ($1, $2, $3, $4, $5) RETURNING id_kendaraan`,
-		req.PlatNomor, req.JenisKendaraan, req.KapasitasKg, req.StatusKendaraan, createdBy,
+		INSERT INTO kendaraan (plat_nomor, jenis_kendaraan, kapasitas_kg, kapasitas_koli, status_kendaraan, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id_kendaraan`,
+		req.PlatNomor, req.JenisKendaraan, req.KapasitasKg, req.KapasitasKoli, req.StatusKendaraan, createdBy,
 	).Scan(&id)
 	return id, err
 }
 
 func (r *Repository) UpdateKendaraan(ctx context.Context, id int64, req KendaraanRequest, updatedBy int64) error {
 	_, err := r.db.Exec(ctx, `
-		UPDATE kendaraan SET plat_nomor=$1, jenis_kendaraan=$2, kapasitas_kg=$3, status_kendaraan=$4,
-		                     updated_at=NOW(), updated_by=$5
-		WHERE id_kendaraan=$6`,
-		req.PlatNomor, req.JenisKendaraan, req.KapasitasKg, req.StatusKendaraan, updatedBy, id,
+		UPDATE kendaraan SET plat_nomor=$1, jenis_kendaraan=$2, kapasitas_kg=$3, kapasitas_koli=$4, status_kendaraan=$5,
+		                     updated_at=NOW(), updated_by=$6
+		WHERE id_kendaraan=$7`,
+		req.PlatNomor, req.JenisKendaraan, req.KapasitasKg, req.KapasitasKoli, req.StatusKendaraan, updatedBy, id,
 	)
 	return err
 }
@@ -131,7 +142,7 @@ func (r *Repository) DeleteKendaraan(ctx context.Context, id int64) error {
 func (r *Repository) ListSeller(ctx context.Context) ([]Seller, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT s.id_seller, s.kode_seller, s.nama_seller, s.alamat, s.kota, s.area, s.pic, s.no_hp,
-		       s.forecast_harian, s.status, s.latitude, s.longitude,
+		       s.forecast_harian, s.status, COALESCE(s.is_dropper, FALSE), s.latitude, s.longitude,
 		       s.created_at, s.created_by, COALESCE(u1.username, ''),
 		       s.updated_at, s.updated_by, COALESCE(u2.username, '')
 		FROM seller s
@@ -146,7 +157,7 @@ func (r *Repository) ListSeller(ctx context.Context) ([]Seller, error) {
 	for rows.Next() {
 		var s Seller
 		if err := rows.Scan(&s.ID, &s.KodeSeller, &s.NamaSeller, &s.Alamat, &s.Kota,
-			&s.Area, &s.Pic, &s.NoHP, &s.ForecastHarian, &s.Status, &s.Latitude, &s.Longitude,
+			&s.Area, &s.Pic, &s.NoHP, &s.ForecastHarian, &s.Status, &s.IsDropper, &s.Latitude, &s.Longitude,
 			&s.CreatedAt, &s.CreatedBy, &s.CreatedByName, &s.UpdatedAt, &s.UpdatedBy, &s.UpdatedByName); err != nil {
 			return nil, err
 		}
@@ -164,10 +175,10 @@ func (r *Repository) CheckKodeSellerExists(ctx context.Context, kode string, exc
 func (r *Repository) CreateSeller(ctx context.Context, req SellerRequest, createdBy int64) (int64, error) {
 	var id int64
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO seller (kode_seller, nama_seller, alamat, kota, area, pic, no_hp, forecast_harian, status, latitude, longitude, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id_seller`,
+		INSERT INTO seller (kode_seller, nama_seller, alamat, kota, area, pic, no_hp, forecast_harian, status, is_dropper, latitude, longitude, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id_seller`,
 		req.KodeSeller, req.NamaSeller, req.Alamat, req.Kota, req.Area, req.Pic,
-		req.NoHP, req.ForecastHarian, req.Status, req.Latitude, req.Longitude, createdBy,
+		req.NoHP, req.ForecastHarian, req.Status, req.IsDropper, req.Latitude, req.Longitude, createdBy,
 	).Scan(&id)
 	return id, err
 }
@@ -175,11 +186,11 @@ func (r *Repository) CreateSeller(ctx context.Context, req SellerRequest, create
 func (r *Repository) UpdateSeller(ctx context.Context, id int64, req SellerRequest, updatedBy int64) error {
 	_, err := r.db.Exec(ctx, `
 		UPDATE seller SET kode_seller=$1, nama_seller=$2, alamat=$3, kota=$4, area=$5,
-		       pic=$6, no_hp=$7, forecast_harian=$8, status=$9, latitude=$10, longitude=$11,
-		       updated_at=NOW(), updated_by=$12
-		WHERE id_seller=$13`,
+		       pic=$6, no_hp=$7, forecast_harian=$8, status=$9, is_dropper=$10,
+		       latitude=$11, longitude=$12, updated_at=NOW(), updated_by=$13
+		WHERE id_seller=$14`,
 		req.KodeSeller, req.NamaSeller, req.Alamat, req.Kota, req.Area, req.Pic,
-		req.NoHP, req.ForecastHarian, req.Status, req.Latitude, req.Longitude, updatedBy, id,
+		req.NoHP, req.ForecastHarian, req.Status, req.IsDropper, req.Latitude, req.Longitude, updatedBy, id,
 	)
 	return err
 }
@@ -320,7 +331,9 @@ func (r *Repository) DeleteGudang(ctx context.Context, id int64) error {
 
 func (r *Repository) ListUser(ctx context.Context) ([]User, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT u.id_user, u.username, COALESCE(d.nama_driver, kp.nama, '') AS name, u.role, u.id_driver,
+		SELECT u.id_user, u.username,
+		       COALESCE(NULLIF(d.nama_driver, ''), NULLIF(kp.nama, ''), NULLIF(k.nama, ''), NULLIF(kg.nama, ''), u.username) AS name,
+		       u.role, u.id_driver, u.karyawan_id, u.id_koor_gudang, COALESCE(u.must_set_password, false),
 		       CASE WHEN u.last_login IS NOT NULL AND u.last_login > now() - interval '30 minutes' THEN true ELSE false END AS is_active,
 		       COALESCE(u.status, 'aktif') AS status,
 		       u.created_at, u.created_by, COALESCE(uc.username, ''),
@@ -328,6 +341,8 @@ func (r *Repository) ListUser(ctx context.Context) ([]User, error) {
 		FROM users u
 		LEFT JOIN driver d ON d.id_driver = u.id_driver
 		LEFT JOIN kapten kp ON kp.id_user = u.id_user
+		LEFT JOIN karyawan k ON k.id_karyawan = u.karyawan_id
+		LEFT JOIN koordinator_gudang kg ON kg.id_koor_gudang = u.id_koor_gudang
 		LEFT JOIN users uc ON uc.id_user = u.created_by
 		LEFT JOIN users uu ON uu.id_user = u.updated_by
 		ORDER BY u.id_user`)
@@ -338,7 +353,8 @@ func (r *Repository) ListUser(ctx context.Context) ([]User, error) {
 	var items []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.IDDriver, &u.IsActive, &u.Status,
+		if err := rows.Scan(&u.ID, &u.Username, &u.Name, &u.Role, &u.IDDriver, &u.KaryawanID, &u.IDKoorGudang,
+			&u.MustSetPassword, &u.IsActive, &u.Status,
 			&u.CreatedAt, &u.CreatedBy, &u.CreatedByName, &u.UpdatedAt, &u.UpdatedBy, &u.UpdatedByName); err != nil {
 			return nil, err
 		}
@@ -354,9 +370,9 @@ func (r *Repository) CreateUser(ctx context.Context, req UserRequest, passwordHa
 	}
 	var id int64
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO users (username, password, role, id_driver, status, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id_user`,
-		req.Username, passwordHash, req.Role, req.IDDriver, status, createdBy,
+		INSERT INTO users (username, password, role, id_driver, karyawan_id, id_koor_gudang, status, must_set_password, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8) RETURNING id_user`,
+		req.Username, passwordHash, req.Role, req.IDDriver, req.KaryawanID, req.IDKoorGudang, status, createdBy,
 	).Scan(&id)
 	return id, err
 }
@@ -396,6 +412,250 @@ func (r *Repository) UserExists(ctx context.Context, username string) (bool, err
 		return false, err
 	}
 	return count > 0, nil
+}
+
+// ──────── Karyawan (master pegawai kantor) ────────
+
+func (r *Repository) ListKaryawan(ctx context.Context, peran string) ([]Karyawan, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT k.id_karyawan, k.nik, k.nama, k.jabatan, k.penempatan, k.tempat_penugasan, k.shift,
+		       COALESCE(k.peran, ''), COALESCE(NULLIF(k.status, ''), 'aktif'),
+		       (SELECT u.id_user FROM users u WHERE u.karyawan_id = k.id_karyawan LIMIT 1)
+		FROM karyawan k
+		WHERE ($1 = '' OR k.peran = $1)
+		ORDER BY k.id_karyawan`, peran)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Karyawan
+	for rows.Next() {
+		var k Karyawan
+		if err := rows.Scan(&k.ID, &k.NIK, &k.Nama, &k.Jabatan, &k.Penempatan, &k.TempatPenugasan,
+			&k.Shift, &k.Peran, &k.Status, &k.IDUser); err != nil {
+			return nil, err
+		}
+		items = append(items, k)
+	}
+	return items, rows.Err()
+}
+
+func (r *Repository) CreateKaryawan(ctx context.Context, req KaryawanRequest, createdBy int64) (int64, error) {
+	status := req.Status
+	if status == "" {
+		status = "aktif"
+	}
+	var id int64
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO karyawan (nik, nama, jabatan, penempatan, tempat_penugasan, shift, peran, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id_karyawan`,
+		req.NIK, req.Nama, req.Jabatan, req.Penempatan, req.TempatPenugasan, req.Shift, req.Peran, status,
+	).Scan(&id)
+	return id, err
+}
+
+func (r *Repository) UpdateKaryawan(ctx context.Context, id int64, req KaryawanRequest, updatedBy int64) error {
+	status := req.Status
+	if status == "" {
+		status = "aktif"
+	}
+	_, err := r.db.Exec(ctx, `
+		UPDATE karyawan SET nik=$1, nama=$2, jabatan=$3, penempatan=$4, tempat_penugasan=$5,
+		                    shift=$6, peran=$7, status=$8
+		WHERE id_karyawan=$9`,
+		req.NIK, req.Nama, req.Jabatan, req.Penempatan, req.TempatPenugasan, req.Shift, req.Peran, status, id,
+	)
+	return err
+}
+
+func (r *Repository) DeleteKaryawan(ctx context.Context, id int64) error {
+	_, err := r.db.Exec(ctx, `UPDATE karyawan SET status='nonaktif' WHERE id_karyawan=$1`, id)
+	return err
+}
+
+// ──────── Koordinator Gudang ────────
+
+func (r *Repository) ListKoordinatorGudang(ctx context.Context) ([]KoordinatorGudang, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT kg.id_koor_gudang, kg.nama, kg.no_hp, kg.id_gudang, COALESCE(g.nama_gudang, ''),
+		       COALESCE(NULLIF(kg.status, ''), 'aktif'),
+		       kg.created_at, kg.created_by, COALESCE(u1.username, ''),
+		       kg.updated_at, kg.updated_by, COALESCE(u2.username, ''),
+		       (SELECT u.id_user FROM users u WHERE u.id_koor_gudang = kg.id_koor_gudang LIMIT 1)
+		FROM koordinator_gudang kg
+		LEFT JOIN gudang g ON g.id_gudang = kg.id_gudang
+		LEFT JOIN users u1 ON u1.id_user = kg.created_by
+		LEFT JOIN users u2 ON u2.id_user = kg.updated_by
+		ORDER BY kg.id_koor_gudang`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []KoordinatorGudang
+	for rows.Next() {
+		var kg KoordinatorGudang
+		if err := rows.Scan(&kg.ID, &kg.Nama, &kg.NoHP, &kg.IDGudang, &kg.NamaGudang, &kg.Status,
+			&kg.CreatedAt, &kg.CreatedBy, &kg.CreatedByName, &kg.UpdatedAt, &kg.UpdatedBy, &kg.UpdatedByName,
+			&kg.IDUser); err != nil {
+			return nil, err
+		}
+		items = append(items, kg)
+	}
+	return items, rows.Err()
+}
+
+func (r *Repository) CreateKoordinatorGudang(ctx context.Context, req KoordinatorGudangRequest, createdBy int64) (int64, error) {
+	status := req.Status
+	if status == "" {
+		status = "aktif"
+	}
+	var id int64
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO koordinator_gudang (nama, no_hp, id_gudang, status, created_by)
+		VALUES ($1, $2, $3, $4, $5) RETURNING id_koor_gudang`,
+		req.Nama, req.NoHP, req.IDGudang, status, createdBy,
+	).Scan(&id)
+	return id, err
+}
+
+func (r *Repository) UpdateKoordinatorGudang(ctx context.Context, id int64, req KoordinatorGudangRequest, updatedBy int64) error {
+	status := req.Status
+	if status == "" {
+		status = "aktif"
+	}
+	_, err := r.db.Exec(ctx, `
+		UPDATE koordinator_gudang SET nama=$1, no_hp=$2, id_gudang=$3, status=$4,
+		                              updated_at=NOW(), updated_by=$5
+		WHERE id_koor_gudang=$6`,
+		req.Nama, req.NoHP, req.IDGudang, status, updatedBy, id,
+	)
+	return err
+}
+
+func (r *Repository) DeleteKoordinatorGudang(ctx context.Context, id int64, updatedBy int64) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE koordinator_gudang SET status='nonaktif', updated_at=NOW(), updated_by=$2
+		WHERE id_koor_gudang=$1`, id, updatedBy)
+	return err
+}
+
+// ──────── Aktor yang belum punya akun ────────
+
+func (r *Repository) ListLinkableActors(ctx context.Context, role string) ([]LinkableActor, error) {
+	var query string
+	var arg any
+	switch role {
+	case "admin", "developer", "direktur", "tower_control":
+		query = `
+			SELECT k.id_karyawan, k.nama
+			FROM karyawan k
+			LEFT JOIN users u ON u.karyawan_id = k.id_karyawan
+			WHERE k.peran = $1 AND COALESCE(NULLIF(k.status, ''), 'aktif') = 'aktif' AND u.id_user IS NULL
+			ORDER BY k.id_karyawan`
+		arg = role
+	case "koor_gudang":
+		query = `
+			SELECT kg.id_koor_gudang, kg.nama
+			FROM koordinator_gudang kg
+			LEFT JOIN users u ON u.id_koor_gudang = kg.id_koor_gudang
+			WHERE COALESCE(NULLIF(kg.status, ''), 'aktif') = 'aktif' AND u.id_user IS NULL
+			ORDER BY kg.id_koor_gudang`
+	case "driver", "driver_pickup":
+		tipe := "reguler"
+		if role == "driver_pickup" {
+			tipe = "pickup"
+		}
+		query = `
+			SELECT d.id_driver, d.nama_driver
+			FROM driver d
+			LEFT JOIN users u ON u.id_driver = d.id_driver
+			WHERE COALESCE(d.tipe_driver, 'reguler') = $1
+			  AND COALESCE(d.status_driver, '') <> 'nonaktif'
+			  AND u.id_user IS NULL
+			ORDER BY d.id_driver`
+		arg = tipe
+	case "kapten":
+		query = `
+			SELECT u.id_user, k.nama
+			FROM kapten k
+			JOIN users u ON u.id_user = k.id_user
+			WHERE COALESCE(u.must_set_password, false) = true
+			ORDER BY k.id_kapten`
+	default:
+		return []LinkableActor{}, nil
+	}
+
+	var rows pgx.Rows
+	var err error
+	if arg != nil {
+		rows, err = r.db.Query(ctx, query, arg)
+	} else {
+		rows, err = r.db.Query(ctx, query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LinkableActor
+	for rows.Next() {
+		var a LinkableActor
+		if err := rows.Scan(&a.ID, &a.Nama); err != nil {
+			return nil, err
+		}
+		items = append(items, a)
+	}
+	return items, rows.Err()
+}
+
+func (r *Repository) LinkableKaryawan(ctx context.Context, peran string, id int64) (string, error) {
+	var nama string
+	err := r.db.QueryRow(ctx, `
+		SELECT k.nama FROM karyawan k
+		LEFT JOIN users u ON u.karyawan_id = k.id_karyawan
+		WHERE k.id_karyawan = $1 AND k.peran = $2
+		  AND COALESCE(NULLIF(k.status, ''), 'aktif') = 'aktif' AND u.id_user IS NULL`, id, peran).Scan(&nama)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrActorNotAvailable
+	}
+	return nama, err
+}
+
+func (r *Repository) LinkableKoordinatorGudang(ctx context.Context, id int64) (string, error) {
+	var nama string
+	err := r.db.QueryRow(ctx, `
+		SELECT kg.nama FROM koordinator_gudang kg
+		LEFT JOIN users u ON u.id_koor_gudang = kg.id_koor_gudang
+		WHERE kg.id_koor_gudang = $1
+		  AND COALESCE(NULLIF(kg.status, ''), 'aktif') = 'aktif' AND u.id_user IS NULL`, id).Scan(&nama)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrActorNotAvailable
+	}
+	return nama, err
+}
+
+func (r *Repository) LinkableDriver(ctx context.Context, id int64, tipe string) (string, error) {
+	var nama string
+	err := r.db.QueryRow(ctx, `
+		SELECT d.nama_driver FROM driver d
+		LEFT JOIN users u ON u.id_driver = d.id_driver
+		WHERE d.id_driver = $1 AND COALESCE(d.tipe_driver, 'reguler') = $2
+		  AND COALESCE(d.status_driver, '') <> 'nonaktif' AND u.id_user IS NULL`, id, tipe).Scan(&nama)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrActorNotAvailable
+	}
+	return nama, err
+}
+
+func (r *Repository) ActivateKaptenAccount(ctx context.Context, idUser int64, username, passwordHash string, updatedBy int64) (int64, error) {
+	var id int64
+	err := r.db.QueryRow(ctx, `
+		UPDATE users SET username=$1, password=$2, must_set_password=false, updated_at=NOW(), updated_by=$3
+		WHERE id_user=$4 AND role='kapten' AND COALESCE(must_set_password, false)=true
+		RETURNING id_user`, username, passwordHash, updatedBy, idUser).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrActorNotAvailable
+	}
+	return id, err
 }
 
 // DropPoint — admin CRUD.
@@ -626,7 +886,7 @@ func validateSellers(ctx context.Context, q interface {
 		return nil
 	}
 	var ok int
-	err := q.QueryRow(ctx, `SELECT COUNT(*) FROM seller WHERE id_seller = ANY($1) AND status = 'aktif'`, ids).Scan(&ok)
+	err := q.QueryRow(ctx, `SELECT COUNT(*) FROM seller WHERE id_seller = ANY($1) AND status = 'aktif' AND COALESCE(is_dropper, FALSE) = FALSE`, ids).Scan(&ok)
 	if err != nil {
 		return err
 	}
@@ -668,9 +928,12 @@ func peranImplant(peran map[int64]string, id int64) (string, error) {
 	return p, nil
 }
 
-// normalisasiImplantTitik memastikan setiap implant punya host yang termasuk
-// dalam pilihan dan host menunjuk dirinya sendiri (tidak ada rantai/cycle).
-func normalisasiImplantTitik(implantIDs []int64, titik map[int64]int64) (map[int64]int64, error) {
+// normalisasiImplantTitik memastikan setiap implant punya host yang valid.
+// kanonik berisi titik milik kapten aktif lain untuk implant yang sama; host
+// dari kanonik boleh berada di luar pilihan karena kapten backup mengikuti
+// titik penjemputan yang sudah ada. Host lain wajib termasuk pilihan dan
+// menunjuk dirinya sendiri (tidak ada rantai/cycle).
+func normalisasiImplantTitik(implantIDs []int64, titik, kanonik map[int64]int64) (map[int64]int64, error) {
 	selected := make(map[int64]bool, len(implantIDs))
 	for _, id := range implantIDs {
 		selected[id] = true
@@ -681,44 +944,61 @@ func normalisasiImplantTitik(implantIDs []int64, titik map[int64]int64) (map[int
 		if v, ok := titik[id]; ok && v > 0 {
 			host = v
 		}
+		if v, ok := kanonik[id]; ok && v > 0 {
+			host = v
+		}
 		if !selected[host] {
-			return nil, fmt.Errorf("titik implant %d harus salah satu implant yang dipilih", id)
+			if _, ok := kanonik[id]; !ok {
+				return nil, fmt.Errorf("titik implant %d harus salah satu implant yang dipilih", id)
+			}
 		}
 		out[id] = host
 	}
 	for _, host := range out {
-		if out[host] != host {
+		if selected[host] && out[host] != host {
 			return nil, fmt.Errorf("implant titik harus menunjuk dirinya sendiri")
 		}
 	}
 	return out, nil
 }
 
-// validateImplantOwnership memastikan satu implant hanya dipegang satu kapten
-// aktif. excludeUserID dipakai saat update agar mapping sendiri tidak dihitung.
-func validateImplantOwnership(ctx context.Context, q interface {
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}, implantIDs []int64, excludeUserID int64) error {
+// titikKanonikImplant mengambil titik penjemputan yang sudah dipakai kapten
+// aktif lain untuk implant yang sama. Kapten tambahan (backup) mengikuti titik
+// tersebut agar rute & marker peta tetap konsisten. excludeUserID dipakai saat
+// update agar mapping sendiri tidak dihitung.
+func titikKanonikImplant(ctx context.Context, q interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}, implantIDs []int64, excludeUserID int64) (map[int64]int64, error) {
+	out := map[int64]int64{}
 	if len(implantIDs) == 0 {
-		return nil
+		return out, nil
 	}
-	var nama string
-	err := q.QueryRow(ctx, `
-		SELECT COALESCE(k.nama, u.username, '')
+	rows, err := q.Query(ctx, `
+		SELECT DISTINCT ON (kim.id_implant)
+		       kim.id_implant, COALESCE(kim.id_titik_implant, i.id_implant)
 		FROM kapten_implant_map kim
 		JOIN kapten k ON k.id_user = kim.id_user
-		JOIN users u ON u.id_user = kim.id_user
+		JOIN implant i ON i.id_implant = kim.id_implant
 		WHERE kim.id_implant = ANY($1)
 		  AND kim.id_user <> $2
 		  AND COALESCE(k.status, 'aktif') = 'aktif'
-		LIMIT 1`, implantIDs, excludeUserID).Scan(&nama)
-	if err == nil {
-		return fmt.Errorf("implant sudah dipegang kapten aktif lain: %s", nama)
+		ORDER BY kim.id_implant,
+		         CASE WHEN kim.peran = 'utama' THEN 0 ELSE 1 END,
+		         kim.id_user`, implantIDs, excludeUserID)
+	if err != nil {
+		return nil, err
 	}
-	if err != pgx.ErrNoRows {
-		return err
+	defer rows.Close()
+	for rows.Next() {
+		var idImplant, idTitik int64
+		if err := rows.Scan(&idImplant, &idTitik); err != nil {
+			return nil, err
+		}
+		if idTitik > 0 {
+			out[idImplant] = idTitik
+		}
 	}
-	return nil
+	return out, rows.Err()
 }
 
 // CreateKaptenTx membuat akun users (role kapten) + profil kapten + mapping seller & implant.
@@ -736,8 +1016,8 @@ func (r *Repository) CreateKaptenTx(ctx context.Context, username, passwordHash,
 		return 0, 0, err
 	}
 	err = tx.QueryRow(ctx, `
-		INSERT INTO users (username, password, role, status, created_by)
-		VALUES ($1, $2, 'kapten', $3, $4) RETURNING id_user`,
+		INSERT INTO users (username, password, role, status, must_set_password, created_by)
+		VALUES ($1, $2, 'kapten', $3, true, $4) RETURNING id_user`,
 		username, passwordHash, status, createdBy,
 	).Scan(&idUser)
 	if err != nil {
@@ -757,11 +1037,12 @@ func (r *Repository) CreateKaptenTx(ctx context.Context, username, passwordHash,
 		}
 	}
 	if status == "aktif" && len(implantIDs) > 0 {
-		titik, err := normalisasiImplantTitik(implantIDs, implantTitik)
+		kanonik, err := titikKanonikImplant(ctx, tx, implantIDs, idUser)
 		if err != nil {
 			return 0, 0, err
 		}
-		if err := validateImplantOwnership(ctx, tx, implantIDs, idUser); err != nil {
+		titik, err := normalisasiImplantTitik(implantIDs, implantTitik, kanonik)
+		if err != nil {
 			return 0, 0, err
 		}
 		for _, iid := range implantIDs {
@@ -831,11 +1112,12 @@ func (r *Repository) UpdateKaptenTx(ctx context.Context, id int64, nama string, 
 			if err := validateImplants(ctx, tx, implantIDs); err != nil {
 				return err
 			}
-			titik, err := normalisasiImplantTitik(implantIDs, implantTitik)
+			kanonik, err := titikKanonikImplant(ctx, tx, implantIDs, *idUser)
 			if err != nil {
 				return err
 			}
-			if err := validateImplantOwnership(ctx, tx, implantIDs, *idUser); err != nil {
+			titik, err := normalisasiImplantTitik(implantIDs, implantTitik, kanonik)
+			if err != nil {
 				return err
 			}
 			if _, err := tx.Exec(ctx, `DELETE FROM kapten_implant_map WHERE id_user=$1`, *idUser); err != nil {

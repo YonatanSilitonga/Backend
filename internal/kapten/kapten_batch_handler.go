@@ -271,8 +271,8 @@ func (h *Handler) batchPendingBetween(ctx context.Context, implantID, sellerID i
 	return list
 }
 
-// batchTripForGroupDate mengambil trip terakhir sebuah grup pada rentang tanggal
-// input. Trip aktif menang atas trip selesai agar grup tidak dianggap terlewat
+// batchTripForGroupDate mengambil trip sebuah grup pada tanggal input.
+// Trip aktif menang atas trip selesai agar grup tidak dianggap terlewat
 // saat Rit baru untuk grup yang sama masih berjalan.
 func (h *Handler) batchTripForGroupDate(
 	ctx context.Context,
@@ -307,8 +307,8 @@ func (h *Handler) batchTripForGroupDate(
 		LEFT JOIN driver d ON d.id_driver = r.id_driver
 		LEFT JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
 		WHERE r.jenis_ritase = $4 AND r.ritase_ke = $5
-		  AND r.tanggal BETWEEN $6::date - 1 AND $6::date + 1
-		ORDER BY (r.status <> 'selesai') DESC, r.tanggal DESC, r.id_ritase DESC
+		  AND r.tanggal = $6::date
+		ORDER BY (r.status <> 'selesai') DESC, r.id_ritase DESC
 		LIMIT 1
 	`, implantID, pointID, sellerID, jenis, ritKe, tanggal).Scan(
 		&idRitase, &kode, &status, &rKe, &rJenis, &tgl, &jamMulai, &jamSelesai,
@@ -650,9 +650,9 @@ func (h *Handler) GetBatchOverview(c echo.Context) error {
 	return response.OK(c, map[string]interface{}{"implants": out})
 }
 
-// GetBatchRitase mengembalikan ritase hari ini (WIB) yang menyinggahi SEMUA
-// implant yang diminta + sudah ada driver & kendaraan â€” kandidat satu driver.
-// GET /api/v1/kapten/batch-ritase?implant_ids=1,2,3
+// GetBatchRitase mengembalikan ritase pada tanggal grup (WIB) yang menyinggahi
+// SEMUA implant yang diminta + sudah ada driver & kendaraan â€” kandidat satu driver.
+// GET /api/v1/kapten/batch-ritase?implant_ids=1,2,3&tanggal=2026-11-12
 func (h *Handler) GetBatchRitase(c echo.Context) error {
 	userID, _ := c.Get(appMiddleware.CtxUserID).(int64)
 	if userID == 0 {
@@ -703,6 +703,24 @@ func (h *Handler) GetBatchRitase(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 10*time.Second)
 	defer cancel()
 
+	wib, _ := time.LoadLocation("Asia/Jakarta")
+	if wib == nil {
+		wib = time.FixedZone("WIB", 7*60*60)
+	}
+	now := time.Now().In(wib)
+	tanggal := strings.TrimSpace(c.QueryParam("tanggal"))
+	if tanggal == "" {
+		tanggal = now.Format("2006-01-02")
+	}
+	if _, err := time.ParseInLocation("2006-01-02", tanggal, wib); err != nil {
+		return response.Error(c, http.StatusBadRequest, "tanggal tidak valid")
+	}
+	hariIni := now.Format("2006-01-02")
+	kemarin := now.AddDate(0, 0, -1).Format("2006-01-02")
+	if tanggal != hariIni && tanggal != kemarin {
+		return response.Error(c, http.StatusBadRequest, "tanggal di luar rentang")
+	}
+
 	condition := `(SELECT COUNT(DISTINCT rs.id_implant) FROM ritase_stop rs
 		       WHERE rs.id_ritase = r.id_ritase AND rs.id_implant = ANY($1)
 		      ) = array_length($1, 1)`
@@ -717,13 +735,12 @@ func (h *Handler) GetBatchRitase(c echo.Context) error {
 		FROM ritase r
 		JOIN driver d ON d.id_driver = r.id_driver
 		JOIN kendaraan k ON k.id_kendaraan = r.id_kendaraan
-		WHERE r.tanggal BETWEEN ((now() AT TIME ZONE 'Asia/Jakarta')::date - 1)
-		                    AND ((now() AT TIME ZONE 'Asia/Jakarta')::date + 1)
+		WHERE r.tanggal = $2::date
 		  AND r.status != 'selesai'
 		  AND ` + condition + `
 		ORDER BY r.ritase_ke ASC, r.id_ritase ASC
 	`
-	rows, err := h.DB.Query(ctx, query, ids)
+	rows, err := h.DB.Query(ctx, query, ids, tanggal)
 	if err != nil {
 		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data ritase")
 	}
@@ -924,9 +941,8 @@ func (h *Handler) PostBatchConfirmPickup(c echo.Context) error {
 			WHERE r.id_ritase = $3
 			  AND r.status != 'selesai'
 			  AND r.jenis_ritase = $4 AND r.ritase_ke = $5
-			  AND r.tanggal BETWEEN ((now() AT TIME ZONE 'Asia/Jakarta')::date - 1)
-			                    AND ((now() AT TIME ZONE 'Asia/Jakarta')::date + 1)
-		`, it.IDImplant, pointID, req.IDRitase, req.JenisRitase, req.RitaseKe).Scan(&foundID)
+			  AND r.tanggal = $6::date
+		`, it.IDImplant, pointID, req.IDRitase, req.JenisRitase, req.RitaseKe, req.TanggalAsal).Scan(&foundID)
 		if err != nil {
 			return response.Error(c, http.StatusBadRequest, "ritase tidak valid untuk salah satu implant")
 		}
@@ -1024,4 +1040,3 @@ func (h *Handler) PostBatchConfirmPickup(c echo.Context) error {
 		"items":          results,
 	})
 }
-
