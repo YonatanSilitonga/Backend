@@ -30,7 +30,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest, platform ...strin
 		return nil, errors.New("username/email dan password wajib diisi")
 	}
 
-	client := "web"
+	client := ""
 	if len(platform) > 0 && strings.TrimSpace(platform[0]) != "" {
 		client = strings.ToLower(strings.TrimSpace(platform[0]))
 	}
@@ -52,11 +52,25 @@ func (s *Service) Login(ctx context.Context, req LoginRequest, platform ...strin
 		return nil, errors.New("akun dinonaktifkan, hubungi admin")
 	}
 
-	if client == "mobile" && !mobileRoles[user.Role] {
-		return nil, errors.New("akun ini hanya bisa dipakai di dashboard web")
-	}
-	if client != "mobile" && !webRoles[user.Role] {
-		return nil, errors.New("akun ini hanya bisa dipakai di aplikasi mobile")
+	userRole := strings.ToLower(strings.TrimSpace(user.Role))
+
+	// Validasi platform akses berdasarkan role
+	if client == "mobile" {
+		if !mobileRoles[userRole] {
+			return nil, errors.New("akun ini hanya bisa dipakai di dashboard web")
+		}
+	} else if client == "web" {
+		if !webRoles[userRole] {
+			return nil, errors.New("akun ini hanya bisa dipakai di aplikasi mobile")
+		}
+	} else {
+		// Jika platform tidak ditentukan secara eksplisit (misal APK mobile versi lama):
+		// Izinkan sesuai domain role masing-masing
+		if mobileRoles[userRole] {
+			client = "mobile"
+		} else if webRoles[userRole] {
+			client = "web"
+		}
 	}
 
 	var idDriver int64

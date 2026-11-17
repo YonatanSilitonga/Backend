@@ -2,6 +2,7 @@ package auth
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -27,7 +28,17 @@ func (h *Handler) Login(c echo.Context) error {
 		return response.Error(c, http.StatusBadRequest, "format request tidak valid")
 	}
 
-	res, err := h.svc.Login(c.Request().Context(), req, c.Request().Header.Get("X-Client-Platform"))
+	platform := strings.TrimSpace(c.Request().Header.Get("X-Client-Platform"))
+	if platform == "" {
+		ua := strings.ToLower(c.Request().Header.Get("User-Agent"))
+		if strings.Contains(ua, "dart") || strings.Contains(ua, "flutter") ||
+			strings.Contains(ua, "okhttp") || strings.Contains(ua, "dalvik") ||
+			strings.Contains(ua, "mobile") || strings.Contains(ua, "android") {
+			platform = "mobile"
+		}
+	}
+
+	res, err := h.svc.Login(c.Request().Context(), req, platform)
 	if err != nil {
 		return response.Error(c, http.StatusUnauthorized, err.Error())
 	}
