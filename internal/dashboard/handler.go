@@ -73,6 +73,64 @@ func (h *Handler) GetAnalyticsImplants(c echo.Context) error {
 	return response.OK(c, data)
 }
 
+// GetImplanDilayani menangani GET /dashboard/implan-dilayani?tanggal=.
+func (h *Handler) GetImplanDilayani(c echo.Context) error {
+	data, err := h.svc.GetImplanDilayani(c.Request().Context(), c.QueryParam("tanggal"))
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data implan dilayani")
+	}
+	return response.OK(c, data)
+}
+
+// GetImplanDilayaniDetail menangani GET /dashboard/implan-dilayani/:id?tanggal=.
+func (h *Handler) GetImplanDilayaniDetail(c echo.Context) error {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "id implant tidak valid")
+	}
+	data, err := h.svc.GetImplanDilayaniDetail(c.Request().Context(), id, c.QueryParam("tanggal"))
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil detail implant")
+	}
+	return response.OK(c, data)
+}
+
+// GetSellerDilayani menangani GET /dashboard/seller-dilayani?tanggal=&from=&to=.
+func (h *Handler) GetSellerDilayani(c echo.Context) error {
+	data, err := h.svc.GetSellerDilayani(
+		c.Request().Context(),
+		c.QueryParam("tanggal"),
+		c.QueryParam("from"),
+		c.QueryParam("to"),
+	)
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data seller dilayani")
+	}
+	return response.OK(c, data)
+}
+
+// GetDropperDilayani menangani GET /dashboard/dropper-dilayani?tanggal=.
+func (h *Handler) GetDropperDilayani(c echo.Context) error {
+	data, err := h.svc.GetDropperDilayani(c.Request().Context(), c.QueryParam("tanggal"))
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data muatan dropper")
+	}
+	return response.OK(c, data)
+}
+
+// GetSellerDilayaniDetail menangani GET /dashboard/seller-dilayani/detail?key=&tanggal=.
+func (h *Handler) GetSellerDilayaniDetail(c echo.Context) error {
+	key := c.QueryParam("key")
+	if key == "" {
+		return response.Error(c, http.StatusBadRequest, "key seller wajib diisi")
+	}
+	data, err := h.svc.GetSellerDilayaniDetail(c.Request().Context(), key, c.QueryParam("tanggal"))
+	if err != nil {
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil detail seller")
+	}
+	return response.OK(c, data)
+}
+
 // RegisterRoutes memasang route dashboard di grup yang diberikan (butuh auth).
 func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	g.GET("/dashboard/summary", h.GetSummary, authMW)
@@ -81,6 +139,11 @@ func (h *Handler) RegisterRoutes(g *echo.Group, authMW echo.MiddlewareFunc) {
 	g.GET("/dashboard/analytics/drivers", h.GetAnalyticsDrivers, authMW)
 	g.GET("/dashboard/analytics/sellers", h.GetAnalyticsSellers, authMW)
 	g.GET("/dashboard/analytics/implants", h.GetAnalyticsImplants, authMW)
+	g.GET("/dashboard/implan-dilayani", h.GetImplanDilayani, authMW)
+	g.GET("/dashboard/implan-dilayani/:id", h.GetImplanDilayaniDetail, authMW)
+	g.GET("/dashboard/seller-dilayani", h.GetSellerDilayani, authMW)
+	g.GET("/dashboard/seller-dilayani/detail", h.GetSellerDilayaniDetail, authMW)
+	g.GET("/dashboard/dropper-dilayani", h.GetDropperDilayani, authMW)
 	g.PATCH("/dashboard/alerts/:id/resolve", h.ResolveAlert, authMW)
 	g.GET("/dashboard/alerts/ritase/:id", h.GetAlertsByRitase, authMW)
 }

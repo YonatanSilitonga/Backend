@@ -23,11 +23,12 @@ func NewHandler(db *pgxpool.Pool) *Handler {
 	return &Handler{repo: NewRepository(db)}
 }
 
-func (h *Handler) RegisterRoutes(g *echo.Group, authMW, roleMW echo.MiddlewareFunc) {
-	ug := g.Group("/utilisasi-muatan", authMW, roleMW)
+func (h *Handler) RegisterRoutes(g *echo.Group, authMW, readMW, writeMW echo.MiddlewareFunc) {
+	ug := g.Group("/utilisasi-muatan", authMW, readMW)
 	ug.GET("", h.GetData)
+	ug.GET("/summary", h.GetEffectiveness)
 
-	dg := g.Group("/day-categories", authMW, roleMW)
+	dg := g.Group("/day-categories", authMW, writeMW)
 	dg.GET("", h.ListDayCategories)
 	dg.PUT("/:tanggal", h.UpsertDayCategory)
 	dg.DELETE("/:tanggal", h.DeleteDayCategory)
@@ -79,6 +80,23 @@ func (h *Handler) GetData(c echo.Context) error {
 	if err != nil {
 		log.Printf("[UTILISASI] gagal mengambil data: %v", err)
 		return response.Error(c, http.StatusInternalServerError, "gagal mengambil data utilisasi muatan")
+	}
+	return response.OK(c, data)
+}
+
+func (h *Handler) GetEffectiveness(c echo.Context) error {
+	start, end, err := parseRange(c)
+	if err != nil {
+		return response.Error(c, http.StatusBadRequest, "format tanggal harus YYYY-MM-DD dan end >= start")
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 20*time.Second)
+	defer cancel()
+
+	data, err := h.repo.GetEffectiveness(ctx, start, end)
+	if err != nil {
+		log.Printf("[UTILISASI] gagal mengambil ringkasan efektivitas: %v", err)
+		return response.Error(c, http.StatusInternalServerError, "gagal mengambil ringkasan efektivitas armada")
 	}
 	return response.OK(c, data)
 }

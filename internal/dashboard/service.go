@@ -51,6 +51,31 @@ func (s *Service) GetAnalyticsImplants(ctx context.Context, from, to string) ([]
 	return s.repo.GetAnalyticsImplants(ctx, from, to)
 }
 
+// GetImplanDilayani delegasi ke repository (rekap implant dilayani per tanggal).
+func (s *Service) GetImplanDilayani(ctx context.Context, tanggal string) (*DilayaniPage, error) {
+	return s.repo.GetImplanDilayani(ctx, tanggal)
+}
+
+// GetImplanDilayaniDetail delegasi ke repository (detail satu implant).
+func (s *Service) GetImplanDilayaniDetail(ctx context.Context, id int64, tanggal string) (*DilayaniDetail, error) {
+	return s.repo.GetImplanDilayaniDetail(ctx, id, tanggal)
+}
+
+// GetDropperDilayani delegasi ke repository (rekap muatan dropper per tanggal).
+func (s *Service) GetDropperDilayani(ctx context.Context, tanggal string) (*DropperDilayaniPage, error) {
+	return s.repo.GetDropperDilayani(ctx, tanggal)
+}
+
+// GetSellerDilayani delegasi ke repository (rekap seller dilayani per tanggal/periode).
+func (s *Service) GetSellerDilayani(ctx context.Context, tanggal, from, to string) (*DilayaniPage, error) {
+	return s.repo.GetSellerDilayani(ctx, tanggal, from, to)
+}
+
+// GetSellerDilayaniDetail delegasi ke repository (detail satu seller).
+func (s *Service) GetSellerDilayaniDetail(ctx context.Context, key, tanggal string) (*DilayaniDetail, error) {
+	return s.repo.GetSellerDilayaniDetail(ctx, key, tanggal)
+}
+
 // ResolveAlert menandai alert sebagai ditangani tower control.
 func (s *Service) ResolveAlert(ctx context.Context, idAlert int64, userID int64) error {
 	return s.repo.ResolveAlert(ctx, idAlert, userID)

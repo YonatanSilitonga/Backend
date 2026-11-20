@@ -645,6 +645,86 @@ func (r *Repository) GetData(ctx context.Context, start, end time.Time) (*Respon
 	}, nil
 }
 
+// GetEffectiveness menghitung ringkasan efektivitas armada tanpa membangun
+// matriks harian/mingguan/bulanan seperti GetData.
+func (r *Repository) GetEffectiveness(ctx context.Context, start, end time.Time) (*EffectivenessSummary, error) {
+	vehicles, err := r.ListVehicles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	trips, err := r.ListTrips(ctx, start, end)
+	if err != nil {
+		return nil, err
+	}
+
+	vehicleByID := make(map[int64]*vehicleMeta, len(vehicles))
+	for _, v := range vehicles {
+		rule, metric, min, max := ruleFor(v.JenisKendaraan, v.KapasitasKoli, v.KapasitasKg)
+		vehicleByID[v.IDKendaraan] = &vehicleMeta{
+			ID:     v.IDKendaraan,
+			Plat:   v.PlatNomor,
+			Jenis:  normalizeJenis(v.JenisKendaraan),
+			Metric: metric,
+			Min:    min,
+			Max:    max,
+			AWBMax: rule.MaxAWB,
+			Active: !strings.EqualFold(strings.TrimSpace(v.Status), "nonaktif"),
+		}
+	}
+
+	resolved := make([]effectivenessTrip, 0, len(trips))
+	hasTrip := make(map[int64]bool, len(trips))
+	for _, t := range trips {
+		meta := vehicleByID[t.IDKendaraan]
+		if meta == nil {
+			rule, metric, min, max := ruleFor(t.JenisKendaraan, t.KapasitasKoli, t.KapasitasKg)
+			meta = &vehicleMeta{
+				ID:     t.IDKendaraan,
+				Plat:   t.PlatNomor,
+				Jenis:  normalizeJenis(t.JenisKendaraan),
+				Metric: metric,
+				Min:    min,
+				Max:    max,
+				AWBMax: rule.MaxAWB,
+				Active: true,
+			}
+			vehicleByID[t.IDKendaraan] = meta
+		}
+
+		hasTrip[t.IDKendaraan] = true
+		koli, _ := resolveKoli(t)
+		awb, _ := resolveAWB(t)
+		load := koli
+		hasData := koli > 0
+		if meta.Metric == MetricAWB {
+			load = awb
+			hasData = awb > 0
+		}
+
+		resolved = append(resolved, effectivenessTrip{
+			Meta:    *meta,
+			Load:    load,
+			HasData: hasData,
+		})
+	}
+
+	totalVehicles := 0
+	for id, meta := range vehicleByID {
+		if meta.Active || hasTrip[id] {
+			totalVehicles++
+		}
+	}
+
+	summary := buildEffectiveness(
+		formatDate(start),
+		formatDate(end),
+		len(trips),
+		totalVehicles,
+		resolved,
+	)
+	return &summary, nil
+}
+
 func resolveKoli(t tripRow) (int, string) {
 	switch t.GatewayAkhir {
 	case "JKT":

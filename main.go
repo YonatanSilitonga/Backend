@@ -228,11 +228,16 @@ func main() {
 
 	// Rekap Total Muatan (implan + driver pickup + dropper) — tower_control/developer
 	muatanH := muatan.NewHandler(db)
-	muatanH.RegisterRoutes(v1, authMW, appMiddleware.RequireRoles("tower_control", "developer"))
+	muatanH.RegisterRoutes(v1, authMW, appMiddleware.RequireRoles("tower_control", "developer", "direktur"))
 
-	// Utilisasi Muatan (matriks keterisian per kendaraan) — tower_control/developer
+	// Utilisasi Muatan — read: tower_control/developer/direktur, write: tower_control/developer
 	utilisasiH := utilisasi.NewHandler(db)
-	utilisasiH.RegisterRoutes(v1, authMW, appMiddleware.RequireRoles("tower_control", "developer"))
+	utilisasiH.RegisterRoutes(
+		v1,
+		authMW,
+		appMiddleware.RequireRoles("tower_control", "developer", "direktur"),
+		appMiddleware.RequireRoles("tower_control", "developer"),
+	)
 
 	// GPS tracker hardware — sumber posisi cadangan saat HP mati.
 	// Tanpa JWT (device tidak login), dilindungi header X-Tracker-Key.
